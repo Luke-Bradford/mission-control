@@ -449,6 +449,8 @@ import { type CodexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
+import { registerSessionRoutes } from "./sessions/api.ts";
+import type { SessionsService } from "./sessions/sessions.ts";
 import { weeklyProjection } from "./spend/projection.ts";
 import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
@@ -571,6 +573,8 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  /** Every cmux workspace on this Mac (the Sessions page); absent: its routes answer 503. */
+  sessions?: SessionsService;
   attentionMaterials?: AttentionMaterialsService;
   qaReports?: QaReportService;
   /** Moves a card on the board: approving a held plan moves its ticket to Ready; absent: the card stays. */
@@ -4396,6 +4400,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       registerInstructionRoutes(api, deps);
+      registerSessionRoutes(api, deps);
 
       // Reader: apps/web/src/pages/Agent.tsx (Queue move-up approval item)
       api.post<{ Params: { id: string } }>("/seats/:id/queue/reorder", async (req, reply) => {

@@ -133,6 +133,7 @@ import {
   runawayRefusedText,
   runawaySameReason,
   runawayWritesReason,
+  SESSION_NOT_ASKED_TEXT,
   type SeatSessionRow,
   smallNoPlanText,
   startMissingNeedsText,
@@ -188,7 +189,9 @@ import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
 import { stageReviewEvidence } from "../src/pr-evidence/review.ts";
 import { type PrEvidenceStore, prEvidenceStore } from "../src/pr-evidence/store.ts";
+import type { Cmux } from "../src/runtime/cmux.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
+import { createSessions } from "../src/sessions/sessions.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
 import { operatorDecisionFields } from "./brief-fixture.ts";
@@ -363,6 +366,11 @@ const args = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const CMUX_WS = "11111111-1111-4111-8111-111111111111";
+let cmuxStub: Cmux;
+let cmuxSent: { ws: string; text: string }[];
+let cmuxScreen: string;
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mc-flight-tools-"));
   store = new Store(join(dir, "mc.sqlite"));
@@ -450,6 +458,29 @@ beforeEach(() => {
     pruneBranches: async () => ({ ok: true, text: "Pruned." }),
   };
   stateSeen.mockClear();
+  cmuxSent = [];
+  cmuxScreen = "";
+  cmuxStub = {
+    ensure: async () => {},
+    ping: async () => "up",
+    workspaces: async () => [{ id: CMUX_WS, name: "pricing", cwd: null }],
+    agents: async () => [],
+    focus: async () => {},
+    statuses: async () => ({}),
+    inbox: async () => [],
+    agentMessage: async () => {},
+    openBrowser: async () => {},
+    newWorkspace: async () => CMUX_WS,
+    send: async (ws, text) => {
+      cmuxSent.push({ ws, text });
+      return "sent";
+    },
+    sendKey: async () => {},
+    readScreen: async () => cmuxScreen,
+    close: async () => {
+      throw new Error("never closed");
+    },
+  };
   flightDeps = (): FlightToolsDeps => ({
     attentionMaterials: { attachStory: (key, story) => materialsImpl(key, story) as never },
     hubOrigin: "http://127.0.0.1:7420",
@@ -588,6 +619,13 @@ beforeEach(() => {
       pruneBranches: () => tidyImpl.pruneBranches(),
     },
     now: () => nowMs,
+    sessions: createSessions({
+      cmux: cmuxStub,
+      store,
+      seatIds: () => ["guido-1"],
+      probe: async () => true,
+      now: () => nowMs,
+    }),
   });
   tools = createFlightTools(flightDeps());
   const t = tools.find((candidate) => candidate.name === "log_decision");
@@ -1405,6 +1443,8 @@ describe("tool list", () => {
       "remember",
       "forget",
       "recall",
+      "cmux_sessions",
+      "cmux_send",
       "hold_item",
       "release_hold",
     ]);
@@ -12057,5 +12097,58 @@ describe("flight_state and the AUDIT report", () => {
     for (const s of [top.problem, top.evidence, top.cause, top.links[0].label])
       expect(s).toMatch(wrapped);
     expect(top.links[0].href).toBe("https://github.com/o/mc/pull/7");
+  });
+});
+
+describe("cmux sessions", () => {
+  const ask = (over: Partial<Parameters<Store["addComms"]>[0]> = {}) => {
+    const m = store.addComms({
+      at: nowMs,
+      from: "CAPCOM",
+      to: "flight-1",
+      ticket: null,
+      text: "Ask the pricing session where it got to",
+      senderKind: "operator",
+      ...over,
+    });
+    if (m === null) throw new Error("rate limited");
+    return m.id;
+  };
+
+  it("cmux_sessions reads a session's screen", async () => {
+    cmuxScreen = "Running migration\nDone: migrated 3 tables\n";
+    const all = await call("cmux_sessions", {});
+    expect(all.isError).toBeUndefined();
+    expect(JSON.parse(all.text).sessions[0]).toMatchObject({ name: "pricing", owner: "operator" });
+    const one = await call("cmux_sessions", { workspace: CMUX_WS, lines: 10 });
+    expect(JSON.parse(one.text).screen).toContain("Done: migrated 3 tables");
+    expect(isReadCall("cmux_sessions", { workspace: CMUX_WS })).toBe(true);
+    expect((await call("cmux_sessions", { workspace: "workspace:1" })).isError).toBe(true);
+    expect(cmuxSent).toEqual([]);
+  });
+
+  it("cmux_send needs the operator's asking message", async () => {
+    const send = (asked_by?: string) =>
+      call("cmux_send", {
+        workspace: CMUX_WS,
+        text: "Where did you get to?",
+        ...(asked_by === undefined ? {} : { asked_by }),
+      });
+    expect(await send()).toEqual(refused(SESSION_NOT_ASKED_TEXT));
+    const fromSeat = ask({ from: "guido-1", senderKind: "seat" });
+    expect(await send(fromSeat)).toEqual(refused(SESSION_NOT_ASKED_TEXT));
+    const old = ask({ at: nowMs - 25 * 60 * 60 * 1000, text: "An old ask" });
+    expect(await send(old)).toEqual(refused(SESSION_NOT_ASKED_TEXT));
+    const toOther = ask({ to: "guido-1", text: "Not to FLIGHT" });
+    expect(await send(toOther)).toEqual(refused(SESSION_NOT_ASKED_TEXT));
+    expect(cmuxSent).toEqual([]);
+
+    const fresh = ask();
+    expect((await send(fresh)).isError).toBeUndefined();
+    expect(cmuxSent).toEqual([{ ws: CMUX_WS, text: "Where did you get to?" }]);
+    expect(store.hubEvents(0).map((e) => e.text)).toContain(
+      `Wrote to cmux session "pricing" (21 characters), asked by FLIGHT for ${fresh}`,
+    );
+    expect(isReadCall("cmux_send", { workspace: CMUX_WS })).toBe(false);
   });
 });

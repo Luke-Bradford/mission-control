@@ -1,0 +1,457 @@
+/**
+ * Every cmux workspace on this Mac, the operator's own and the crew's, read from cmux with no agent:
+ * what each is doing, for how long, its last line, its status and its app. It writes to a workspace
+ * only when the operator asks (the page, or FLIGHT citing his message), and logs each write with who
+ * asked. There is deliberately no close: a session the operator started is his.
+ */
+import { lstat, open, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import {
+  CMUX_WORKSPACE_ID,
+  type CmuxSessionRow,
+  type CmuxSessionState,
+  type CmuxSessionsView,
+  COMMS_CAPCOM,
+  SESSION_APP_STATUS_KEY,
+  SESSION_LINE_MAX,
+  SESSION_NO_APP_TEXT,
+  SESSION_TEXT_MAX,
+  SESSION_UNKNOWN_TEXT,
+  sortSessions,
+} from "@mc/core";
+import { cleanText } from "../repo/clean.ts";
+import {
+  CMUX_REFUSED_TEXT,
+  type Cmux,
+  type CmuxAgent,
+  type CmuxInboxMessage,
+  type CmuxWorkspace,
+} from "../runtime/cmux.ts";
+import type { Store } from "../store.ts";
+
+/** cmux is not running; the hub never starts it for a read. */
+export const CMUX_NOT_RUNNING_TEXT = "cmux is not running.";
+/** One read is shared by every reader for this long. */
+const VIEW_CACHE_MS = 2000;
+/** Workspaces read at once (status, screen, transcript). */
+const READS_AT_ONCE = 4;
+/** An app's answer is kept this long. */
+const PROBE_CACHE_MS = 5000;
+const PROBE_TIMEOUT_MS = 2000;
+/** The tail of a transcript searched for the agent's last words. */
+const TRANSCRIPT_TAIL_BYTES = 64 * 1024;
+/** The screen lines a shell's last line is looked for in. */
+const SCREEN_TAIL_LINES = 30;
+/** How old the operator's asking message may be for FLIGHT to write for him. */
+export const SESSION_ASK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/** How often the hub reads the sessions by itself, to tell a session when its app stops. */
+export const SESSIONS_APP_WATCH_MS = 30_000;
+/** Who the hub's own messages to a session are from. */
+export const SESSION_NOTICE_FROM = "Mission Control";
+/** The hosts an app's address is checked on: this Mac only. */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const BOX_DRAWING = /[─-╿]/g;
+
+/** A refusal with the HTTP status the API gives it. */
+export class SessionError extends Error {
+  readonly status: 400 | 404;
+  constructor(status: 400 | 404, message: string) {
+    super(message);
+    this.name = "SessionError";
+    this.status = status;
+  }
+}
+
+export interface SessionsService {
+  view(): Promise<CmuxSessionsView>;
+  /** The workspace's screen, at most `lines` of its last lines. */
+  read(id: string, lines: number): Promise<string>;
+  focus(id: string): Promise<void>;
+  /** Pastes `text` then Enter; "busy" when the session has a question open. `askedBy` is logged. */
+  send(id: string, text: string, askedBy: string): Promise<"sent" | "busy">;
+  /** Opens the session's app in a browser pane of its own workspace. */
+  openApp(id: string, askedBy: string): Promise<void>;
+}
+
+export interface SessionsDeps {
+  cmux: Cmux;
+  store: Store;
+  /** The configured seat ids: a workspace named `<seat> · …` is the crew's. */
+  seatIds: () => string[];
+  /** Whether a local address answers; default an HTTP GET. */
+  probe?: (url: string) => Promise<boolean>;
+  /** Where Claude keeps transcripts; only `.jsonl` files under it are read. */
+  projectsDir?: string;
+  /** Whether a process is alive; default `kill(pid, 0)`. */
+  alive?: (pid: number) => boolean;
+  /** Whether a session is told when its app stops answering (default true; off in a preview hub). */
+  tellApps?: boolean;
+  now?: () => number;
+  log?: (m: string) => void;
+}
+
+/** Any HTTP answer is an answer; refused or timed out is not. Redirects are not followed. */
+export async function probeLocal(url: string): Promise<boolean> {
+  try {
+    const r = await fetch(url, {
+      method: "GET",
+      redirect: "manual",
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    await r.body?.cancel().catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The address when it is an http(s) URL on this Mac; null for any other. */
+export function localAddress(url: string): URL | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  return LOCAL_HOSTS.has(u.hostname) ? u : null;
+}
+
+const isHttp = (url: string): boolean => {
+  try {
+    return ["http:", "https:"].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+};
+
+const pidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
+
+const STATE_OF: Record<CmuxAgent["lifecycle"], CmuxSessionState> = {
+  running: "working",
+  idle: "idle",
+  needsInput: "waiting",
+};
+const LIFECYCLE_RANK: CmuxAgent["lifecycle"][] = ["needsInput", "running", "idle"];
+
+/** The line as inert text on one line, at most SESSION_LINE_MAX characters. */
+const oneLine = (s: string): string => cleanText(s.replace(/\s+/g, " ").trim(), SESSION_LINE_MAX);
+
+/** The last non-blank line of a screen, box-drawing removed. */
+export function lastScreenLine(screen: string): string | null {
+  const lines = screen
+    .split("\n")
+    .map((l) => l.replace(BOX_DRAWING, "").trim())
+    .filter((l) => l !== "");
+  const last = lines.at(-1);
+  return last === undefined ? null : oneLine(last);
+}
+
+/** The last assistant text in a Claude transcript's tail; null when it has none. */
+export function lastAssistantText(tail: string, partialFirst: boolean): string | null {
+  const lines = tail.split("\n");
+  if (partialFirst) lines.shift();
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]?.trim();
+    if (!line) continue;
+    let o: unknown;
+    try {
+      o = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof o !== "object" || o === null || (o as { type?: unknown }).type !== "assistant")
+      continue;
+    const content = (o as { message?: { content?: unknown } }).message?.content;
+    const texts =
+      typeof content === "string"
+        ? [content]
+        : Array.isArray(content)
+          ? content.flatMap((c) =>
+              typeof c === "object" &&
+              c !== null &&
+              (c as { type?: unknown }).type === "text" &&
+              typeof (c as { text?: unknown }).text === "string"
+                ? [(c as { text: string }).text]
+                : [],
+            )
+          : [];
+    const text = texts.filter((t) => t.trim() !== "").at(-1);
+    if (text !== undefined) return oneLine(text);
+  }
+  return null;
+}
+
+/**
+ * The repo a folder is in, by the nearest `.git` above it, with no git run: a `.git` file (a
+ * worktree) names the main checkout's folder from its `gitdir:` line; a `.git` folder names the
+ * folder it is in.
+ */
+export async function repoOf(folder: string): Promise<string | null> {
+  let dir = resolve(folder);
+  for (let depth = 0; depth < 64; depth++) {
+    const dotGit = join(dir, ".git");
+    const s = await lstat(dotGit).catch(() => null);
+    if (s?.isDirectory()) return basename(dir) || null;
+    if (s?.isFile()) {
+      const text = await readFile(dotGit, "utf8").catch(() => "");
+      const gitdir = /^gitdir:\s*(.+?)\s*$/m.exec(text)?.[1];
+      if (gitdir !== undefined) {
+        const abs = isAbsolute(gitdir) ? gitdir : resolve(dir, gitdir);
+        if (/[\\/]\.git[\\/]worktrees[\\/][^\\/]+[\\/]?$/.test(abs))
+          return basename(resolve(abs, "../../..")) || null;
+      }
+      return basename(dir) || null;
+    }
+    const up = dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+  return null;
+}
+
+/** At most `n` of `fn` at once, in order. */
+async function inTurns<T, R>(items: readonly T[], n: number, fn: (t: T) => Promise<R>) {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+  return out;
+}
+
+/** Whether `ref` is a Comms message the operator sent FLIGHT (`flightId`) in the last 24 hours. */
+export function operatorAsked(store: Store, flightId: string, ref: string, now: number): boolean {
+  const m = store.commsMessage(ref);
+  return (
+    m !== null &&
+    m.from === COMMS_CAPCOM &&
+    m.senderKind === "operator" &&
+    m.to === flightId &&
+    m.at <= now &&
+    now - m.at <= SESSION_ASK_MAX_AGE_MS
+  );
+}
+
+export function createSessions(deps: SessionsDeps): SessionsService {
+  const { cmux, store } = deps;
+  const now = deps.now ?? Date.now;
+  const probe = deps.probe ?? probeLocal;
+  const alive = deps.alive ?? pidAlive;
+  const log = deps.log ?? (() => {});
+  const projects = resolve(deps.projectsDir ?? join(homedir(), ".claude", "projects"));
+  /** Each workspace's state and when this hub first saw it in that state. */
+  const seen = new Map<string, { state: CmuxSessionState; since: number }>();
+  /** Each workspace's app as last read, and whether the session was told it stopped. */
+  const apps = new Map<string, { url: string; answers: boolean | null; told: boolean }>();
+  const probes = new Map<string, { at: number; answers: Promise<boolean> }>();
+  let cached: { at: number; view: Promise<CmuxSessionsView> } | null = null;
+
+  /** The workspace's live agent: the most pressing record whose process is not known dead. */
+  const agentOf = (agents: readonly CmuxAgent[], ws: string): CmuxAgent | null =>
+    agents
+      .filter((a) => a.workspaceId === ws && (a.pid === null || alive(a.pid)))
+      .sort(
+        (a, b) => LIFECYCLE_RANK.indexOf(a.lifecycle) - LIFECYCLE_RANK.indexOf(b.lifecycle),
+      )[0] ?? null;
+
+  const transcriptOk = (path: string | null): path is string =>
+    typeof path === "string" && path.endsWith(".jsonl") && resolve(path).startsWith(projects + sep);
+
+  async function transcriptLine(path: string): Promise<string | null> {
+    const file = await open(path, "r").catch(() => null);
+    if (file === null) return null;
+    try {
+      const { size } = await file.stat();
+      const start = Math.max(0, size - TRANSCRIPT_TAIL_BYTES);
+      const buf = Buffer.alloc(size - start);
+      await file.read(buf, 0, buf.length, start);
+      return lastAssistantText(buf.toString("utf8"), start > 0);
+    } catch {
+      return null;
+    } finally {
+      await file.close();
+    }
+  }
+
+  function answers(url: string): Promise<boolean> {
+    const hit = probes.get(url);
+    if (hit !== undefined && now() - hit.at < PROBE_CACHE_MS) return hit.answers;
+    const call = probe(url).catch(() => false);
+    probes.set(url, { at: now(), answers: call });
+    return call;
+  }
+
+  async function sinceOf(id: string, state: CmuxSessionState, agent: CmuxAgent | null) {
+    const prev = seen.get(id);
+    if (prev?.state === state) return prev.since;
+    let since = now();
+    if (prev === undefined && transcriptOk(agent?.transcriptPath ?? null)) {
+      const s = await stat(agent?.transcriptPath as string).catch(() => null);
+      if (s !== null) since = Math.min(since, s.mtimeMs);
+    }
+    seen.set(id, { state, since });
+    return since;
+  }
+
+  async function rowOf(
+    ws: CmuxWorkspace,
+    agent: CmuxAgent | null,
+    inbox: readonly CmuxInboxMessage[],
+    seats: readonly string[],
+  ): Promise<CmuxSessionRow> {
+    const state: CmuxSessionState = agent === null ? "no-agent" : STATE_OF[agent.lifecycle];
+    const folder = agent?.cwd ?? ws.cwd;
+    const [since, repo, statuses] = await Promise.all([
+      sinceOf(ws.id, state, agent),
+      folder === null ? null : repoOf(folder),
+      cmux.statuses(ws.id).catch(() => ({}) as Record<string, string>),
+    ]);
+    let lastLine: string | null = null;
+    if (agent !== null && transcriptOk(agent.transcriptPath))
+      lastLine = await transcriptLine(agent.transcriptPath);
+    if (lastLine === null)
+      lastLine = lastScreenLine(await cmux.readScreen(ws.id, SCREEN_TAIL_LINES).catch(() => ""));
+    const statusKey = Object.keys(statuses).find((k) => k !== SESSION_APP_STATUS_KEY);
+    const url = statuses[SESSION_APP_STATUS_KEY]?.trim();
+    const app =
+      url === undefined || url === "" || !isHttp(url)
+        ? null
+        : { url, answers: localAddress(url) === null ? null : await answers(url) };
+    const mine = inbox.filter((m) => m.workspaceId === ws.id);
+    const newest = mine[0];
+    return {
+      id: ws.id,
+      name: ws.name,
+      owner: seats.some((s) => ws.name.startsWith(`${s} · `)) ? "crew" : "operator",
+      folder,
+      repo,
+      state,
+      since,
+      lastLine,
+      status: statusKey === undefined ? null : oneLine(statuses[statusKey] as string),
+      app,
+      inbox: {
+        unread: mine.filter((m) => !m.read).length,
+        newest: newest === undefined ? null : oneLine(newest.text),
+      },
+    };
+  }
+
+  /** Tells a session that asked (by naming an app) when its app stops answering, and when it is back. */
+  async function tellApps(rows: readonly CmuxSessionRow[]) {
+    for (const row of rows) {
+      const prev = apps.get(row.id);
+      const answers = row.app?.answers ?? null;
+      const url = row.app?.url ?? null;
+      if (url === null) {
+        apps.delete(row.id);
+        continue;
+      }
+      let told = prev?.url === url ? prev.told : false;
+      const say = async (text: string, event: string) => {
+        try {
+          await cmux.agentMessage(row.id, text, SESSION_NOTICE_FROM);
+          store.addHubEvent(`Told cmux session "${row.name}" ${event}`, now());
+          return true;
+        } catch (e) {
+          log(`sessions: could not tell "${row.name}" about its app: ${String(e)}`);
+          return false;
+        }
+      };
+      if (prev?.url === url && prev.answers === true && answers === false && !told)
+        told = await say(
+          `Your app at ${url} has stopped answering.`,
+          `its app at ${url} stopped answering`,
+        );
+      else if (told && answers === true)
+        told = !(await say(`Your app at ${url} answers again.`, `its app at ${url} answers again`));
+      apps.set(row.id, { url, answers, told });
+    }
+    for (const id of apps.keys()) if (!rows.some((r) => r.id === id)) apps.delete(id);
+  }
+
+  async function read(): Promise<CmuxSessionsView> {
+    const at = now();
+    const up = await cmux.ping();
+    if (up === "denied") return { ok: false, at, error: CMUX_REFUSED_TEXT };
+    if (up === "down") return { ok: false, at, error: CMUX_NOT_RUNNING_TEXT };
+    try {
+      const [workspaces, agents, inbox] = await Promise.all([
+        cmux.workspaces(),
+        cmux.agents(),
+        cmux.inbox().catch(() => [] as CmuxInboxMessage[]),
+      ]);
+      const seats = deps.seatIds();
+      const rows = await inTurns(workspaces, READS_AT_ONCE, (ws) =>
+        rowOf(ws, agentOf(agents, ws.id), inbox, seats),
+      );
+      for (const id of seen.keys()) if (!rows.some((r) => r.id === id)) seen.delete(id);
+      if (deps.tellApps !== false) await tellApps(rows);
+      return { ok: true, at, sessions: sortSessions(rows) };
+    } catch (e) {
+      return { ok: false, at, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** The open workspace with this id; a malformed or unknown id is refused before it reaches cmux. */
+  async function workspace(id: string): Promise<CmuxWorkspace> {
+    if (!CMUX_WORKSPACE_ID.test(id)) throw new SessionError(404, SESSION_UNKNOWN_TEXT);
+    const ws = (await cmux.workspaces()).find((w) => w.id.toLowerCase() === id.toLowerCase());
+    if (ws === undefined) throw new SessionError(404, SESSION_UNKNOWN_TEXT);
+    return ws;
+  }
+
+  return {
+    view() {
+      if (cached !== null && now() - cached.at < VIEW_CACHE_MS) return cached.view;
+      const view = read();
+      cached = { at: now(), view };
+      return view;
+    },
+    async read(id, lines) {
+      const ws = await workspace(id);
+      return cleanText(await cmux.readScreen(ws.id, lines), 64 * 1024);
+    },
+    async focus(id) {
+      const ws = await workspace(id);
+      await cmux.focus(ws.id);
+    },
+    async send(id, text, askedBy) {
+      if (text.trim() === "" || text.length > SESSION_TEXT_MAX)
+        throw new SessionError(400, `Write 1 to ${SESSION_TEXT_MAX} characters.`);
+      const ws = await workspace(id);
+      if (agentOf(await cmux.agents(), ws.id)?.lifecycle === "needsInput") return "busy";
+      if ((await cmux.send(ws.id, text)) === "busy") return "busy";
+      // the text itself is never logged
+      store.addHubEvent(
+        `Wrote to cmux session "${ws.name}" (${text.length} characters), asked by ${askedBy}`,
+        now(),
+      );
+      cached = null;
+      return "sent";
+    },
+    async openApp(id, askedBy) {
+      const ws = await workspace(id);
+      const url = (await cmux.statuses(ws.id))[SESSION_APP_STATUS_KEY]?.trim();
+      if (url === undefined || !isHttp(url)) throw new SessionError(400, SESSION_NO_APP_TEXT);
+      await cmux.openBrowser(ws.id, url);
+      store.addHubEvent(
+        `Opened the app of cmux session "${ws.name}" in its browser, asked by ${askedBy}`,
+        now(),
+      );
+    },
+  };
+}
