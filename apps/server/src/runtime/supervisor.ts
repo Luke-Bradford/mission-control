@@ -172,6 +172,7 @@ import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/que
 import { RepoRulesError } from "../engine/rules.ts";
 import { flightFloor, flightShellContext } from "../flight/floor.ts";
 import { noteFlightWrite } from "../flight/runaway.ts";
+import { flightSeat } from "../flight/seat.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
@@ -4787,11 +4788,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.upsertRun(run);
       if (scratch.installNote !== undefined) {
         store.setReviewInstallNote(reviewId, scratch.installNote);
-        const flight = config.crew?.sessions
-          .flatMap((session) => session.seats)
-          .find(
-            (seat) => !seat.retiring && !seatUnavailable(seat) && seatDef(seat).loop === "watch",
-          );
+        const flight = flightSeat(config)?.seat;
         if (flight !== undefined)
           store.addComms({
             at: now(),
