@@ -315,9 +315,13 @@ const bulletText = (line: string): string | null =>
 const QUOTE_RE = /^ {0,3}(?:>[ \t]?)*/;
 const DONE_WHEN_RE = /^ {0,3}(#{1,6})[ \t]+done[ \t-]*when\b.*$/im;
 const SIZE_OR_SECURITY_RE = /^ {0,3}##[ \t]+(?:size|security)\b.*$/im;
-/** A heading line of `level` or above opens at `from`: the offset it starts at, or the end. */
-const sectionEnd = (plain: string, from: number, level: number): number => {
-  const next = new RegExp(`^ {0,3}#{1,${level}}(?:[ \\t]|$)`, "m").exec(plain.slice(from));
+/**
+ * A heading line of `level` or above opens at `from`: the offset it starts at, or the end. In a
+ * quoted section (`quoted`), a heading behind block-quote markers ends it too.
+ */
+const sectionEnd = (plain: string, from: number, level: number, quoted = false): number => {
+  const lead = quoted ? " {0,3}(?:>[ \\t]?)*" : " {0,3}";
+  const next = new RegExp(`^${lead}#{1,${level}}(?:[ \\t]|$)`, "m").exec(plain.slice(from));
   return next === null ? plain.length : from + next.index;
 };
 /**
@@ -359,10 +363,10 @@ export function withControllerCheckItem(
   const line = `- ${want}`;
   if (m !== null) {
     const start = m.index + m[0].length;
-    const end = sectionEnd(plain, start, m[1]?.length ?? 2);
-    const section = out.slice(start, end);
     // a quoted heading's items are quoted too; a fenced bullet is example text, not an item
     const quote = (QUOTE_RE.exec(m[0])?.[0] ?? "").trim();
+    const end = sectionEnd(plain, start, m[1]?.length ?? 2, quote !== "");
+    const section = out.slice(start, end);
     if (
       plain
         .slice(start, end)

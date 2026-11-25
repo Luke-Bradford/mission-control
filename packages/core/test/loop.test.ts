@@ -3948,6 +3948,14 @@ describe("withControllerCheckItem", () => {
     expect(r.body).toBe(`> ## Controller check\n> - Open it.\n> - ${item}\n`);
     expect(withControllerCheckItem(r.body, item).added).toBe(false);
   });
+  it("ends a quoted section at the next quoted heading", () => {
+    for (const next of ["## Size\n> S", "## Security\n> none"]) {
+      const body = `> ## Controller check\n> - Open it.\n> ${next}`;
+      expect(withControllerCheckItem(body, item).body).toBe(
+        `> ## Controller check\n> - Open it.\n> - ${item}\n> ${next}`,
+      );
+    }
+  });
   it("keeps CRLF line ends", () => {
     expect(withControllerCheckItem("## Why\r\nx\r\n", item).body).toBe(
       `## Why\r\nx\r\n\r\n## Controller check\r\n\r\n- ${item}\r\n`,

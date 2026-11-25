@@ -957,15 +957,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   }
 
   /**
-   * The logs of failed jobs, each line led by its job's name as `--log-failed` leads it; null when
-   * none could be read.
+   * The logs of failed jobs, each line led by its job's name as `--log-failed` leads it; a job whose
+   * log could not be read is a line saying so. Null only when there are no jobs.
    */
   async function jobsLog(
     repo: string,
     jobs: { id: number; name: string }[],
   ): Promise<string | null> {
     const lines: string[] = [];
-    let read = false;
     for (const j of jobs) {
       const got = await deps.gh(["api", `repos/${repo}/actions/jobs/${j.id}/logs`], {
         cwd: cwd(),
@@ -976,10 +975,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         lines.push(`${j.name}\t-\t[the log of job ${j.name} could not be read]`);
         continue;
       }
-      read = true;
       for (const l of got.stdout.split("\n")) lines.push(`${j.name}\t-\t${l}`);
     }
-    return read ? lines.join("\n") : null;
+    return lines.length > 0 ? lines.join("\n") : null;
   }
 
   /** `run:sha` of heads `isDescendant` could not fetch, and when; asked for again after a pause. */

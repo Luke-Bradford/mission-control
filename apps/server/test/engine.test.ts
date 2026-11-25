@@ -2231,6 +2231,34 @@ describe("refusals", () => {
     expect(h.endedRuns).toContain(RUN);
   });
 
+  it("tells the seat the install note that came with a worktree move", async () => {
+    h.descends = true;
+    h.fastForwardResult = {
+      ok: true,
+      installNote: "dependencies may have changed; install not run",
+    };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    const told = h.sent.filter((m) => m.key.includes(":branch-moved:"));
+    expect(told).toHaveLength(1);
+    expect(told[0]?.text).toContain("Your branch moved to");
+    expect(told[0]?.text).toContain("dependencies may have changed; install not run");
+  });
+
+  it("lets the publisher go of a run ended outside the engine", async () => {
+    report();
+    await h.engine.reconcileRun(RUN);
+    store.setRunEnded(RUN, clock, "ok", "operator");
+    seatIdle(null);
+    await h.engine.reconcileRun(RUN);
+    expect(h.endedRuns).toContain(RUN);
+  });
+
   it("a head added on top long after the push gets its own window: the first no is not a park, the next pass adopts it", async () => {
     h.descends = true;
     setPr({ ci: "pending", headSha: SHA });
@@ -3896,6 +3924,27 @@ describe("review round", () => {
       ]);
     });
 
+    it("marks the running tick overrun when one run's pass ends past the interval", async () => {
+      report();
+      const log = tickLogOf(store);
+      const startedAt = clock;
+      log.begin(startedAt);
+      const run = store.run.bind(store);
+      vi.spyOn(store, "run").mockImplementationOnce((id) => {
+        clock += ENGINE_TICK_MS + 1;
+        return run(id);
+      });
+      try {
+        await h.engine.reconcileRun(RUN);
+        expect(h.logs.filter((l) => l.includes("still running"))).toEqual([
+          expect.stringContaining(`reconcile ${REPO} ${RUN} `),
+        ]);
+      } finally {
+        log.end(clock);
+      }
+      expect(log.recent().at(-1)?.overranOn).toEqual([expect.stringContaining(RUN)]);
+    });
+
     it("finishes the tick it records when the tick throws", async () => {
       vi.spyOn(store, "notes").mockImplementation(() => {
         throw new Error("db gone");
@@ -5268,6 +5317,25 @@ describe("the engine runs reviews", () => {
     });
 
     describe("a hold on the merge", () => {
+      it("is ok once stored, even when the pass after it throws", async () => {
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        const run = store.run.bind(store);
+        // once the hold is stored, the pass that follows it fails
+        const spy = vi.spyOn(store, "run").mockImplementation((id) => {
+          const row = run(id);
+          if (row?.loop?.mergeHold) throw new Error("db gone");
+          return row;
+        });
+        try {
+          expect(await h.engine.holdMerge(RUN, "FLIGHT", "wait")).toEqual({ ok: true });
+        } finally {
+          spy.mockRestore();
+        }
+        expect(loopOf().mergeHold).toMatchObject({ by: "FLIGHT", reason: "wait" });
+        expect(h.logs.some((l) => l.includes("db gone"))).toBe(true);
+      });
+
       it("parks a clean, green run instead of merging, and merges once released", async () => {
         await toReview();
         expect(await h.engine.holdMerge(RUN, "FLIGHT", "design not approved")).toEqual({

@@ -855,6 +855,26 @@ describe("ciExcerpt", () => {
     expect(out).toContain("the log of job web could not be read");
   });
 
+  it("names a running run's only failed job when its log could not be read", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "CI", conclusion: "", status: "in_progress", attempt: 1 },
+        ]),
+      }),
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          jobs: [{ databaseId: 501, name: "web", status: "completed", conclusion: "failure" }],
+        }),
+      }),
+      () => ({ code: 1, stdout: "" }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(out).toContain("the log of job web could not be read");
+  });
+
   it("names the attempt of a completed failed run and reads that attempt", async () => {
     ghAnswers = [
       () => ({
