@@ -141,7 +141,7 @@ export interface GateFacts {
   containsMain: boolean;
   hubOnly: boolean;
   strays: string[];
-  /** Whether the head changes the HUD and therefore needs a recorded RETRO design pass. */
+  /** Whether the head's diff against main changes the repo's web area. */
   webChanged: boolean;
 }
 export type GateResult =
@@ -242,16 +242,16 @@ export interface Publisher {
   /** The tail of the failed Actions logs for `sha`, as one line-safe text. */
   ciExcerpt(repo: string, sha: string): Promise<string>;
   /**
-   * Re-runs the failed jobs of every failed Actions run on `sha`; the runs re-run (none: nothing
-   * failed to re-run), "running" when a run on `sha` has not completed (nothing is re-run; gh refuses
-   * a running run), or null when gh could not be read or refused.
+   * Re-runs the failed jobs of every failed, timed-out or cancelled Actions run on `sha`; the runs
+   * re-run (none: nothing to re-run), "running" when a run on `sha` has not completed (nothing is
+   * re-run; gh refuses a running run), or null when gh could not be read or refused.
    */
   rerunFailed(
     repo: string,
     sha: string,
   ): Promise<{ id: number; name: string }[] | null | "running">;
   /**
-   * FLIGHT's re-run of a ruled sha: like `rerunFailed` (failed or timed-out runs only), but it
+   * FLIGHT's re-run of a ruled sha: like `rerunFailed` (failed, timed-out or cancelled runs), but it
    * returns each run's attempt from before, so `rerunState` can tell the re-run from the first
    * run. NO_FAILED_RUN when none failed.
    */
@@ -393,8 +393,10 @@ const CROSS_LINE = /^[×✗✕]\s/;
 const STREAM_LINE = /^(?:stderr|stdout) \|/;
 const BLOCK_END = /^(?:[✓×✗✕❯↓]|FAIL\b|RUN\b|Test Files|Tests\s|Duration)/;
 const NOT_A_CAUSE = /Process completed with exit code/;
-/** A stack frame vitest prints under a failure's assertion: `❯ path/to/file.ts:1550:30`. */
-const SOURCE_LINE = /^❯\s+\S+:\d+:\d+$/;
+/** A stack frame vitest prints under a failure's assertion: `❯ [fn] path/to/file.ts:1550:30`. */
+const SOURCE_LINE = /^❯\s+(?:\S+\s+)?\S+:\d+:\d+$/;
+/** The heading of vitest's block of errors no test owns: no failure above it reaches into it. */
+const UNHANDLED_LINE = /\bUnhandled (?:Errors?|Rejection)\b/;
 /** How far under a FAIL line its error line is looked for. */
 const ERROR_WINDOW = 6;
 /** How far under a FAIL line its source line is looked for: a diff may sit between. */
@@ -496,6 +498,7 @@ export function ciLogBody(log: string, max: number): string {
     if (STREAM_LINE.test(text)) stream = true;
     else if (BLOCK_END.test(text)) stream = false;
     if (NOT_A_CAUSE.test(text)) continue;
+    if (UNHANDLED_LINE.test(text)) open = null;
     const line = cut(text);
     if (FAIL_LINE.test(text)) {
       stream = false;
@@ -567,7 +570,7 @@ export function ciLogBody(log: string, max: number): string {
     const kept = log
       .trimEnd()
       .split("\n")
-      .filter((raw) => jobs.has(LOG_LINE.exec(raw)?.[1] ?? ""));
+      .filter((raw) => jobs.has(LOG_LINE.exec(raw)?.[1] ?? "") && !NOT_A_CAUSE.test(raw));
     return tailBytes(kept.slice(-CI_EXCERPT_LINES).join("\n"), max);
   }
   const named = groups.length > 1 || groups[0]?.job !== "";
@@ -927,7 +930,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         ? [
             {
               id: x.databaseId,
-              name: cleanLog(String(x.name ?? "job")).replace(/\t/g, " "),
+              name: cleanLog(String(x.name ?? "job")).replace(/[\t\r\n]+/g, " "),
             },
           ]
         : [];
@@ -954,25 +957,27 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   }
 
   /**
-   * The logs of failed jobs, each line led by its job's name as `--log-failed` leads it; null when
-   * none could be read.
+   * The logs of failed jobs, each line led by its job's name as `--log-failed` leads it; a job whose
+   * log could not be read is a line saying so. Null only when there are no jobs.
    */
   async function jobsLog(
     repo: string,
     jobs: { id: number; name: string }[],
   ): Promise<string | null> {
     const lines: string[] = [];
-    let read = false;
     for (const j of jobs) {
       const got = await deps.gh(["api", `repos/${repo}/actions/jobs/${j.id}/logs`], {
         cwd: cwd(),
         maxBuffer: CI_LOG_MAX_BUFFER,
       });
-      if (got.code !== 0) continue;
-      read = true;
+      if (got.code !== 0) {
+        // a job whose log could not be read is said so, not left out
+        lines.push(`${j.name}\t-\t[the log of job ${j.name} could not be read]`);
+        continue;
+      }
       for (const l of got.stdout.split("\n")) lines.push(`${j.name}\t-\t${l}`);
     }
-    return read ? lines.join("\n") : null;
+    return lines.length > 0 ? lines.join("\n") : null;
   }
 
   /** `run:sha` of heads `isDescendant` could not fetch, and when; asked for again after a pause. */
@@ -1007,7 +1012,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (mine !== undefined) return { ok: true, prNumber: mine.number };
       // A ticket passes from run to run (restart, reassignment, handover) and the branch stays. A
       // run adopts the open PR an earlier ended run on the same ticket recorded, however many
-      // runs back, while no other run on the ticket is live (start_seat's rule). It never adopts a
+      // runs back, while no other run on the ticket is live. It never adopts a
       // PR merely because it happens to be open on that branch.
       const onTicket = deps.store.runsOnTicket(run.repoId, run.ticket ?? "");
       const othersLive = onTicket.some((other) => other.id !== run.id && other.endedAt === null);
@@ -1121,7 +1126,12 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       // a body the seat rewrote with pr_body keeps its text; only the hub's section is replaced
       const r = await editRunPrBody(deps, run.id, prNumber, (current) =>
         seatWroteBody(current, issue)
-          ? withEngineSection(withSection(current, EVIDENCE_HEADING, null), issue, combined)
+          ? withEngineSection(
+              withSection(current, EVIDENCE_HEADING, null),
+              issue,
+              combined,
+              noteIsPartOf(note, issue),
+            )
           : body,
       );
       if (r.isError === true) {
@@ -1205,7 +1215,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           id: number;
           name: string;
           attempt: number | null;
-          rerun: boolean;
+          /** The attempt read is the one before a re-run that is still going or was cancelled. */
+          rerun: "going" | "cancelled" | null;
           /** The failed jobs of a run still going: its own log is not readable until it completes. */
           jobs?: { id: number; name: string }[];
         }[] = [];
@@ -1230,63 +1241,72 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               ? x.attempt
               : null;
           if (x.conclusion === "failure") {
-            failed.push({ id: x.databaseId, name, attempt, rerun: false });
-          } else if (typeof x.status === "string" && x.status !== "completed") {
+            failed.push({ id: x.databaseId, name, attempt, rerun: null });
+            continue;
+          }
+          const going = typeof x.status === "string" && x.status !== "completed";
+          // a completed run that neither failed nor was cancelled has nothing to read
+          if (!going && x.conclusion !== "cancelled") continue;
+          if (x.status === "in_progress") {
             // one shard can fail while the rest of the run goes on: gh's --log-failed reads nothing
             // until the run completes, but a finished job's own log can be read now. A re-run's own
-            // failed job comes before the attempt it re-runs.
+            // failed job comes before the attempt it re-runs. (A queued or waiting run has no job
+            // that finished.)
             const jobs = await failedJobs(repo, x.databaseId);
             if (jobs.length > 0) {
-              failed.push({
-                id: x.databaseId,
-                name,
-                attempt,
-                rerun: false,
-                jobs,
-              });
+              failed.push({ id: x.databaseId, name, attempt, rerun: null, jobs });
               continue;
             }
-            if (attempt === null || attempt <= 1) continue;
-            // a run being re-run has no conclusion yet: the attempt before it may be the one that
-            // failed, but a re-run can also start from a green attempt
-            const before = await deps.gh(
-              [
-                "run",
-                "view",
-                `--repo=${repo}`,
-                String(x.databaseId),
-                `--attempt=${attempt - 1}`,
-                "--json=conclusion",
-              ],
-              { cwd: cwd() },
-            );
-            if (before.code !== 0) return CI_LOG_UNREADABLE;
-            const state: unknown = parseJson<unknown>(before.stdout, undefined, rethrowJson);
-            if ((state as { conclusion?: unknown } | null)?.conclusion === "failure") {
-              failed.push({
-                id: x.databaseId,
-                name,
-                attempt: attempt - 1,
-                rerun: true,
-              });
-            }
+          }
+          if (attempt === null || attempt <= 1) continue;
+          // a re-run going, or cancelled, has no failure of its own: the attempt before it may be
+          // the one that failed, but a re-run can also start from a green attempt
+          const before = await deps.gh(
+            [
+              "run",
+              "view",
+              `--repo=${repo}`,
+              String(x.databaseId),
+              `--attempt=${attempt - 1}`,
+              "--json=conclusion",
+            ],
+            { cwd: cwd() },
+          );
+          if (before.code !== 0) return CI_LOG_UNREADABLE;
+          const state: unknown = parseJson<unknown>(before.stdout, undefined, rethrowJson);
+          if ((state as { conclusion?: unknown } | null)?.conclusion === "failure") {
+            failed.push({
+              id: x.databaseId,
+              name,
+              attempt: attempt - 1,
+              rerun: going ? "going" : "cancelled",
+            });
           }
         }
         if (failed.length === 0) return NO_FAILED_RUN;
+        const headOf = (f: (typeof failed)[number]): string => {
+          const name = cleanLog(f.name).slice(0, RUN_NAME_MAX);
+          if (f.jobs !== undefined)
+            return f.attempt === null
+              ? `${name} (still running)`
+              : `${name} (attempt ${f.attempt}, still running)`;
+          if (f.attempt === null) return name;
+          if (f.rerun === "going")
+            return `${name} (attempt ${f.attempt}, which failed; a re-run is going)`;
+          if (f.rerun === "cancelled")
+            return `${name} (attempt ${f.attempt}, which failed; its re-run was cancelled)`;
+          return `${name} (attempt ${f.attempt})`;
+        };
         // bytes, not characters: what is left of CI_EXCERPT_MAX, separators and headers included
         let budget = CI_EXCERPT_MAX;
         const sections: string[] = [];
         for (const f of failed) {
-          const name = cleanLog(f.name).slice(0, RUN_NAME_MAX);
-          const named =
-            f.attempt === null
-              ? name
-              : `${name} (attempt ${f.attempt}${f.rerun ? ", which failed; a re-run is going" : ""})`;
-          const head = `${f.jobs === undefined ? named : f.attempt === null ? `${name} (still running)` : `${name} (attempt ${f.attempt}, still running)`}:\n`;
+          const spare = budget - (sections.length > 0 ? SEPARATOR_BYTES : 0);
+          if (spare <= 0) break;
+          const head = `${headOf(f)}:\n`;
           // each run left gets an equal part of what is left; what one does not use passes on
           const left = failed.length - failed.indexOf(f);
-          const share = Math.floor((budget - (sections.length > 0 ? SEPARATOR_BYTES : 0)) / left);
-          const room = share - byteLength(head);
+          const room = Math.floor(spare / left) - byteLength(head);
           if (room <= 0) continue; // no room for a header with anything under it
           const log = f.jobs === undefined ? await failedLog(repo, f) : await jobsLog(repo, f.jobs);
           if (log === null) return CI_LOG_UNREADABLE;
@@ -1868,13 +1888,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
 
     async fastForward(run, worktree, sha) {
       if (!SHA.test(sha)) return final("not a commit sha");
-      if (run.branch === null) return final(MERGE_NOT_RUN_BRANCH);
+      const branch = run.branch;
+      if (branch === null) return final(MERGE_NOT_RUN_BRANCH);
       const place = seatPlace(deps.config, run.agentId);
       if (place === null) return final(MERGE_NO_SEAT);
       const git = deps.git ?? crewGit;
       const checkout = place.session.checkout;
       try {
-        return await deps.inClone(checkout, async (): Promise<PublishResult> => {
+        return await deps.inClone(checkout, async (): Promise<FastForwardResult> => {
           const common = await realpath(join(checkout, ".git"));
           const gitDir = await adminDirOf(common, worktree);
           if (gitDir === null) return final(UPDATE_NO_WORKTREE);
@@ -1884,7 +1905,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             (s) => s.trim(),
             () => null,
           );
-          if (run.branch === null || head !== `refs/heads/${run.branch}`) {
+          if (head !== `refs/heads/${branch}`) {
             return final(MERGE_NOT_RUN_BRANCH);
           }
           if (!(await have(g, sha))) await g(["fetch", "--no-tags", "origin", sha]);
@@ -1909,7 +1930,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               {
                 path: worktree,
                 gitDir,
-                branch: run.branch,
+                branch,
                 baseSha: mainSha,
               },
               before,

@@ -55,7 +55,7 @@ The repo's skills are in `.claude/skills/`. Load the one that fits the work; the
 ## Checks
 
 Seats run the `checks` in the Mission Control block below; the push gate requires them, and CI runs the full suite.
-A PR made outside the crew also runs `pnpm -s test && pnpm -s build` first.
+A PR made outside the crew has no push gate, so before it is opened it runs the checks and also `pnpm -s test && pnpm -s build`.
 
 ## Mission Control
 

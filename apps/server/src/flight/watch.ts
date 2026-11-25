@@ -219,7 +219,25 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       return { retryAt: null, restartedAt: null };
     }
   };
-  const writeGuard = (g: Guard): void => store.setSetting(FLIGHT_GUARD_SETTING, JSON.stringify(g));
+  /** Checks again when the guard's cooldown ends, so the restart does not wait for the next tick. */
+  let guardTimer: NodeJS.Timeout | null = null;
+  const armGuard = (retryAt: number | null): void => {
+    if (guardTimer !== null) clearTimeout(guardTimer);
+    guardTimer = null;
+    if (retryAt === null || stopped) return;
+    guardTimer = setTimeout(
+      () => {
+        guardTimer = null;
+        if (!stopped) void check();
+      },
+      Math.max(0, retryAt - now()),
+    );
+    guardTimer.unref();
+  };
+  const writeGuard = (g: Guard): void => {
+    store.setSetting(FLIGHT_GUARD_SETTING, JSON.stringify(g));
+    armGuard(g.retryAt);
+  };
   /** The last start threw and made no session: it is retried sooner than a run that died. */
   let lastStartThrew = false;
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
@@ -598,6 +616,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
     if (noteOpen()) {
       store.clearNote(FLIGHT_NOTE_KEY, t);
+      // the retry went with the note; when the cooldown restart was is kept for "twice in a row"
+      writeGuard({ retryAt: null, restartedAt: readGuard().restartedAt });
       starts = [];
       bus.emit("attention");
     }
@@ -868,6 +888,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       });
       interval = setInterval(() => void check(), FLIGHT_TICK_MS);
       interval.unref();
+      // a cooldown kept from before a restart still ends on time
+      armGuard(readGuard().retryAt);
       void check();
     },
     stop() {
@@ -886,6 +908,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       timer = null;
       if (gapTimer !== null) clearTimeout(gapTimer);
       gapTimer = null;
+      if (guardTimer !== null) clearTimeout(guardTimer);
+      guardTimer = null;
     },
   };
 }

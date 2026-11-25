@@ -731,7 +731,9 @@ export function createEngine(deps: EngineDeps): Engine {
     delete loop.branchMoved;
     // The seat hears of it on its next turn. A line already waiting for it (an answer, a fix)
     // goes first and carries the notice after it, as one line; a waiting line already sent is moot.
-    const notice = branchMovedText(held.sha, moved.commits ?? 1);
+    const moveText = branchMovedText(held.sha, moved.commits ?? 1);
+    const notice =
+      moved.installNote === undefined ? moveText : `${moveText}\n\n${moved.installNote}`;
     const waiting = loop.pendingLine;
     loop.pendingLine =
       waiting != null && !(waiting.key in store.claimedKeys(run.id))
@@ -829,10 +831,10 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!run || run.endedAt !== null || !mayWakeSeat(run)) return;
       const row = supervisor.seat(run.agentId);
       if (!row) return;
-      const woken = Object.keys(store.claimedKeys(run.id))
+      const claimed = store.claimedKeys(run.id);
+      const woken = Object.keys(claimed)
         .filter((key) => key.startsWith(`wake:${run.id}:`))
         .flatMap((key) => key.slice(`wake:${run.id}:`.length).split("|"));
-      const claimed = store.claimedKeys(run.id);
       const epoch = run.loop?.epoch ?? 0;
       const work = pendingSeatWork({
         lastTurnStartedAt: row.lastTurnStartedAt ?? null,
@@ -1023,7 +1025,6 @@ export function createEngine(deps: EngineDeps): Engine {
       const rows = store.reviewsOfRun(run.id).map((row) => ({
         ...reviewFact(row),
         reportPermalink: store.qaReportForReview(row.id)?.permalink,
-        design: store.reviewChecks(row.id).find((check) => check.check === "design") ?? null,
       }));
       const cur = pushed
         ? reviewFor(
@@ -2168,12 +2169,12 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       case "pr-body": {
         const row = store.review(a.reviewId);
-        const reviewer = reviewerFor(run);
-        if (row === null || reviewer === null) return;
+        if (row === null) return;
+        // the seat that wrote these findings, whichever seat would review the run now
         const r = await publisher.postMinorFindings(run, {
           id: row.id,
           sha: row.sha,
-          retro: seatCallSign(reviewer.id),
+          retro: seatCallSign(row.seatId),
         });
         const event = (text: string): void => {
           store.addLoopEvent(reviewEventKey(run.id, row.id, "pr-body"), run.id, text, at);
@@ -2515,6 +2516,8 @@ export function createEngine(deps: EngineDeps): Engine {
       // (in ci, a new report is in flight: the line about the old failure is moot)
       if (run.endedAt !== null || cur.phase === "ci" || !current) excerpts.delete(key);
     }
+    // however the run ended (the engine's end-run, the operator, an exit), the publisher lets go
+    if (run.endedAt !== null) publisher.runEnded(run.id);
     saveLoop(runId, cur, stored, at);
     // The run's card is not the ended run's to move once another run has the ticket.
     const newer = run.endedAt !== null && store.hasNewerRunOnTicket(run);
@@ -2552,6 +2555,12 @@ export function createEngine(deps: EngineDeps): Engine {
       try {
         await pass(runId);
       } finally {
+        // as each tick phase does: a pass that blocked the event loop also starves the overrun timer
+        const tick = ticks.running();
+        if (tick !== null && now() - tick.startedAt >= ENGINE_TICK_MS) {
+          const steps = ticks.overrun();
+          if (steps !== null) log(overrunText(tick.startedAt, steps));
+        }
         done();
       }
     });
@@ -3168,8 +3177,10 @@ export function createEngine(deps: EngineDeps): Engine {
               ...FLIGHT_FLOOR_PATHS,
             ]);
             if (paths.length === 0) return refuse("wrong-action");
-            const firstAccountId = seatConfig(first.seatId)?.accountId ?? "";
+            // a first seat gone from the config leaves no account to keep the second review off
+            const firstAccountId = seatConfig(first.seatId)?.accountId;
             if (
+              firstAccountId === undefined ||
               reviewerOf(config, run.agentId, reviewRoleOf(run), {
                 store,
                 now: now(),
@@ -3220,9 +3231,10 @@ export function createEngine(deps: EngineDeps): Engine {
           lastRefusal: null,
           unparkedAt: at,
         };
-        // a grant lasts until a review park is settled again, whatever else starts a new epoch meanwhile
-        // (a CI lift, a main sync). A review-failed park keeps it: its review never ran, so the
-        // granted review is still owed. FLIGHT's rework sets it again below.
+        // a grant lasts until a review or review-ruling park is lifted again, by anyone, whatever
+        // else starts a new epoch meanwhile (a CI lift, a main sync); FLIGHT's rework of one sets it
+        // afresh below. A review-failed park keeps it: its review never ran, so the granted review
+        // is still owed.
         if (
           (kind === "review" || kind === "review-ruling") &&
           !(by === "FLIGHT" && opts?.action === "rework")
@@ -3268,9 +3280,22 @@ export function createEngine(deps: EngineDeps): Engine {
         } else if (opts?.action === "rereview" || opts?.action === "rework") {
           next.reviewWaivedSha = null;
           next.flightClearedSha = null;
+          // FLIGHT's second review of this head failed to run: its re-run is still that second
+          // review, on another account
+          const second = pushed ? loop.flightSecondReview?.[pushed.sha] : undefined;
+          if (
+            opts.action === "rereview" &&
+            kind === "review-failed" &&
+            pushed &&
+            second?.epoch === loop.epoch
+          )
+            next.flightSecondReview = {
+              ...loop.flightSecondReview,
+              [pushed.sha]: { ...second, epoch: next.epoch },
+            };
           next.phase = opts.action === "rereview" ? "review" : "working";
           if (opts.action === "rework") {
-            // at the review-round cap the grant is for the next epoch's review, of the seat's fix
+            // the grant is for the next epoch's review, of the seat's fix
             if (kind === "review" || kind === "review-ruling")
               next.flightReworkGrantEpoch = next.epoch;
             if (pushed)
@@ -3297,11 +3322,8 @@ export function createEngine(deps: EngineDeps): Engine {
               // its seat is free (as a failed controller check does)
               const stored = store.addComms({
                 at,
-                // the rework is FLIGHT's request, filed from its seat
-                from:
-                  config.crew?.sessions
-                    .flatMap((x) => x.seats)
-                    .find((x) => seatDef(x).loop === "watch")?.id ?? COMMS_MC,
+                // the rework is FLIGHT's request, filed from its seat (the hub's, with none configured)
+                from: flightSeat(config)?.seat.id ?? COMMS_MC,
                 senderKind: "flight",
                 to: run.agentId,
                 ticket: run.ticket ?? null,
@@ -3557,8 +3579,13 @@ export function createEngine(deps: EngineDeps): Engine {
           at,
         );
         bus.emit("agents");
-        // a run waiting on FLIGHT's clearance parks on the hold in this pass
-        await withoutBriefDispatch(() => pass(runId));
+        // a run waiting on FLIGHT's clearance parks on the hold in this pass; the hold is stored
+        // already, so a pass that fails is logged, not reported as a failed hold
+        try {
+          await withoutBriefDispatch(() => pass(runId));
+        } catch (e) {
+          log(`${runId}: pass after merge hold: ${e instanceof Error ? e.message : String(e)}`);
+        }
         return { ok: true };
       });
     },

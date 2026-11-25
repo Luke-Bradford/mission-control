@@ -19,6 +19,7 @@ import {
   FLIGHT_GHOST_MS,
   FLIGHT_GUARD_AGAIN_COOLDOWN_MS,
   FLIGHT_GUARD_COOLDOWN_MS,
+  FLIGHT_GUARD_SETTING,
   FLIGHT_HANDOVER_ASK,
   FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HEADLINE,
@@ -43,6 +44,7 @@ import {
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_TICK_MS,
   FLIGHT_WAKE_HEAD,
+  FLIGHT_WAKE_SETTING,
   type FlightLedgerEntry,
   type FlightSeatState,
   type FlightState,
@@ -89,6 +91,7 @@ import {
   flightView,
   flightWake,
   flightWakeHistory,
+  lastRecordedWake,
   markItemsShown,
   markPrsShown,
   ownReply,
@@ -1744,6 +1747,10 @@ describe("the FLIGHT watcher", () => {
     facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
     await watch.check();
     expect(notesOpen()).toEqual([]);
+    // the cleared note takes its retry with it
+    expect(JSON.parse(store.getSetting(FLIGHT_GUARD_SETTING) ?? "{}")).toMatchObject({
+      retryAt: null,
+    });
   });
 
   it("a pending crew change holds the hub's retry, which runs once the change settles", async () => {
@@ -2850,6 +2857,16 @@ describe("the FLIGHT watcher", () => {
         expect(notesOpen()).toEqual([]);
       });
 
+      it("restarts FLIGHT when the cooldown ends, not at the next tick", async () => {
+        liveCrew();
+        await tripGuard();
+        const started = startCalls.length;
+        nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+        await vi.advanceTimersByTimeAsync(FLIGHT_GUARD_COOLDOWN_MS);
+        expect(startCalls).toHaveLength(started + 1);
+        expect(notesOpen()).toEqual([]);
+      });
+
       it("a handover trip after a retried failed start waits the trip's own cooldown", async () => {
         liveCrew();
         noFlight();
@@ -2871,6 +2888,28 @@ describe("the FLIGHT watcher", () => {
         await watch.check();
         expect(startCalls).toHaveLength(started + 1);
         expect(notesOpen()).toEqual([]);
+      });
+
+      it("restarts FLIGHT when the cooldown ends after the hub restarted, not at a tick", async () => {
+        liveCrew();
+        await tripGuard();
+        const started = startCalls.length;
+        const { retryAt } = JSON.parse(store.getSetting(FLIGHT_GUARD_SETTING) ?? "{}") as {
+          retryAt: number;
+        };
+        watch.stop();
+        nowMs = retryAt - FLIGHT_GUARD_COOLDOWN_MS + 2 * MIN; // the hub restarts into the cooldown
+        makeWatch();
+        watch.start();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(startCalls).toHaveLength(started);
+        // ticks fall every 5 minutes from the start; none restarts FLIGHT before retryAt
+        await vi.advanceTimersByTimeAsync(FLIGHT_GUARD_COOLDOWN_MS - 3 * MIN);
+        expect(startCalls).toHaveLength(started);
+        // retryAt is 28 minutes after the start and the next tick is at 30: only the cooldown's timer fires
+        nowMs = retryAt;
+        await vi.advanceTimersByTimeAsync(MIN);
+        expect(startCalls).toHaveLength(started + 1);
       });
 
       it("keeps the cooldown through a hub restart", async () => {
@@ -3334,6 +3373,33 @@ describe("wakeSummary", () => {
       expect(pending(unparked)).toBe(false);
       expect(wakeFacts(state({ aside: [aside] }))).not.toBe(wakeFacts(unparked));
     });
+  });
+});
+
+describe("the stored wake record", () => {
+  const put = (record: object) => store.setSetting(FLIGHT_WAKE_SETTING, JSON.stringify(record));
+  it("keeps a whole record, and one from before next was kept", () => {
+    put({ repo: "mc", at: T0, wokeOn: ["q (1)"], next: T0 + MIN });
+    expect(lastRecordedWake(store, "mc")).toBe(T0);
+    put({ repo: "mc", at: T0, wokeOn: ["q (1)"], next: null });
+    expect(lastRecordedWake(store, "mc")).toBe(T0);
+    put({ repo: "mc", at: T0, wokeOn: ["q (1)"] });
+    expect(lastRecordedWake(store, "mc")).toBe(T0);
+  });
+  it("discards a record with a wokeOn entry that is not text, or a next that is not a time", () => {
+    for (const bad of [
+      { repo: "mc", at: T0, wokeOn: ["q (1)", 7], next: null },
+      { repo: "mc", at: T0, wokeOn: ["q (1)"], next: "soon" },
+    ]) {
+      put(bad);
+      expect(lastRecordedWake(store, "mc")).toBe(0);
+    }
+    // JSON keeps no Infinity, but a hand-edited 1e999 reads as one
+    store.setSetting(
+      FLIGHT_WAKE_SETTING,
+      `{"repo":"mc","at":${T0},"wokeOn":["q (1)"],"next":1e999}`,
+    );
+    expect(lastRecordedWake(store, "mc")).toBe(0);
   });
 });
 
@@ -4194,6 +4260,35 @@ describe("ops review regressions", () => {
       observeCheck(sha, "passing", 2);
     }
     expect(signalState().signals).toEqual([]);
+  });
+
+  it("does not read a cancelled attempt as failed then passed", () => {
+    for (const sha of ["a", "b"]) {
+      observeFlightChecks(
+        store,
+        "mc",
+        [
+          stored(7, {
+            headSha: sha,
+            checks: [
+              {
+                name: "unit (linux)",
+                workflow: "keeper",
+                kind: "check",
+                state: "failing",
+                conclusion: "CANCELLED",
+                attempt: 1,
+                url: "https://github.com/o/mc/actions/runs/1/job/7",
+              },
+            ],
+          }),
+        ],
+        nowMs,
+      );
+      observeCheck(sha, "passing", 2);
+    }
+    expect(signalState().signals).toEqual([]);
+    expect(JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").flakes).toEqual({});
   });
 
   it("ignores statuses, same-attempt passes and closed PR checks", () => {

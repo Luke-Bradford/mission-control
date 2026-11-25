@@ -724,6 +724,8 @@ export const PROMOTE_NO_RULES = "Not moved: the repo's rules could not be read."
 export const promoteOffText = (repoId: string): string =>
   `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question, then brief the item it raises with mc brief_item.`;
 export const moveNotOnBoardText = (ref: string): string => `Not moved: ${ref} is not on the board.`;
+export const moveUnreadableText = (ref: string): string =>
+  `Not moved: ${ref}'s card could not be read; try again.`;
 export const moveWrongColumnText = (ref: string, column: string): string =>
   `Not moved: ${ref} is in ${column}; promote moves Backlog to Ready or Refinement, Refinement to Ready, and Ready or Refinement to Backlog.`;
 export const moveHasRunText = (ref: string): string => `Not moved: ${ref} has a run.`;
@@ -1211,7 +1213,6 @@ export interface FlightState {
   /** Items waiting for triage, oldest first, including those held from the operator. */
   items: {
     key: string;
-    /** A stream question's identity, independent of later progress messages in its thread. */
     kind: AttentionKind;
     ticket: string | null;
     text: string;
@@ -1461,7 +1462,9 @@ export const flightRotationLoopText = (
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
-export const handoverKey = (runId: string): string => `flight:handover:${runId}`;
+const HANDOVER_KEY_PREFIX = "flight:handover:";
+export const handoverKey = (runId: string): string => `${HANDOVER_KEY_PREFIX}${runId}`;
+export const isHandoverKey = (key: string): boolean => key.startsWith(HANDOVER_KEY_PREFIX);
 /**
  * The start brief's text for a fresh session: where to read what is going on, and the handover.
  * One line, as the brief's digest stays on the lines after it.
@@ -1558,7 +1561,7 @@ export const flightStartFailedText = (
 ): string =>
   `FLIGHT could not be kept running: ${reason}. The hub tries again in ${
     retryMs >= 2 * 60 * 60_000 ? `${retryMs / 3_600_000} hours` : `${retryMs / 60_000} minutes`
-  } and clears this when FLIGHT is running. Starting it from FLIGHT's dock once that is fixed brings it back sooner.`;
+  }; starting it from FLIGHT's dock is sooner.`;
 export const WAKE_ASK =
   "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary. It is posted to the operator only if you have not already replied to them this turn.";
 

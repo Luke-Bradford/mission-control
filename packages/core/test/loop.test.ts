@@ -423,6 +423,30 @@ describe("state step", () => {
     }
   });
 
+  it("5b: a review-ruling park lifted by a green newer head drops FLIGHT's rework grant", () => {
+    const parked = {
+      phase: "parked" as const,
+      hold: { kind: "review-ruling", reason: "ruled", ended: false, worktree: null, wake: false },
+      ciFailedSha: SHA,
+      reportedEvidenceId: 1,
+      flightReworkGrantEpoch: 0,
+    };
+    const r = reconcile(
+      snap(
+        {
+          headCommit: SHA2,
+          pushed: { sha: SHA2, at: NOW - 1000 },
+          evidence: { id: 1, at: 1, ruling: true },
+          evidenceCount: 1,
+          pr: pr({ headSha: SHA2, ci: "passing" }),
+        },
+        parked,
+      ),
+    );
+    expect(r.loop.phase).toBe("review");
+    expect(r.loop.flightReworkGrantEpoch).toBeUndefined();
+  });
+
   it("6: a new report starts the push, in working and in review", () => {
     for (const phase of ["working", "review"] as const) {
       const r = reconcile(
@@ -622,6 +646,18 @@ describe("state step", () => {
       reason: "PR #12 conflicts with main",
       ended: true,
     });
+  });
+
+  it("10b: a merge-main line not yet sent is dropped once a newer push replaces its sha", () => {
+    const line = { key: mergeMainKey("r1", SHA), text: MERGE_MAIN_TEXT };
+    const r = reconcile(
+      inCi(
+        { headCommit: SHA2, pushed: { sha: SHA2, at: NOW - 1000 }, pr: pr({ headSha: SHA2 }) },
+        { pendingLine: line, pushFor: SHA2 },
+      ),
+    );
+    expect(r.loop.pendingLine ?? null).toBeNull();
+    expect(sends(r.actions)).not.toContain(line.key);
   });
 
   it("11: passing CI moves to review and resets the failure count", () => {
@@ -3216,7 +3252,7 @@ describe("merge workspace", () => {
   it("records HUD design checks without making them a merge gate", () => {
     const result = reconcile(
       merge(
-        { review: rows({ design: { result: "fail", note: "overflow at 1366px" } }) },
+        { review: rows({ design: { result: "fail", note: "overflow at 1366px" } } as never) },
         { gate: gateOf({ webChanged: true }) },
       ),
     );
@@ -3903,6 +3939,30 @@ describe("withControllerCheckItem", () => {
     const twice = withControllerCheckItem(once.body, item);
     expect(twice).toEqual({ body: once.body, added: false, removed: false });
     expect(controllerCheckOf(once.body)).toBe(`- ${item}`);
+  });
+  it("a bullet inside a fence in the section does not count as listed", () => {
+    const body = `## Controller check\n\`\`\`\n- ${item}\n\`\`\`\n`;
+    const r = withControllerCheckItem(body, item);
+    expect(r.added).toBe(true);
+    expect(r.body).toBe(`## Controller check\n\`\`\`\n- ${item}\n\`\`\`\n- ${item}\n`);
+  });
+  it("leaves a controller-check section nested under done-when as it is", () => {
+    const body = `## Done when\n- Tests pass\n\n### Controller check\n- ${item}\n\n## Size\nS\n`;
+    expect(withControllerCheckItem(body, item)).toEqual({ body, added: false, removed: false });
+  });
+  it("adds a quoted line under a quoted heading, and counts a quoted line as listed", () => {
+    const body = "> ## Controller check\n> - Open it.\n";
+    const r = withControllerCheckItem(body, item);
+    expect(r.body).toBe(`> ## Controller check\n> - Open it.\n> - ${item}\n`);
+    expect(withControllerCheckItem(r.body, item).added).toBe(false);
+  });
+  it("ends a quoted section at the next quoted heading", () => {
+    for (const next of ["## Size\n> S", "## Security\n> none"]) {
+      const body = `> ## Controller check\n> - Open it.\n> ${next}`;
+      expect(withControllerCheckItem(body, item).body).toBe(
+        `> ## Controller check\n> - Open it.\n> - ${item}\n> ${next}`,
+      );
+    }
   });
   it("keeps CRLF line ends", () => {
     expect(withControllerCheckItem("## Why\r\nx\r\n", item).body).toBe(

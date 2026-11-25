@@ -270,15 +270,20 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
         let milestone: number | null | undefined;
         if (a.milestone === null) milestone = null;
         else if (a.milestone !== undefined) {
+          // every page: a repo can hold more than one page of milestones
           const list = await ghWrite([
             "api",
             `repos/${repo.github}/milestones?state=all&per_page=100`,
+            "--paginate",
+            "--slurp",
           ]);
           try {
-            const milestones = parseJson<unknown>(list.stdout, undefined, rethrowJson) as {
-              number: number;
-              title: string;
-            }[];
+            const milestones = (
+              parseJson<unknown>(list.stdout, undefined, rethrowJson) as {
+                number: number;
+                title: string;
+              }[][]
+            ).flat();
             const match = milestones.find((m) => m.title === a.milestone);
             if (!list.ok || match === undefined)
               return stop(`No milestone titled "${a.milestone}".`);

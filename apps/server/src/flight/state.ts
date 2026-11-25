@@ -39,6 +39,7 @@ import {
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
+  type FLIGHT_SIGNAL_KINDS,
   FLIGHT_STARTABLE,
   FLIGHT_STATE_DECISION_MAX,
   FLIGHT_STATE_TEXT_MAX,
@@ -306,7 +307,13 @@ interface WakeRecord {
 function readWakeRecord(store: Store, repo: string): WakeRecord | null {
   try {
     const r = parseJson(store.getSetting(FLIGHT_WAKE_SETTING), null) as WakeRecord | null;
-    return r !== null && r.repo === repo && Number.isFinite(r.at) && Array.isArray(r.wokeOn)
+    return r !== null &&
+      r.repo === repo &&
+      Number.isFinite(r.at) &&
+      Array.isArray(r.wokeOn) &&
+      r.wokeOn.every((w) => typeof w === "string") &&
+      // a record from before `next` was kept has none
+      (r.next === undefined || r.next === null || Number.isFinite(r.next))
       ? r
       : null;
   } catch {
@@ -1845,6 +1852,8 @@ const URGENT_CATEGORIES: readonly string[] = [
   "audit",
 ];
 
+const SEAT_CALL: (typeof FLIGHT_SIGNAL_KINDS)[number] = "seat_call";
+
 /** Whether a changed fact set adds an urgent fact: one of the categories above, or a seat's call. */
 export function urgentChange(previous: string, current: string): boolean {
   const before = parseJson<Facts>(previous, {});
@@ -1855,7 +1864,7 @@ export function urgentChange(previous: string, current: string): boolean {
   };
   return (
     URGENT_CATEGORIES.some((category) => added(category).length > 0) ||
-    added("signals").some((v) => String(v).startsWith("seat_call:"))
+    added("signals").some((v) => String(v).startsWith(`${SEAT_CALL}:`))
   );
 }
 
