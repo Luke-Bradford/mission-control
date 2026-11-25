@@ -270,6 +270,48 @@ describe("sessions view", () => {
     expect(fake.state().sent ?? []).toEqual([]);
   });
 
+  it("two overlapping reads tell a session once when its app stops, and once when it is back", async () => {
+    let answers = true;
+    const fake = fakeCmux(dir, {
+      ...threeSessions(),
+      statuses: { [PRICING]: { app: "http://127.0.0.1:5173" } },
+    });
+    // a slow message keeps both reads inside the notice at once
+    const slow = new Proxy(fake.cmux, {
+      get(target, key, receiver) {
+        const v = Reflect.get(target, key, receiver) as (...a: unknown[]) => Promise<unknown>;
+        if (key !== "agentMessage") return v;
+        return async (...a: unknown[]) => {
+          await new Promise((r) => setTimeout(r, 50));
+          return v.apply(target, a);
+        };
+      },
+    });
+    const { sessions } = setup(
+      { ...threeSessions(), statuses: { [PRICING]: { app: "http://127.0.0.1:5173" } } },
+      { cmux: slow, probe: async () => answers },
+    );
+    await sessions.view();
+    const overlapping = async () => {
+      const first = sessions.view();
+      // past the shared read and the probe's cache, so the second is a read of its own
+      nowMs += 10_000;
+      const second = sessions.view();
+      expect(second).not.toBe(first);
+      await Promise.all([first, second]);
+      nowMs += 10_000;
+    };
+    answers = false;
+    nowMs += 10_000;
+    await overlapping();
+    answers = true;
+    await overlapping();
+    expect(fake.state().messages?.map((m) => m.text)).toEqual([
+      "Your app at http://127.0.0.1:5173 has stopped answering.",
+      "Your app at http://127.0.0.1:5173 answers again.",
+    ]);
+  });
+
   it("shows each session's unread messages and the newest one", async () => {
     const { sessions } = setup({
       ...threeSessions(),

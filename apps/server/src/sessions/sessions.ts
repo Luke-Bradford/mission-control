@@ -265,6 +265,9 @@ export function createSessions(deps: SessionsDeps): SessionsService {
   const seen = new Map<string, { state: CmuxSessionState; since: number }>();
   /** Each workspace's app as last read, and whether the session was told it stopped. */
   const apps = new Map<string, { url: string; answers: boolean | null; told: boolean }>();
+  /** Reads take turns at telling apps, and a read older than one already handled is skipped. */
+  let appsTurn: Promise<void> = Promise.resolve();
+  let appsAt = Number.NEGATIVE_INFINITY;
   const probes = new Map<string, { at: number; answers: Promise<boolean> }>();
   let cached: { at: number; view: Promise<CmuxSessionsView> } | null = null;
 
@@ -395,6 +398,17 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     for (const id of apps.keys()) if (!rows.some((r) => r.id === id)) apps.delete(id);
   }
 
+  /** `tellApps` one read at a time, so overlapping reads never send the same notice twice. */
+  function tellAppsInTurn(rows: readonly CmuxSessionRow[], at: number): Promise<void> {
+    const turn = appsTurn.then(async () => {
+      if (at < appsAt) return;
+      appsAt = at;
+      await tellApps(rows);
+    });
+    appsTurn = turn.catch(() => {});
+    return turn;
+  }
+
   /** The view, or a cmux-is-slow error once the view deadline passes; a late answer is dropped. */
   async function read(): Promise<CmuxSessionsView> {
     const at = now();
@@ -436,7 +450,7 @@ export function createSessions(deps: SessionsDeps): SessionsService {
         rowOf(ws, agentOf(agents, ws.id), inbox, seats, late),
       );
       for (const id of seen.keys()) if (!rows.some((r) => r.id === id)) seen.delete(id);
-      if (deps.tellApps !== false) await tellApps(rows);
+      if (deps.tellApps !== false) await tellAppsInTurn(rows, at);
       return { ok: true, at, sessions: sortSessions(rows) };
     } catch (e) {
       return { ok: false, at, error: e instanceof Error ? e.message : String(e) };
