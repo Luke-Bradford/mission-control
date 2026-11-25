@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseAgents, parseInbox, parseStatuses, parseWorkspaces } from "../src/runtime/cmux.ts";
+import {
+  parseAgents,
+  parseInbox,
+  parseStatuses,
+  parseWindows,
+  parseWorkspaces,
+} from "../src/runtime/cmux.ts";
 
 describe("cmux parsers", () => {
   it("reads a workspace's folder under any of its names", () => {
@@ -63,5 +69,37 @@ describe("cmux parsers", () => {
       { workspaceId: "w", text: "hi", read: false },
       { workspaceId: "v", text: "old", read: true },
     ]);
+  });
+
+  it("reads real cmux's inbox rows, which name the workspace as the recipient", () => {
+    expect(
+      parseInbox(
+        JSON.stringify({
+          messages: [
+            {
+              id: "m1",
+              recipient_workspace_id: "w",
+              body: "hi",
+              state: "delivered",
+              read_at: null,
+            },
+            { id: "m2", recipientWorkspaceId: "v", body: "old", read_at: "2026-11-25T10:00:00Z" },
+          ],
+        }),
+      ),
+    ).toEqual([
+      { workspaceId: "w", text: "hi", read: false },
+      { workspaceId: "v", text: "old", read: true },
+    ]);
+  });
+
+  it("reads the windows cmux has open", () => {
+    expect(
+      parseWindows(
+        JSON.stringify({ windows: [{ id: "w1", index: 0 }, { window_id: "w2" }, { index: 2 }] }),
+      ),
+    ).toEqual(["w1", "w2"]);
+    expect(parseWindows(JSON.stringify([{ uuid: "w3" }]))).toEqual(["w3"]);
+    expect(parseWindows("not json")).toEqual([]);
   });
 });

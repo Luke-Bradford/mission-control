@@ -8,8 +8,10 @@
  *
  * It opens one shell workspace with the cmux command (as the operator would), and passes only if:
  * the hub lists it as the operator's with no agent; a write reaches it (an `echo` marker shows on
- * its screen); an app on a free local port reads as not answering; and the workspace is closed
- * again through the cmux command, never through the hub. It prints the raw `list-status`,
+ * its screen); the hub brings it to the front; an agent message to it types nothing on its screen
+ * and comes back from `agent inbox` parsed for this workspace; an app on a free local port reads as
+ * not answering, with no notice typed into the shell; and the workspace is closed again through the
+ * cmux command, never through the hub. It prints the raw `list-windows`, `list-status`,
  * `list-workspaces`, `sessions` and `agent inbox` output, to check the fake against.
  * Exit code 0 is a pass.
  */
@@ -73,6 +75,32 @@ try {
     "the write is logged with who asked",
   );
 
+  await sessions.focus(id);
+  check(true, "the hub brings the workspace to the front (select-workspace, then cmux forward)");
+
+  // `agent message` goes through cmux's agent inbox, never typed into the terminal: a plain shell's
+  // screen stays clear of it, and the inbox names the workspace it went to
+  const note = `MC-NOTE-${randomUUID().slice(0, 8)}`;
+  await cmux.agentMessage(id, note, "Mission Control");
+  await sleep(1500);
+  check(
+    !(await sessions.read(id, 30)).includes(note),
+    "an agent message types nothing into the shell",
+  );
+  const inbox = await cmux.inbox();
+  check(
+    inbox.some((m) => m.workspaceId === id && m.text === note),
+    `the inbox parses the message for this workspace (parsed ${inbox.length} rows)`,
+  );
+  await sleep(2100); // past the shared read
+  view = await sessions.view();
+  if (!view.ok) throw new Error(view.error);
+  const mine = view.sessions.find((r) => r.id === id)?.inbox;
+  check(
+    mine !== undefined && mine.unread >= 1 && mine.newest === note,
+    `the row shows the message (got ${JSON.stringify(mine)})`,
+  );
+
   const port = await freePort();
   cmuxCli("set-status", "app", `http://127.0.0.1:${port}`, "--workspace", id);
   await sleep(2100); // past the shared read
@@ -83,8 +111,13 @@ try {
     app?.url === `http://127.0.0.1:${port}` && app.answers === false,
     `an app on a free port reads as not answering (got ${JSON.stringify(app)})`,
   );
+  check(
+    !(await sessions.read(id, 30)).includes("stopped answering"),
+    "no app notice is typed into a shell",
+  );
 
   log("raw output, to check fake-cmux.mjs against:");
+  console.log("--- list-windows\n", cmuxCli("--json", "--id-format", "uuids", "list-windows"));
   console.log("--- list-status\n", cmuxCli("list-status", "--workspace", id));
   console.log(
     "--- list-workspaces\n",

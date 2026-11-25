@@ -382,6 +382,8 @@ export function createSessions(deps: SessionsDeps): SessionsService {
       if (answers === null && prev?.url === url) continue;
       let told = prev?.url === url ? prev.told : false;
       const say = async (text: string, event: string) => {
+        // a plain shell has no agent to read it: nothing is ever written there
+        if (row.state === "no-agent") return false;
         try {
           await cmux.agentMessage(row.id, text, SESSION_NOTICE_FROM);
           store.addHubEvent(`Told cmux session "${row.name}" ${event}`, now());

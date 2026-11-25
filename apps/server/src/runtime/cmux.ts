@@ -200,6 +200,16 @@ export function parseWorkspaces(text: string): CmuxWorkspace[] {
   return out;
 }
 
+/** The ids of the windows `list-windows` names. */
+export function parseWindows(text: string): string[] {
+  const out: string[] = [];
+  for (const o of rowsOf(text, "windows")) {
+    const id = pick(o, "id", "uuid", "window_id", "windowId");
+    if (typeof id === "string" && id !== "") out.push(id);
+  }
+  return out;
+}
+
 /**
  * `list-status` output, read either way cmux may print it: JSON (a list of `{key, value}` or an
  * object keyed by key, bare or under `statuses`/`entries`), or one `key=value` / `key: value` /
@@ -249,6 +259,9 @@ export function parseInbox(text: string): CmuxInboxMessage[] {
     const target = isObj(o.to) ? o.to : isObj(o.target) ? o.target : o;
     const ws = pick(
       target,
+      // real cmux (0.65.2) names it the recipient
+      "recipient_workspace_id",
+      "recipientWorkspaceId",
       "workspaceId",
       "workspace_id",
       "to_workspace_id",
@@ -309,10 +322,29 @@ export function createCmux(
   let agentsAt = 0;
   let agentsCall: Promise<CmuxAgent[]> | null = null;
 
-  async function workspaces() {
-    const r = await cmux(["--json", "--id-format", "uuids", "list-workspaces"]);
+  const inWindow = async (window?: string) => {
+    const r = await cmux([
+      "--json",
+      "--id-format",
+      "uuids",
+      "list-workspaces",
+      ...(window === undefined ? [] : ["--window", window]),
+    ]);
     if (r.code !== 0) throw failed("list-workspaces", r);
     return parseWorkspaces(r.stdout);
+  };
+  /** `list-workspaces` names one window's workspaces only, so every window is listed in turn. */
+  async function workspaces() {
+    const w = await cmux(["--json", "--id-format", "uuids", "list-windows"]);
+    const windows = w.code === 0 ? parseWindows(w.stdout) : [];
+    // a cmux with no list-windows, or no window named: the current window is all there is to read
+    if (windows.length === 0) return inWindow();
+    const seen = new Set<string>();
+    return (await Promise.all(windows.map(inWindow))).flat().filter((ws) => {
+      if (seen.has(ws.id)) return false;
+      seen.add(ws.id);
+      return true;
+    });
   }
   const ping = async (): Promise<"up" | "denied" | "down"> => {
     const r = await cmux(["ping"]);

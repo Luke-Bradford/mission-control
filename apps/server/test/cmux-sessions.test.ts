@@ -103,8 +103,30 @@ describe("sessions view", () => {
     expect(view.sessions.map((r) => r.state)).toEqual(["waiting", "working", "no-agent"]);
     // reads only: no agent, no write
     expect(new Set(fake.log().map(commandOf))).toEqual(
-      new Set(["ping", "list-workspaces", "sessions", "agent inbox", "list-status", "read-screen"]),
+      new Set([
+        "ping",
+        "list-windows",
+        "list-workspaces",
+        "sessions",
+        "agent inbox",
+        "list-status",
+        "read-screen",
+      ]),
     );
+  });
+
+  it("lists the workspaces of every cmux window, not only the current one", async () => {
+    const state = threeSessions();
+    // the shell sits in a second window: a bare list-workspaces names only the first
+    state.workspaces = state.workspaces?.map((w) =>
+      w.id === SHELL ? { ...w, window: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" } : w,
+    );
+    const { sessions } = setup(state);
+    const view = await sessions.view();
+    if (!view.ok) throw new Error(view.error);
+    expect(view.sessions.map((r) => r.id).sort()).toEqual([PRICING, GUIDO, SHELL].sort());
+    // a write finds it too
+    await sessions.focus(SHELL);
   });
 
   it("a stalled status or screen read drops out by the deadline instead of holding the list", async () => {
@@ -295,6 +317,25 @@ describe("sessions view", () => {
       'Told cmux session "pricing" its app at http://127.0.0.1:5173 answers again',
     ]);
     // the terminal is never typed into
+    expect(fake.state().sent ?? []).toEqual([]);
+  });
+
+  it("never tells a plain shell about its app: nothing is written where no agent reads", async () => {
+    let answers = true;
+    const { fake, sessions } = setup(
+      { ...threeSessions(), statuses: { [SHELL]: { app: "http://127.0.0.1:5173" } } },
+      { probe: async () => answers },
+    );
+    await sessions.view();
+    answers = false;
+    nowMs += 10_000;
+    const view = await sessions.view();
+    if (!view.ok) throw new Error(view.error);
+    expect(view.sessions.find((r) => r.id === SHELL)?.app).toEqual({
+      url: "http://127.0.0.1:5173",
+      answers: false,
+    });
+    expect(fake.state().messages ?? []).toEqual([]);
     expect(fake.state().sent ?? []).toEqual([]);
   });
 

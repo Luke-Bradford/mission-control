@@ -1,6 +1,7 @@
 // A stand-in for the `cmux` command. Tests run it as `node fake-cmux.mjs --state <file> <command...>`.
 // All its state lives in the JSON <file>, which a test reads and changes to play cmux and Claude:
-//   workspaces  [{id, name, cwd, command}]      made by `new-workspace`
+//   workspaces  [{id, name, cwd, command, window}]  made by `new-workspace`; `window` defaults to the
+//                                               current one, CURRENT_WINDOW
 //   sessions    [{session_id, lifecycle, pid, workspace_id, transcript_path}]   kept here; `sessions` prints `lifecycle` as real cmux does, under `agent_lifecycle`
 //   sent        [{ws, text, paste}]             every `send`
 //   keys        [{ws, key, force}]              every `send-key`
@@ -9,10 +10,13 @@
 //   calls       [[argv...]]                     every call that changes something
 //   statuses    {ws: {key: value}}              what `list-status` prints, one `key=value` a line
 //   selected    [ws]                            every `select-workspace`
-//   inbox       [{workspace_id, text, state}]   what `agent inbox` prints
+//   inbox       [{workspace_id, text, state}]   what `agent inbox` prints, in real cmux's shape
+//                                               (`recipient_workspace_id`, `body`, `state`, `read_at`)
 //   messages    [{to, from, text}]              every `agent message`
 //   panes       [{ws, type, url}]               every `new-pane`
 // Every call, read-only ones included, is also appended to `<file>.log`, one JSON argv a line.
+// `list-workspaces` names only one window's workspaces, as real cmux does: the current one, or the
+// one after `--window`. `list-windows` names every window a workspace is in, the current one first.
 // `workspaces` rows may carry `cwd`, and `sessions` rows `cwd`: both are printed as given.
 // Switches a test sets: `down` (no socket until `open` is run), `denied` (access denied), `busy`
 // (`send` refuses: a dialog is open), `noForce` (close-workspace refuses --force), `hideWorkspaces`
@@ -23,6 +27,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+const CURRENT_WINDOW = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const argv = process.argv.slice(2);
 const stateAt = argv[argv.indexOf("--state") + 1];
 let args = argv.slice(argv.indexOf("--state") + 2);
@@ -35,6 +40,7 @@ const READ_ONLY = new Set([
   "read-screen",
   "ping",
   "list-status",
+  "list-windows",
   "agent inbox",
 ]);
 // written whole and renamed into place: a test reading the file never meets it half written
@@ -110,17 +116,30 @@ switch (cmd) {
     ok("OK workspace:1");
     break;
   }
-  case "list-workspaces":
+  case "list-windows": {
+    const ids = new Set([
+      CURRENT_WINDOW,
+      ...(state.workspaces ?? []).map((w) => w.window ?? CURRENT_WINDOW),
+    ]);
+    ok(JSON.stringify({ windows: [...ids].map((id, index) => ({ id, index })) }));
+    break;
+  }
+  case "list-workspaces": {
+    const window = flag("--window") ?? CURRENT_WINDOW;
     ok(
       JSON.stringify({
-        workspaces: (state.workspaces ?? []).map((w) => ({
-          id: w.id,
-          title: w.name,
-          ...(w.cwd ? { cwd: w.cwd } : {}),
-        })),
+        window_id: window,
+        workspaces: (state.workspaces ?? [])
+          .filter((w) => (w.window ?? CURRENT_WINDOW) === window)
+          .map((w) => ({
+            id: w.id,
+            title: w.name,
+            ...(w.cwd ? { cwd: w.cwd } : {}),
+          })),
       }),
     );
     break;
+  }
   case "sessions":
     // the shape real cmux prints (0.65.2): the state is `agent_lifecycle`, with `runtime_status` beside it
     ok(
@@ -166,7 +185,18 @@ switch (cmd) {
   }
   case "agent": {
     const [sub, ...more] = rest;
-    if (sub === "inbox") ok(JSON.stringify({ messages: state.inbox ?? [] }));
+    if (sub === "inbox")
+      ok(
+        JSON.stringify({
+          messages: (state.inbox ?? []).map((m, i) => ({
+            id: `m${i}`,
+            recipient_workspace_id: m.workspace_id,
+            body: m.text,
+            state: m.state,
+            read_at: m.state === "read" ? "2026-11-25T10:00:00Z" : null,
+          })),
+        }),
+      );
     if (sub === "message") {
       const from = more[more.indexOf("--from") + 1];
       state.messages ??= [];
