@@ -2,7 +2,7 @@ import type { CrewRow, RunLoopView } from "@mc/core";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { NO_SECTION_DATA, PromptCostBar } from "../hud/PromptCost.tsx";
 
-/** The side panel's Context tab: what the run's prompt cost, by section, from what the hub recorded at its start. */
+/** The side panel's Context tab: what the run's latest prompt cost, by section, from the newest wake the hub recorded. */
 export function PromptTab({ row }: { row: CrewRow }) {
   const ref = row.run ? RESOURCES.runLoop(row.run.id) : null;
   const loop = useResource<RunLoopView>(ref);

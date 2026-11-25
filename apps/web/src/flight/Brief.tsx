@@ -122,7 +122,7 @@ export function BriefPanel({ expanded = false }: { expanded?: boolean }) {
           <>
             <h2>FLIGHT's notes</h2>
             {updatedAt !== null && (
-              <span className="s fg2">{` · updated ${briefUpdated(updatedAt, now, tz)}`}</span>
+              <span className="s fg2">{` · ${briefUpdated(updatedAt, now, tz)}`}</span>
             )}
           </>
         }

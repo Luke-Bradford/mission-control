@@ -61,6 +61,14 @@ describe("crewOrder", () => {
     expect(ids(crewOrder(rows, items))).toEqual(["d", "b", "c", "f", "a", "e"]);
   });
 
+  it("ranks a paused idle seat with the held seats, above idle ones", () => {
+    const rows = [
+      crewRow({ id: "a", index: 0, hudState: "idle" }),
+      crewRow({ id: "b", index: 1, hudState: "idle", paused: true, pausedBy: "shop-app#1" }),
+    ];
+    expect(ids(crewOrder(rows, []))).toEqual(["b", "a"]);
+  });
+
   it("does not reorder or mutate its input", () => {
     const rows = [crewRow({ id: "b", index: 1 }), crewRow({ id: "a", index: 0 })];
     expect(ids(crewOrder(rows, []))).toEqual(["a", "b"]);

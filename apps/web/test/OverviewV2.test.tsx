@@ -175,10 +175,11 @@ it.each([
   expect(container.querySelector("#machP")).toBeTruthy();
   expect(screen.queryByRole("img", { name: "Memory history" })).toBeNull();
   // The Mac row has no reading (the lock is free), and the Board's head figures have no registry
-  // value: dashes.
+  // value: dashes. CPU alone falls back to its sparkline's last point when there is one.
+  const cpu = "machine" in overview && overview.machine.cpu ? "20%" : "—";
   expect(
     [...container.querySelectorAll("#macP .mac-measure b")].map((el) => el.textContent),
-  ).toEqual(["—", "—", "—", "—", "free"]);
+  ).toEqual([cpu, "—", "—", "—", "free"]);
   expect(
     [...container.querySelectorAll("#pipelineP .ph b[data-metric]")].map((el) => el.textContent),
   ).toEqual(["—", "—", "—"]);

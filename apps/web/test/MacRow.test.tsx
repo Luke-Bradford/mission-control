@@ -74,7 +74,7 @@ describe("MacRow", () => {
     const title = within(container.querySelector("#macP") as HTMLElement).getByRole("link", {
       name: "Mac",
     });
-    expect(title.getAttribute("href")).toBe("/telemetry");
+    expect(title.getAttribute("href")).toBe("/telemetry?tab=machine");
     expect(container.querySelector(".mac-warning")).toBeNull();
   });
 
@@ -158,6 +158,15 @@ describe("MacRow", () => {
       }),
     );
     await waitFor(() => expect(measures(container).Lock).toBe("free"));
+  });
+
+  it("shows the sparkline's last CPU point until the reading has its own", async () => {
+    const { container } = show(
+      { latest: sample({ cpuPct: null }), warning: null },
+      {},
+      { ...OVERVIEW, machine: { cpu: [10, 30, null], mem: [40, 50, 45], diskFreeGb: 412 } },
+    );
+    await waitFor(() => expect(measures(container).CPU).toBe("30%"));
   });
 
   it("draws a thirty-minute sparkline for each measure that has history", async () => {

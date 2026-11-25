@@ -82,7 +82,7 @@ describe("BUILD_NOTES for the guard, test lock and crew PRs", () => {
       panel: "machP",
       cls: "proven",
       label: "Test lock",
-      note: "Live: agents' full suites take the test lock one at a time; one in the background waits for the lock the same way and keeps it until the seat's turn ends, and one still waiting after 10 minutes is refused with a hint to run a single test file.",
+      note: "Live: agents' full suites take the test lock one at a time; one in the background waits for the lock the same way and keeps it until the seat's turn ends, and one still waiting after 10 minutes is refused with a hint to run one test file now, or the full suite later.",
     });
     expect(BUILD_NOTES).toContainEqual({
       panel: "tLock",

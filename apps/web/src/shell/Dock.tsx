@@ -67,10 +67,6 @@ function DockMeta({ flight }: { flight: FlightView | undefined }) {
   );
 }
 
-/**
- * FLIGHT's dock (catalogue §1.4): a 380px column on wide screens, a drawer with a scrim below
- * 1200px. With no FLIGHT seat configured the conversation is empty and the input is switched off.
- */
 /** The widths with two columns and no room for FLIGHT beside them. Below, the Overview stacks. */
 const OVERVIEW_COVER_QUERY = "(min-width: 1500px) and (max-width: 2199px)";
 
@@ -90,6 +86,10 @@ export function useOverviewDockOverlay(overview: boolean, dock: ReturnType<typeo
   return overview && dock.wide && dock.visible && !dock.collapsed && covers;
 }
 
+/**
+ * FLIGHT's dock (catalogue §1.4): a 380px column on wide screens, a drawer with a scrim below
+ * 1200px. With no FLIGHT seat configured the conversation is empty and the input is switched off.
+ */
 export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
   const { visible, wide, collapsed, toggle } = useDock();
   // Esc folds the cover from anywhere on the page, and the page behind stays usable.
