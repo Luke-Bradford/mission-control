@@ -38,6 +38,7 @@ import {
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
+  CHATTER_NOTE_PREFIX,
   type CiRunView,
   COMMS_CAPCOM,
   COMMS_OPEN_PREFIX,
@@ -548,6 +549,13 @@ export class Store {
       statement: (sql) => this.statement(sql),
       run: (id) => this.run(id),
       raiseNote: (n) => this.raiseNote(n),
+      chatterNoteKeys: () =>
+        this.statement(
+          "SELECT key FROM attention_notes WHERE cleared_at IS NULL AND substr(key, 1, ?) = ?",
+        )
+          .all(CHATTER_NOTE_PREFIX.length, CHATTER_NOTE_PREFIX)
+          .map((r) => r.key as string),
+      clearNote: (key, at) => this.clearNote(key, at),
     });
   }
 

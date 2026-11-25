@@ -1023,6 +1023,82 @@ describe("Comms API", () => {
     });
   });
 
+  describe("a round note", () => {
+    const ticket = "shop-app#706";
+    const KEY = `chatter:${ticket}:alpha:beta`;
+    const MIN = 60_000;
+    const chatterNotes = () => store.notes().filter((note) => note.key.startsWith("chatter:"));
+    let said = 0;
+    const round = (at: number, on = ticket, a = "alpha", b = "beta") => {
+      commsRow(a, b, `question ${said++}`, at, on);
+      commsRow(b, a, `reply ${said++}`, at, on);
+    };
+    const rounds = (n: number, at: number, on = ticket, a = "alpha", b = "beta") => {
+      for (let i = 0; i < n; i++) round(at, on, a, b);
+    };
+
+    it("clears once the pair is quiet for the window, on another pair's message, and is raised again", () => {
+      const T = clock; // commsRow moves `clock` on with every row
+      rounds(7, T);
+      rounds(7, T, "shop-app#708", "gamma", "delta");
+      expect(chatterNotes()).toHaveLength(2);
+      // the other pair keeps talking
+      round(T + HOUR, "shop-app#708", "gamma", "delta");
+      // exactly the window after the quiet pair's last message: still open
+      commsRow("omega", "alpha", "a message with no ticket", T + 2 * HOUR);
+      expect(chatterNotes()).toHaveLength(2);
+      // one millisecond later only the quiet pair's note goes, with nobody dismissing it
+      round(T + 2 * HOUR + 1, "shop-app#708", "gamma", "delta");
+      expect(chatterNotes().map((note) => note.key)).toEqual(["chatter:shop-app#708:delta:gamma"]);
+      rounds(7, T + 5 * HOUR);
+      expect(chatterNotes().map((note) => note.key)).toContain(KEY);
+    });
+
+    it("is raised anew, undismissed, when the quiet pair itself is the next to speak", () => {
+      const T = clock;
+      rounds(7, T);
+      expect(store.dismissNote(KEY, T + MIN)).toBe(true);
+      rounds(7, T + 3 * HOUR);
+      const note = chatterNotes()[0];
+      expect(note?.at).toBe(T + 3 * HOUR);
+      expect(note?.dismissedAt).toBeNull();
+    });
+
+    it("clears on a ticket stored with no repo, and such a note belongs to no repo", () => {
+      const T = clock;
+      rounds(7, T, "#706");
+      rounds(7, T, "PR 12", "gamma", "delta");
+      expect(chatterNotes().map((note) => [note.key, note.repoId])).toEqual([
+        ["chatter:#706:alpha:beta", null],
+        ["chatter:PR 12:delta:gamma", null],
+      ]);
+      commsRow("omega", "alpha", "a message with no ticket", T + 3 * HOUR);
+      expect(chatterNotes()).toEqual([]);
+    });
+
+    it("stays, and stays dismissed, while the pair keeps talking past the first window", () => {
+      const T = clock;
+      rounds(6, T);
+      round(T + 115 * MIN);
+      expect(chatterNotes()).toHaveLength(1);
+      expect(store.dismissNote(KEY, T + 116 * MIN)).toBe(true);
+      // the six early rounds have left the window, so the pair is back under the limit, but talking
+      commsRow("omega", "alpha", "a message with no ticket", T + 121 * MIN);
+      round(T + 122 * MIN);
+      rounds(6, T + 123 * MIN);
+      const note = chatterNotes()[0];
+      expect(note?.at).toBe(T + 115 * MIN);
+      expect(note?.dismissedAt).toBe(T + 116 * MIN);
+    });
+
+    it("is not cleared by a message stored with a time before the pair's last one", () => {
+      const T = clock;
+      rounds(7, T);
+      commsRow("omega", "alpha", "stored late with an earlier time", T - 3 * HOUR);
+      expect(chatterNotes()).toHaveLength(1);
+    });
+  });
+
   it("does not flag chatter whose seven rounds span more than two hours", async () => {
     const ticket = "shop-app#706";
     for (let round = 0; round < 7; round++) {
