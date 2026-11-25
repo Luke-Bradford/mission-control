@@ -48,7 +48,8 @@ const ACTIVITY_FULL_LOAD_MS = 60_000;
 const enc = encodeURIComponent;
 const OVERVIEW_TOPICS: readonly Topic[] = ["agents", "boards", "limits", "attention", "machine"];
 const AGENT_DETAIL_TOPICS: readonly Topic[] = ["agents", "attention", "boards"];
-const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention"];
+// A plan decision changes the ticket's plan, so the ticket page reads again on "plans" too.
+const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention", "plans"];
 const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
 const INSTRUCTION_TOPICS: readonly Topic[] = ["flight", "config", "agents"];
 const ORDER_TOPICS: readonly Topic[] = ["flight", "config"];
@@ -396,12 +397,12 @@ export const ACTIONS = {
   addRepo: "/api/repos",
   /** Atomically writes a new/converted repo, its setup fields and optional empty crew session. */
   onboardRepo: "/api/repos/onboard",
-  /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
   approvePlan: (repoId: string, issue: number | string) =>
     `/api/plans/${enc(repoId)}/${issue}/approve`,
   /** Body `{ note }`. */
   sendBackPlan: (repoId: string, issue: number | string) =>
     `/api/plans/${enc(repoId)}/${issue}/send-back`,
+  /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
   repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
   hubSettings: "/api/config/settings",
   removeRepo: (repoId: string) => `/api/repos/${enc(repoId)}`,

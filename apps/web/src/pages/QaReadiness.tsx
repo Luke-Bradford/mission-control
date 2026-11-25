@@ -412,7 +412,6 @@ function Detail({
         pr={pr.number}
         head={pr.headSha}
         awaiting={awaiting}
-        ticket={pr.ticket}
       >
         {pageChanges === true && visualEvidenceAvailable && (
           <Pairs
@@ -429,7 +428,10 @@ function Detail({
         {pageChanges === true && !visualEvidenceAvailable && (
           <p className="uat-queue-none">Screenshot evidence is unavailable for this repository.</p>
         )}
-        {pageChanges === false && <p className="uat-queue-none">No page changes</p>}
+        {/* With no changed paths captured, "no page changes" is not known: Impact says why. */}
+        {pageChanges === false && Boolean(data?.files?.length) && (
+          <p className="uat-queue-none">No page changes</p>
+        )}
         <div className="uat-grid-two uat-tests-grid">
           <Tests data={data} checks={fullPr?.checks ?? []} />
           <Panel title="Rework timeline">

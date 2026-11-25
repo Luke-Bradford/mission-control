@@ -392,8 +392,9 @@ export function NativeQaHistory({ id, identity }: { id: string; identity: string
                   <summary>{test.command}</summary>
                   <p>{test.file ?? "File not recorded"}</p>
                   <p>
-                    Reported: {test.passed} passed · {test.failed} failed · {test.skipped} skipped ·{" "}
-                    {test.duration} ms
+                    {/* The report tool names no unit for duration, so none is claimed here. */}
+                    Reported: {test.passed} passed · {test.failed} failed · {test.skipped} skipped ·
+                    duration {test.duration}
                   </p>
                 </details>
               ))}
