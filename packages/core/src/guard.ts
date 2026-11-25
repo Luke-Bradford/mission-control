@@ -3109,8 +3109,8 @@ function shellWriteTargets(program: string, args: readonly string[]): string[] |
       else if (arg.startsWith(`${long}=`)) paths.push(arg.slice(long.length + 1));
       else if (arg.startsWith(short) && arg.length > short.length)
         paths.push(arg.slice(short.length));
-      else if (short === "-o") {
-        const cluster = /^-[a-zA-Z]*?o(.*)$/.exec(arg);
+      else if (short === "-o" || short === "-O") {
+        const cluster = new RegExp(`^-[a-zA-Z]*?${short[1]}(.*)$`).exec(arg);
         if (cluster) paths.push(cluster[1] || args[++n] || "");
       }
     }
@@ -3127,7 +3127,13 @@ function shellWriteTargets(program: string, args: readonly string[]): string[] |
     const files = paths.filter((path) => path !== "-");
     return files.length ? files : null;
   }
-  if (program === "wget") return output("-O", "--output-document");
+  if (program === "wget") {
+    // a spider check saves nothing, and `-O -` writes to stdout
+    if (args.includes("--spider")) return null;
+    const paths = output("-O", "--output-document");
+    if (paths.length > 0 && paths.every((path) => path === "-")) return null;
+    return paths.filter((path) => path !== "-");
+  }
   if (program === "sed" || program === "perl") {
     if (!args.some((arg) => /^-[a-zA-Z]*i|^--in-place(?:=|$)/.test(arg))) return null;
     const files: string[] = [];
@@ -3228,6 +3234,11 @@ export function flightShellWrite(command: string): boolean {
     }
     if (program === "curl") {
       if (args.some((a) => /^(?:-X|--request|-d|--data|-F|--form|-T|--upload-file|--json)/.test(a)))
+        return true;
+      continue;
+    }
+    if (program === "wget") {
+      if (args.some((a) => /^--(?:post-data|post-file|method|body-data|body-file)/.test(a)))
         return true;
       continue;
     }

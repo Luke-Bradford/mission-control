@@ -310,6 +310,17 @@ describe("flightShellBreakerWrite", () => {
       false,
     );
   });
+  it.each([
+    "wget -O - https://example.test",
+    "wget -qO- https://example.test",
+    "wget --spider https://example.test",
+  ])("does not count wget output to stdout, or a spider check, as a write: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(false);
+  });
+  it("still counts a plain wget download, or a wget POST, as a write", () => {
+    expect(flightShellWrite("wget https://example.test/file")).toBe(true);
+    expect(flightShellWrite("wget -O - --post-data=x https://example.test")).toBe(true);
+  });
   it("counts a write through a symlink to an outside destination", () => {
     expect(
       flightShellBreakerWrite("touch linked/file", {
