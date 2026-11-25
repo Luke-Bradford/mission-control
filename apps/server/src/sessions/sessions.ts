@@ -39,6 +39,8 @@ const READS_AT_ONCE = 4;
 /** An app's answer is kept this long. */
 const PROBE_CACHE_MS = 5000;
 const PROBE_TIMEOUT_MS = 2000;
+/** A workspace's status or screen read still out this long after a view starts is dropped, so one stalled cmux call never holds the list past the 5 s first view. */
+const FIELD_DEADLINE_MS = 3000;
 /** The tail of a transcript searched for the agent's last words. */
 const TRANSCRIPT_TAIL_BYTES = 64 * 1024;
 /** The screen lines a shell's last line is looked for in. */
@@ -87,6 +89,8 @@ export interface SessionsDeps {
   alive?: (pid: number) => boolean;
   /** Whether a session is told when its app stops answering (default true; off in a preview hub). */
   tellApps?: boolean;
+  /** How long a view waits for each workspace's status and screen reads; default 3 s. */
+  fieldDeadlineMs?: number;
   now?: () => number;
   log?: (m: string) => void;
 }
@@ -311,19 +315,22 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     agent: CmuxAgent | null,
     inbox: readonly CmuxInboxMessage[],
     seats: readonly string[],
+    late: Promise<void>,
   ): Promise<CmuxSessionRow> {
     const state: CmuxSessionState = agent === null ? "no-agent" : STATE_OF[agent.lifecycle];
     const folder = agent?.cwd ?? ws.cwd;
+    const byDeadline = <T>(read: Promise<T>, fallback: T) =>
+      Promise.race([read.catch(() => fallback), late.then(() => fallback)]);
     const [since, repo, statuses] = await Promise.all([
       sinceOf(ws.id, state, agent),
       folder === null ? null : repoOf(folder),
-      cmux.statuses(ws.id).catch(() => ({}) as Record<string, string>),
+      byDeadline(cmux.statuses(ws.id), {} as Record<string, string>),
     ]);
     let lastLine: string | null = null;
     if (agent !== null && transcriptOk(agent.transcriptPath))
       lastLine = await transcriptLine(agent.transcriptPath);
     if (lastLine === null)
-      lastLine = lastScreenLine(await cmux.readScreen(ws.id, SCREEN_TAIL_LINES).catch(() => ""));
+      lastLine = lastScreenLine(await byDeadline(cmux.readScreen(ws.id, SCREEN_TAIL_LINES), ""));
     const statusKey = Object.keys(statuses).find((k) => k !== SESSION_APP_STATUS_KEY);
     const url = statuses[SESSION_APP_STATUS_KEY]?.trim();
     const app =
@@ -388,6 +395,10 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     const up = await cmux.ping();
     if (up === "denied") return { ok: false, at, error: CMUX_REFUSED_TEXT };
     if (up === "down") return { ok: false, at, error: CMUX_NOT_RUNNING_TEXT };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<void>((done) => {
+      timer = setTimeout(done, deps.fieldDeadlineMs ?? FIELD_DEADLINE_MS);
+    });
     try {
       const [workspaces, agents, inbox] = await Promise.all([
         cmux.workspaces(),
@@ -396,13 +407,15 @@ export function createSessions(deps: SessionsDeps): SessionsService {
       ]);
       const seats = deps.seatIds();
       const rows = await inTurns(workspaces, READS_AT_ONCE, (ws) =>
-        rowOf(ws, agentOf(agents, ws.id), inbox, seats),
+        rowOf(ws, agentOf(agents, ws.id), inbox, seats, late),
       );
       for (const id of seen.keys()) if (!rows.some((r) => r.id === id)) seen.delete(id);
       if (deps.tellApps !== false) await tellApps(rows);
       return { ok: true, at, sessions: sortSessions(rows) };
     } catch (e) {
       return { ok: false, at, error: e instanceof Error ? e.message : String(e) };
+    } finally {
+      clearTimeout(timer);
     }
   }
 

@@ -106,6 +106,32 @@ describe("sessions view", () => {
     );
   });
 
+  it("a stalled status or screen read drops out by the deadline instead of holding the list", async () => {
+    const fake = fakeCmux(dir, threeSessions());
+    const stalled = new Proxy(fake.cmux, {
+      get(target, key, receiver) {
+        if (key === "statuses" || key === "readScreen")
+          return (id: string, ...rest: unknown[]) =>
+            id === SHELL
+              ? new Promise(() => {})
+              : (Reflect.get(target, key, receiver) as (...a: unknown[]) => unknown).call(
+                  target,
+                  id,
+                  ...rest,
+                );
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const { sessions } = setup(threeSessions(), { cmux: stalled, fieldDeadlineMs: 300 });
+    const t0 = Date.now();
+    const view = await sessions.view();
+    expect(Date.now() - t0).toBeLessThan(2000);
+    if (!view.ok) throw new Error(view.error);
+    const by = Object.fromEntries(view.sessions.map((r) => [r.name, r]));
+    expect(by["dev server"]).toMatchObject({ state: "no-agent", lastLine: null, status: null });
+    expect(by["GUIDO-1 · PR 12"]).toMatchObject({ lastLine: "Allow this edit?" });
+  });
+
   it("an operator's workspace is listed as theirs and never closed", async () => {
     const { fake, sessions } = setup(threeSessions());
     expect("close" in sessions).toBe(false);
