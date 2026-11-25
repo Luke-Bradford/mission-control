@@ -13,7 +13,7 @@ function inView<T extends { agentId: AgentId }>(scope: Scope, rows: T[]): T[] {
 export function ToolLatency({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const ms = (v: number | null): string => (v === null ? DASH : dur(v));
   return (
-    <Panel id="tLat" title="Tool latency" sub="p50 and p95 per tool">
+    <Panel id="tLat" title="Tool latency" sub="p50 and p95 per tool, most calls first">
       {!t ? (
         <p className="pb s muted">{scope.wait}</p>
       ) : t.toolLatency.length === 0 ? (
@@ -24,7 +24,9 @@ export function ToolLatency({ t, scope }: { t: Telemetry | undefined; scope: Sco
             <thead>
               <tr>
                 <th>Tool</th>
-                <th className="r">Calls</th>
+                <th className="r" aria-sort="descending">
+                  Calls
+                </th>
                 <th className="r">p50</th>
                 <th className="r">p95</th>
                 <th className="r">Failed</th>
@@ -57,7 +59,7 @@ export function ToolLatency({ t, scope }: { t: Telemetry | undefined; scope: Sco
 export function Subagents({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const rows = t ? inView(scope, t.subagents) : [];
   return (
-    <Panel id="tSubs" title="Subagents" sub="spawned by the crew today">
+    <Panel id="tSubs" title="Subagents" sub="spawned by the crew today, oldest first">
       {!t ? (
         <p className="pb s muted">{scope.wait}</p>
       ) : rows.length === 0 ? (

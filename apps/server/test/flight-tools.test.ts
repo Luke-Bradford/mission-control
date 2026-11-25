@@ -20,6 +20,7 @@ import {
   briefSavedDecision,
   briefSavedText,
   briefTooLongText,
+  CHATTER_NOTE_PREFIX,
   CI_LOG_EMPTY,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
@@ -102,6 +103,7 @@ import {
   MC_TICKET_READERS_ONLY,
   MC_TOOLS,
   MERGE_HOLD_PARK,
+  moveUnreadableText,
   NEW_LOOP,
   NOT_ON_BOARD,
   needsYouItems,
@@ -1496,7 +1498,7 @@ describe("add_review_evidence", () => {
     expect(ghCalls.every((call) => call[0] === "api" && !call.includes("--method"))).toBe(true);
   });
 
-  it("keeps a stored release-removal retry when a picture is added", async () => {
+  it("keeps a stored release-removal retry and the variants when a picture is added", async () => {
     reviewEvidence.save(
       {
         repoId: "mc",
@@ -1505,6 +1507,7 @@ describe("add_review_evidence", () => {
         mainSha: MAIN,
         capturedAt: NOW,
         pairs: [],
+        variants: [{ scheme: "dark", width: 1600 }],
         releaseRemoval: true,
       },
       [],
@@ -1540,6 +1543,9 @@ describe("add_review_evidence", () => {
       basis: "Checked the committed PNG.",
     });
     expect(reviewEvidence.manifest("mc", 9, SHA)?.releaseRemoval).toBe(true);
+    expect(reviewEvidence.manifest("mc", 9, SHA)?.variants).toEqual([
+      { scheme: "dark", width: 1600 },
+    ]);
   });
 
   it("refuses a changed head and a blob that is not PNG", async () => {
@@ -2017,6 +2023,27 @@ describe("answer_question", () => {
     expect(decisions()).toHaveLength(1);
   });
 
+  it("passes a question whose earlier operator brief left it unpassed", async () => {
+    const id = ask();
+    store.addBrief({
+      key: `ask:${id}`,
+      for: "operator",
+      by: "hub",
+      at: NOW - 1,
+      ask: "Which lane?",
+      context: "A seat asked which lane.",
+      recommendation: "Lane 2.",
+      basis: "Legacy brief.",
+      options: [
+        { id: "two", label: "Lane 2", answer: "Lane 2." },
+        { id: "one", label: "Lane 1", answer: "Lane 1." },
+      ],
+    });
+    expect(store.question(id)?.passedAt).toBeNull();
+    expect(await passUp(id)).toEqual({ text: BRIEFED_TEXT });
+    expect(store.question(id)?.passedAt).toBe(NOW);
+  });
+
   it("refuses an answer with a pass, or neither", async () => {
     const id = ask();
     expect(await call("answer_question", A(id, { pass_to_operator: true }))).toEqual(
@@ -2292,6 +2319,12 @@ describe("start_seat", () => {
         text: expect.stringMatching(/^Assigned mc#7: /),
       },
     ]);
+  });
+
+  it("records the start for the silence alarm", async () => {
+    expect(store.silenceEventLastSeen("seat-run-started")).toBeNull();
+    await start();
+    expect(store.silenceEventLastSeen("seat-run-started")).toBe(NOW);
   });
 
   it("starts with no options when the engine is off", async () => {
@@ -4536,16 +4569,18 @@ describe("promote", () => {
     readImpl = () => {
       throw new Error("down");
     };
-    expect(await call("promote", P())).toEqual(refused("Not moved: mc#7 is not on the board."));
+    expect(await call("promote", P())).toEqual(refused(moveUnreadableText("mc#7")));
     expect(moveCalls).toEqual([]);
   });
 
-  it("refuses a card whose re-read fails", async () => {
+  it("refuses a card whose re-read fails, saying it could not be read", async () => {
     board();
     readImpl = () => {
       throw new Error("down");
     };
-    expect(await call("promote", P())).toEqual(refused("Not moved: mc#7 is not on the board."));
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7's card could not be read; try again."),
+    );
     expect(moveCalls).toEqual([]);
   });
 
@@ -4659,6 +4694,17 @@ describe("create_ticket", () => {
       "--limit=1000",
     ]);
     expect(ghCalls[0]?.some((a) => a.startsWith("--search"))).toBe(false);
+  });
+
+  it("files nothing when the open issues cannot be read whole", async () => {
+    for (const stdout of ["not json", '{"number":1}', '[{"title":"Server: fix the flake"}]']) {
+      ghImpl = async (a) =>
+        a[0] === "issue" && a[1] === "list"
+          ? { code: 0, stdout, stderr: "" }
+          : { code: 0, stdout: "https://github.com/o/mc/issues/42\n", stderr: "" };
+      expect(await call("create_ticket", C())).toHaveProperty("isError", true);
+    }
+    expect(ghCalls.filter((a) => a[1] === "create")).toEqual([]);
   });
 
   it("serialises calls, so the duplicate check sees the earlier call's issue", async () => {
@@ -7963,6 +8009,43 @@ describe("superuser housekeeping", () => {
     expect(new Set([texts[0], texts[1], texts[2], texts[4], failed]).size).toBe(5);
     for (const text of texts) expect(text).not.toBe("This item is protected or unavailable.");
   });
+  it("judges a Comms question's always_ask ticket on its live card, not the cache", async () => {
+    elevated();
+    nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+    rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+    // the cache predates the operator's always_ask label
+    board(card(913));
+    const add = () => {
+      const m = store.addComms({
+        at: nowMs - 50 * 60_000,
+        from: "guido-1",
+        to: "CAPCOM",
+        ticket: "mc#913",
+        text: "A question",
+        label: "question",
+      });
+      if (m === null) throw new Error("message was not stored");
+      return `comms-open:${m.id}`;
+    };
+    readImpl = (n) => card(n, { labels: ["approval:operator"] });
+    expect(await call("dismiss_item", { key: add(), basis: "Resolved." })).toHaveProperty(
+      "isError",
+      true,
+    );
+    readImpl = () => {
+      throw new Error("down");
+    };
+    expect(await call("dismiss_item", { key: add(), basis: "Resolved." })).toHaveProperty(
+      "isError",
+      true,
+    );
+    // the same question on a live card without the label is settled
+    readImpl = (n) => card(n);
+    expect(await call("dismiss_item", { key: add(), basis: "Resolved." })).not.toHaveProperty(
+      "isError",
+      true,
+    );
+  });
   it("settles FLIGHT's own stale Comms item with its reason", async () => {
     elevated();
     nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
@@ -8140,6 +8223,38 @@ describe("superuser housekeeping", () => {
     const r = await call("dismiss_item", { key: `note:${HUB_UPDATE_HELD_KEY}` });
     expect(r).toHaveProperty("isError", true);
     expect(JSON.stringify(r)).not.toContain("No open item with that key");
+  });
+  it("finds and dismisses a repo-less note that is not an Update note", async () => {
+    elevated();
+    store.raiseNote({
+      key: "hub:info",
+      kind: "ready",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "The hub noticed something.",
+      at: NOW,
+    });
+    expect(await call("dismiss_item", { key: "note:hub:info" })).not.toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(store.notes().find((n) => n.key === "hub:info")?.dismissedAt).toBe(NOW);
+  });
+  it("dismisses a chatter note: it holds nobody's work", async () => {
+    elevated();
+    const key = `${CHATTER_NOTE_PREFIX}mc#7:guido-1:retro-1`;
+    store.raiseNote({
+      key,
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: "mc",
+      text: "guido-1 and retro-1 exceeded 5 rounds on mc#7.",
+      at: NOW,
+    });
+    expect(await call("dismiss_item", { key: `note:${key}` })).not.toHaveProperty("isError", true);
+    expect(store.notes().find((n) => n.key === key)?.dismissedAt).toBe(NOW);
   });
   it.each(["stopped", "account", "approval"])(
     "dismiss_item respects real %s records even for ended runs",
@@ -10142,7 +10257,10 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       board(card(7));
       ghImpl = async (a) => ({
         code: 0,
-        stdout: a[1]?.includes("milestones") ? JSON.stringify([{ number: 3, title: "M1" }]) : "",
+        // every page of milestones, as `--paginate --slurp` gives them: M1 is on the second
+        stdout: a[1]?.includes("milestones")
+          ? JSON.stringify([[{ number: 1, title: "M0" }], [{ number: 3, title: "M1" }]])
+          : "",
         stderr: "",
       });
       const r = await call("set_fields", {
@@ -10160,6 +10278,9 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         labels: ["area:server", "lane:home"],
         milestone: 3,
       });
+      expect(ghCalls.find((a) => a[1]?.includes("milestones"))).toEqual(
+        expect.arrayContaining(["--paginate", "--slurp"]),
+      );
       expect(await call("set_fields", { issue: 7 })).toHaveProperty("isError", true);
     });
     it("fails closed when the live card cannot be read, whatever the cache says", async () => {

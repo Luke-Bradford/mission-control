@@ -1,10 +1,11 @@
 import type { CrewRow, FlightView, PromptWakeCost, RunLoopView } from "@mc/core";
-import { PROMPT_SECTIONS } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { FLIGHT_VIEW_LIMIT, PROMPT_SECTIONS } from "@mc/core";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PromptTab } from "../src/agent/PromptTab.tsx";
 import { hub, RESOURCES } from "../src/data.ts";
-import { PromptWakes } from "../src/flight/PromptWakes.tsx";
+import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
+import { NO_WAKE_SECTION_DATA, PromptWakes } from "../src/flight/PromptWakes.tsx";
 import { hhmm } from "../src/fmt.ts";
 import { NO_SECTION_DATA, PROMPT_SECTION_LABEL, PromptCostBar } from "../src/hud/PromptCost.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -73,7 +74,20 @@ it("the Agent tab says a run from before the accounting has no section data", as
   stubFetch({ [RESOURCES.runLoop("run-1").path]: loopView(undefined) });
   render(<PromptTab row={seat()} />);
   expect(await screen.findByText(NO_SECTION_DATA)).toBeTruthy();
-  stubFetch({ [RESOURCES.runLoop("run-1").path]: loopView([]) });
+});
+
+it("the Agent tab keeps the last figures and marks them stale when a refresh fails", async () => {
+  stubFetch({ [RESOURCES.runLoop("run-2").path]: loopView([wake(0)]) });
+  render(<PromptTab row={crewRow({ run: { id: "run-2" } as never })} />);
+  await screen.findByText("8,200 tokens");
+  stubFetch({
+    [RESOURCES.runLoop("run-2").path]: () => ({ status: 500, body: { error: "boom" } }),
+  });
+  await act(async () => {
+    hub.refetch(RESOURCES.runLoop("run-2").path);
+  });
+  await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Stale"));
+  expect(screen.getByText("8,200 tokens")).toBeTruthy();
 });
 
 it("the Agent tab for a seat with no run names that, and a failed load offers Retry", async () => {
@@ -100,7 +114,7 @@ it("the FLIGHT panel lists a bar for each wake, newest first", async () => {
   expect(wakes).toHaveLength(3);
   // Newest first, whatever order the hub sent.
   expect(wakes.map((w) => w.querySelector("h3")?.textContent)).toEqual([
-    expect.stringContaining("Wake 0"),
+    expect.stringContaining("Start"),
     expect.stringContaining("Wake 1"),
     expect.stringContaining("Wake 2"),
   ]);
@@ -109,15 +123,35 @@ it("the FLIGHT panel lists a bar for each wake, newest first", async () => {
   expect(wakes[0]?.textContent).toContain(hhmm(NOW, "Europe/London"));
 });
 
+it("the FLIGHT panel says the hub sends at most its limit, and counts a full list as a floor", async () => {
+  stubFetch({
+    [RESOURCES.config.path]: CREW_CONFIG,
+    [RESOURCES.flight.path]: flightWith(
+      Array.from({ length: FLIGHT_VIEW_LIMIT }, (_, n) => wake(n + 1)),
+    ),
+  });
+  render(<PromptWakes />);
+  expect(await screen.findByText(`${FLIGHT_VIEW_LIMIT}+ wakes`)).toBeTruthy();
+  expect(document.querySelector("#promptP")?.textContent).toContain(`at most ${FLIGHT_VIEW_LIMIT}`);
+});
+
 it("the FLIGHT panel says there is no section data when no wake was recorded", async () => {
   stubFetch({
     [RESOURCES.config.path]: CREW_CONFIG,
     [RESOURCES.flight.path]: flightWith(undefined),
   });
   render(<PromptWakes />);
-  expect(
-    await screen.findByText(NO_SECTION_DATA.replace("this run", "FLIGHT's wakes")),
-  ).toBeTruthy();
+  expect(await screen.findByText(NO_WAKE_SECTION_DATA)).toBeTruthy();
+});
+
+it("the FLIGHT panel says FLIGHT has no seat when none is configured", async () => {
+  stubFetch({
+    [RESOURCES.config.path]: CREW_CONFIG,
+    [RESOURCES.flight.path]: { seat: null, decisions: [], promptWakes: [] },
+  });
+  render(<PromptWakes />);
+  expect(await screen.findByText(FLIGHT_NO_SEAT)).toBeTruthy();
+  expect(screen.queryByText(/wakes?$/)).toBeNull();
 });
 
 it("the FLIGHT panel marks stale figures when a refresh fails", async () => {
@@ -137,5 +171,4 @@ it("the FLIGHT panel marks stale figures when a refresh fails", async () => {
   });
   await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Stale"));
   expect(screen.getByText("8,200 tokens")).toBeTruthy();
-  fireEvent.click(document.body);
 });

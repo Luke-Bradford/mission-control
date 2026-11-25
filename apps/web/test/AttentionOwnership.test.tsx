@@ -53,6 +53,9 @@ it("names the loop owner in Overview, with one reachable action for fifty asks",
   expect(need.textContent).toContain("Decision for studio · 50 items");
   expect(need.textContent).not.toContain("needs you");
   expect(within(need).getAllByRole("button")).toHaveLength(1);
-  expect(within(need).queryByRole("button", { name: "Answer" })).toBeNull();
+  // No Answer anywhere on the loop's row, not just in its need cell.
+  expect(
+    within(need.closest(".trow") as HTMLElement).queryByRole("button", { name: "Answer" }),
+  ).toBeNull();
   expect(needOwnerLabel(row, items)).toBe("has an item to resolve");
 });

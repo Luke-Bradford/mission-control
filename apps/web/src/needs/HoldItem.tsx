@@ -20,7 +20,7 @@ const pathFor = (action: AttentionAction, key: string): string =>
 const labelFor = (action: AttentionAction): string =>
   action === "clear" ? "Clear" : ACTION_LABEL[action];
 
-/** Set aside or close only the actions the server has offered for this open question. */
+/** The actions the server has offered for this open question, plus Clear, which every question has. */
 export function HoldItem({ item }: { item: AttentionItem }) {
   const [busy, setBusy] = useState<AttentionAction | null>(null);
   const [error, setError] = useState<string | null>(null);

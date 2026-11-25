@@ -2228,6 +2228,34 @@ describe("refusals", () => {
     expect(h.endedRuns).toContain(RUN);
   });
 
+  it("tells the seat the install note that came with a worktree move", async () => {
+    h.descends = true;
+    h.fastForwardResult = {
+      ok: true,
+      installNote: "dependencies may have changed; install not run",
+    };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    const told = h.sent.filter((m) => m.key.includes(":branch-moved:"));
+    expect(told).toHaveLength(1);
+    expect(told[0]?.text).toContain("Your branch moved to");
+    expect(told[0]?.text).toContain("dependencies may have changed; install not run");
+  });
+
+  it("lets the publisher go of a run ended outside the engine", async () => {
+    report();
+    await h.engine.reconcileRun(RUN);
+    store.setRunEnded(RUN, clock, "ok", "operator");
+    seatIdle(null);
+    await h.engine.reconcileRun(RUN);
+    expect(h.endedRuns).toContain(RUN);
+  });
+
   it("a head added on top long after the push gets its own window: the first no is not a park, the next pass adopts it", async () => {
     h.descends = true;
     setPr({ ci: "pending", headSha: SHA });
@@ -3893,6 +3921,27 @@ describe("review round", () => {
       ]);
     });
 
+    it("marks the running tick overrun when one run's pass ends past the interval", async () => {
+      report();
+      const log = tickLogOf(store);
+      const startedAt = clock;
+      log.begin(startedAt);
+      const run = store.run.bind(store);
+      vi.spyOn(store, "run").mockImplementationOnce((id) => {
+        clock += ENGINE_TICK_MS + 1;
+        return run(id);
+      });
+      try {
+        await h.engine.reconcileRun(RUN);
+        expect(h.logs.filter((l) => l.includes("still running"))).toEqual([
+          expect.stringContaining(`reconcile ${REPO} ${RUN} `),
+        ]);
+      } finally {
+        log.end(clock);
+      }
+      expect(log.recent().at(-1)?.overranOn).toEqual([expect.stringContaining(RUN)]);
+    });
+
     it("finishes the tick it records when the tick throws", async () => {
       vi.spyOn(store, "notes").mockImplementation(() => {
         throw new Error("db gone");
@@ -5026,6 +5075,17 @@ describe("the engine runs reviews", () => {
     expect(h.starts).toHaveLength(2);
   });
 
+  it("names the seat that reviewed in the minor list, not the review seat chosen now", async () => {
+    draftWorkspace();
+    await toReview();
+    const id = first().id;
+    seats().push({ ...retroSeat(), id: "retro-2" });
+    need(seats().find((s) => s.id === first().seatId)).retiring = true;
+    reported(id, [finding("Minor")]);
+    await vi.waitFor(() => expect(h.minorCalls).toHaveLength(1));
+    expect(h.minorCalls[0]).toEqual({ id, sha: SHA, retro: CALL });
+  });
+
   it("a clean review raises the ready note and lists the minor findings once", async () => {
     draftWorkspace();
     await toReview();
@@ -5254,6 +5314,25 @@ describe("the engine runs reviews", () => {
     });
 
     describe("a hold on the merge", () => {
+      it("is ok once stored, even when the pass after it throws", async () => {
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        const run = store.run.bind(store);
+        // once the hold is stored, the pass that follows it fails
+        const spy = vi.spyOn(store, "run").mockImplementation((id) => {
+          const row = run(id);
+          if (row?.loop?.mergeHold) throw new Error("db gone");
+          return row;
+        });
+        try {
+          expect(await h.engine.holdMerge(RUN, "FLIGHT", "wait")).toEqual({ ok: true });
+        } finally {
+          spy.mockRestore();
+        }
+        expect(loopOf().mergeHold).toMatchObject({ by: "FLIGHT", reason: "wait" });
+        expect(h.logs.some((l) => l.includes("db gone"))).toBe(true);
+      });
+
       it("parks a clean, green run instead of merging, and merges once released", async () => {
         await toReview();
         expect(await h.engine.holdMerge(RUN, "FLIGHT", "design not approved")).toEqual({
@@ -6917,6 +6996,41 @@ describe("the engine runs reviews", () => {
           note: "again",
         });
         expect(again).toEqual({ lifted: false, reason: "second-review-done" });
+      });
+
+      it("a rereview after the second review failed keeps it on another account", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        expect(await second()).toBe(true);
+        await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
+        await h.engine.reconcileRun(RUN);
+        setLoop({
+          phase: "parked",
+          hold: { kind: "review-failed", reason: "x", ended: false, worktree: null, wake: false },
+        });
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: ["review-failed"],
+            action: "rereview",
+          }),
+        ).toEqual({ lifted: true });
+        expect(loopOf().flightSecondReview?.[SHA]?.epoch).toBe(loopOf().epoch);
+      });
+
+      it("refuses when the first review's seat is gone from the config", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        const gone = first().seatId;
+        seats().splice(
+          seats().findIndex((s) => s.id === gone),
+          1,
+        );
+        const r = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "second_review",
+          note: "x",
+        });
+        expect(r).toEqual({ lifted: false, reason: "no-second-reviewer" });
       });
 
       it("refuses when no reviewer on another account is left", async () => {

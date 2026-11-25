@@ -7,8 +7,13 @@ describe("toolLabel", () => {
   });
 
   it("drops the mcp prefix and the underscores from an mcp tool with no label", () => {
-    expect(toolLabel("mcp__mc__report_evidence")).toBe("report evidence");
-    expect(toolLabel("mcp__other__do_a_thing")).toBe("do a thing");
+    expect(toolLabel("mcp__mc__report_evidence")).toBe("Report evidence");
+    expect(toolLabel("mcp__other__do_a_thing")).toBe("Do a thing");
+  });
+
+  it("reads a server name that holds an underscore", () => {
+    expect(toolLabel("mcp__my_server__screenshot_hud")).toBe("Taking a screenshot");
+    expect(toolLabel("mcp__my_server__list_files")).toBe("List files");
   });
 
   it("leaves a built-in tool as it is", () => {

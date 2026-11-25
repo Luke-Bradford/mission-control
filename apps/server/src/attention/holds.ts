@@ -11,6 +11,7 @@ import {
   DECISION_DEFAULT_WAIT_MS,
   flightFloorBlocked,
   GUARD_ACK_PREFIX,
+  isChatterNoteKey,
 } from "@mc/core";
 import type { z } from "zod";
 import { runAccountId } from "../accounts/bindings.ts";
@@ -237,6 +238,8 @@ export function protectedDecisionItem(
   )
     return true;
   if (item.kind !== "blocked" || commsOpen) return false;
+  // a chatter note says two seats talked past their rounds: it holds nobody's work
+  if (note !== undefined && isChatterNoteKey(note.key)) return false;
   const parked = run?.loop?.hold?.kind;
   // A blocked row is an operator hold unless it can be proved to be an ordinary, non-parked
   // note. Missing source rows are deliberately treated as protected rather than defaulted.

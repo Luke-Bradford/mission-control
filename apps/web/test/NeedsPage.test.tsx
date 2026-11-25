@@ -522,6 +522,13 @@ describe("links and pictures", () => {
     ]);
   });
 
+  it("keeps a plain link to a hub picture route, and leaves out the one drawn as a picture", () => {
+    const shot = `/api/hud-screenshots/${"a".repeat(32)}`;
+    const drawn = `/api/hud-screenshots/${"b".repeat(32)}`;
+    const i = withBrief(`[The shot](${shot}) and ![Drawn](${drawn})`);
+    expect(briefLinks(i).map((l) => l.url)).toEqual([shot]);
+  });
+
   it("makes a remote https image a link and requests nothing", async () => {
     const fetchMock = routes([withBrief("![Layout](https://evil.example/p.png)")]);
     const { container } = render(<Needs item={null} />);

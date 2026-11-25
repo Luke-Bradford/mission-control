@@ -20,6 +20,7 @@ import {
   FieldError,
   fieldProps,
   isUncertain,
+  refusesEntry,
   UNCERTAIN_TEXT,
   useSubmitGuard,
 } from "../components/formSupport.tsx";
@@ -34,7 +35,6 @@ import { useSearch } from "../router.ts";
 import { BuildChips } from "../shell/buildStatus.tsx";
 
 import { openItem } from "../shell/overlays.ts";
-import { toast } from "../shell/Toast.tsx";
 import { PromptTab } from "./PromptTab.tsx";
 import { seatError } from "./seat.ts";
 
@@ -143,9 +143,6 @@ export function Queue({ row }: { row: CrewRow }) {
     setFocusIssue(null);
     setFocusError(null);
     setUncertain(false);
-    toast(
-      'Focus is what FLIGHT assigns from: a lane, labels or a ticket list. Change it here, or tell FLIGHT, e.g. "GUIDO-2: catalog bugs only this week".',
-    );
   };
   const propose = async (move: string, above: string) => {
     setBusy(true);
@@ -228,13 +225,15 @@ export function Queue({ row }: { row: CrewRow }) {
               } catch (e) {
                 const status = e instanceof ApiError ? e.status : undefined;
                 const message = seatError(e);
-                // A refusal is about what was typed: link it to the field. A dropped connection
-                // or a broken server says nothing about the draft, so the field stays unmarked.
+                // A refusal of what was typed is linked to the field. A dropped connection, a
+                // broken server or any other refusal says nothing about the draft: the field
+                // stays unmarked.
                 if (isUncertain(status)) {
                   setFocusError(message);
                   setUncertain(true);
                   hub.refetch(focusRef.path);
-                } else setFocusIssue(message);
+                } else if (refusesEntry(status)) setFocusIssue(message);
+                else setFocusError(message);
                 setFocusKey((key) => key + 1);
               } finally {
                 guard.release();

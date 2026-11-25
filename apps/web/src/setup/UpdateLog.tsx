@@ -9,6 +9,12 @@ type LogState =
   | { kind: "error"; text: string }
   | { kind: "ok"; log: UpdateLog };
 
+/** The reason after "Could not read update.log", without the hub's own copy of those words. */
+const logReason = (text: string): string => {
+  const rest = text.replace(/^could not read update\.log:?\s*/i, "");
+  return rest ? `: ${rest}` : ".";
+};
+
 /** The last update's commands and output, read fresh on each open; Esc closes it and Tab stays inside. */
 export function UpdateLogModal({
   open,
@@ -34,13 +40,16 @@ export function UpdateLogModal({
     const target = returnTo;
     return () => target?.current?.focus();
   }, [open, returnTo]);
+  // Close takes focus when the modal opens, not on each re-read, so Re-read keeps it.
+  useEffect(() => {
+    if (open) close.current?.focus();
+  }, [open]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: read is a trigger: a bump reads the log again
   useEffect(() => {
     if (!open) {
       setState({ kind: "loading" });
       return;
     }
-    close.current?.focus();
     let live = true;
     setState({ kind: "loading" });
     apiGet<UpdateLog>(ACTIONS.updateLog).then(
@@ -62,7 +71,7 @@ export function UpdateLogModal({
     state.kind === "loading"
       ? "Reading update.log…"
       : state.kind === "error"
-        ? `Could not read update.log: ${state.text}`
+        ? `Could not read update.log${logReason(state.text)}`
         : (state.log.text ?? "No update has run on this hub yet.");
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop takes focus from a click, so Tab stays trapped

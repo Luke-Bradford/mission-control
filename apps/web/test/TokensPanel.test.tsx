@@ -290,13 +290,13 @@ describe("TokensPanel verdict: the hub's own rules", () => {
 });
 
 describe("TokensPanel head", () => {
-  it("links the title to Telemetry and shows today's spend", async () => {
+  it("links the title to Telemetry's Cost tab and shows today's spend", async () => {
     const { container } = show([week()], { "/api/metrics": METRICS_VIEW });
     await waitFor(() => expect(container.querySelector(".token-spend")).toBeTruthy());
     const title = within(container.querySelector("#tokensP") as HTMLElement).getByRole("link", {
       name: "Tokens",
     });
-    expect(title.getAttribute("href")).toBe("/telemetry");
+    expect(title.getAttribute("href")).toBe("/telemetry?tab=cost");
     expect(container.querySelector(".token-spend")?.textContent).toBe("~$24.31 today");
   });
 

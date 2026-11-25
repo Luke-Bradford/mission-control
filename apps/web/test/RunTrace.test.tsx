@@ -8,7 +8,7 @@ import {
 } from "@mc/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { RunChecklist, RunTrace } from "../src/agent/RunTrace.tsx";
+import { endSentence, RunChecklist, RunTrace } from "../src/agent/RunTrace.tsx";
 
 const NOW = 1_730_000_000_000;
 const tries: LoopTry[] = [
@@ -258,4 +258,12 @@ describe("Run trace", () => {
     expect(error).not.toHaveBeenCalled();
     error.mockRestore();
   });
+});
+
+it("ends a Next line with one stop, never after a cut mark or another stop", () => {
+  expect(endSentence("Review parked")).toBe("Review parked.");
+  expect(endSentence("Review parked: a long reason cut…")).toBe(
+    "Review parked: a long reason cut…",
+  );
+  expect(endSentence("Review parked: done.")).toBe("Review parked: done.");
 });

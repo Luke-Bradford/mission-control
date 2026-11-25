@@ -197,6 +197,7 @@ import {
   movedText,
   moveFailedText,
   moveNotOnBoardText,
+  moveUnreadableText,
   moveWrongColumnText,
   NEW_LOOP,
   NOT_ON_BOARD,
@@ -465,15 +466,7 @@ export interface FlightToolsDeps {
   engine:
     | (Pick<Engine, "onOperatorMessage" | "status" | "acceptRuling" | "syncMain" | "uncommitted"> &
         Partial<
-          Pick<
-            Engine,
-            | "clearFlight"
-            | "adoptPrHead"
-            | "rerunCi"
-            | "holdMerge"
-            | "releaseMergeHold"
-            | "controllerCheck"
-          >
+          Pick<Engine, "clearFlight" | "adoptPrHead" | "rerunCi" | "holdMerge" | "releaseMergeHold">
         >)
     | null;
   /** The repo's rules (the area labels), as the engine reads them. */
@@ -953,7 +946,10 @@ export function flightCall<S extends z.ZodType>(
   return { ok: true, args: parsed.data };
 }
 
-/** The open issues of a `gh issue list --json=number,title` answer; null when it is not that. */
+/**
+ * The open issues of a `gh issue list --json=number,title` answer; null when it is not that, or
+ * when any row lacks its number or title (a row skipped could be the duplicate).
+ */
 function openIssues(stdout: string): { number: number; title: string }[] | null {
   let parsed: unknown;
   try {
@@ -962,13 +958,14 @@ function openIssues(stdout: string): { number: number; title: string }[] | null 
     return null;
   }
   if (!Array.isArray(parsed)) return null;
-  return parsed.filter(
+  const issues = parsed.filter(
     (i): i is { number: number; title: string } =>
       typeof i === "object" &&
       i !== null &&
       typeof (i as { number?: unknown }).number === "number" &&
       typeof (i as { title?: unknown }).title === "string",
   );
+  return issues.length === parsed.length ? issues : null;
 }
 
 // GitHub's answers are untrusted JSON: each reader takes what has the right type and nothing else.
@@ -1788,6 +1785,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           : START_FAILED,
       );
     }
+    // a FLIGHT or planner start is a seat start for the silence alarm, as the queue's is
+    store.recordSilenceEvent("seat-run-started", now());
     store.addComms({
       at: now(),
       from: ctx.seatId,
@@ -2104,10 +2103,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (!rules.promoteBacklog) return fail(promoteOffText(repo.id));
     const at = now();
     // The card as it is now: an edit_card or a poll may have changed it since the cache was filled.
-    const fresh = await deps.board.read?.(repo.id, issue).catch(() => null);
+    let unreadable = false;
+    const fresh = await deps.board.read?.(repo.id, issue).catch(() => {
+      unreadable = true;
+      return null;
+    });
     // the board is read after that await: a poll may have replaced it while the project was read
     const cached = store.boardItem(repo.id, issue) ?? undefined;
     // a card that cannot be read live is not moved on the cache's word
+    if (unreadable) return fail(moveUnreadableText(ref));
     if (deps.board.read !== undefined && !fresh) return fail(moveNotOnBoardText(ref));
     const card = fresh ?? cached;
     if (card === undefined) return fail(moveNotOnBoardText(ref));
@@ -2343,8 +2347,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         ],
         { cwd },
       );
-      if (listed.code !== 0) return failed("issue list", listed);
-      const same = openIssues(listed.stdout)?.find((i) => i.title === title);
+      const open = listed.code === 0 ? openIssues(listed.stdout) : null;
+      if (open === null) return failed("issue list", listed);
+      const same = open.find((i) => i.title === title);
       if (same !== undefined) return fail(duplicateTitleText(same.number));
 
       if (setsFields) {
@@ -2915,21 +2920,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           const question = ask ? store.question(Number(ask[1])) : null;
           if (structured.for === "flight" && question?.passedAt !== null && question)
             store.unpassQuestion(question.id);
-          if (
-            structured.for === "operator" &&
-            structured.decision?.whyOperator &&
-            question &&
-            !wasOperators
-          ) {
+          if (structured.for === "operator" && structured.decision?.whyOperator && question) {
             if (question.passedAt === null) store.passQuestion(question.id, briefedAt);
-            record(briefedAt, {
-              kind: "pass",
-              seatId: question.agentId,
-              questionId: question.id,
-              about: `${seatCallSign(question.agentId)}: ${question.text}`,
-              decision: PASSED_DECISION,
-              basis,
-            });
+            // a refreshed brief for the operator is not a second pass
+            if (!wasOperators)
+              record(briefedAt, {
+                kind: "pass",
+                seatId: question.agentId,
+                questionId: question.id,
+                about: `${seatCallSign(question.agentId)}: ${question.text}`,
+                decision: PASSED_DECISION,
+                basis,
+              });
           }
           if (
             hold &&
@@ -3745,6 +3747,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           capturedAt: old?.capturedAt ?? now(),
           pairs: old?.pairs ?? [],
           ...(old?.unchanged ? { unchanged: old.unchanged } : {}),
+          ...(old?.variants ? { variants: old.variants } : {}),
           ...(old?.published ? { published: old.published } : {}),
           ...(old?.releaseRemoval ? { releaseRemoval: true as const } : {}),
           submitted: [...(old?.submitted ?? []), ...submitted].filter(
@@ -4037,7 +4040,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.settlePark,
-      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. For a blocking review on floor-enforcing paths, which you cannot accept past, second_review starts one independent review on the most capable model and another reviewer account; its verdict decides (once per head), and your basis is its reason. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds. Accept is refused when the last review failed the design check: only the operator accepts that.`,
+      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. For a blocking review on floor-enforcing paths, which you cannot accept past, second_review starts one independent review on the most capable model and another reviewer account; its verdict decides (once per head), and your note (your basis when you give none) is its reason. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds. Accept is refused when the last review failed the design check: only the operator accepts that.`,
       SettleArgs,
       "settle",
       async (a) => {
@@ -4274,7 +4277,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           if (asked !== undefined && ticketRepoId === repo.id) {
             const rules = await deps.rules(repo.id);
             if (rules instanceof Error) return fail("Cannot read repo rules.");
-            const card = store.boardItem(repo.id, Number(asked));
+            // the live card: the operator may have labelled it since the cache was filled
+            let card: BoardItem | null;
+            try {
+              card =
+                (await deps.board.read?.(repo.id, Number(asked))) ??
+                store.boardItem(repo.id, Number(asked));
+            } catch {
+              return fail("Cannot read the ticket's card.");
+            }
             if (
               card &&
               rules.alwaysAsk.some((g) => card.labels.some((l) => globMatches(g, l, true)))
@@ -4307,12 +4318,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return { text: `Dismissed ${a.key}.` };
         }
         const key = a.key.slice(NOTE_KEY.length);
-        // the Update notes belong to no repo, so the repo filter must not hide them: the items list shows them
+        // a note of no repo (the Update notes among them) is on the items list too: the repo filter must not hide it
         const hubUpdate = key === HUB_UPDATE_HELD_KEY || key === HUB_UPDATE_PERSON_KEY;
         const note = store
           .notes()
           .find(
-            (n) => n.key === key && (hubUpdate || n.repoId === repo.id) && n.dismissedAt === null,
+            (n) =>
+              n.key === key &&
+              (hubUpdate || n.repoId === null || n.repoId === repo.id) &&
+              n.dismissedAt === null,
           );
         if (!note || key.startsWith(GUARD_ACK_PREFIX) || hubUpdate || note.kind === "ratelimit")
           return fail(note ? protectedItem : notFound);

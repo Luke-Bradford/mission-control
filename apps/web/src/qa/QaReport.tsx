@@ -185,11 +185,8 @@ export function CurrentQaReport({
   pr,
   head,
   awaiting,
-  ticket: _ticket,
   children,
 }: {
-  /** Retained for callers while reports carry their signed-off plan directly. */
-  ticket?: string | null;
   repo: string;
   pr: number;
   head: string | null;

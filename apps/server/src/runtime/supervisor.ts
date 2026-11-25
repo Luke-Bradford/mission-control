@@ -79,6 +79,7 @@ import {
   HUD_STATE_LABEL,
   hasPlanSection,
   inferTicket,
+  isHandoverKey,
   isObj,
   isResumeLineKey,
   LOOPBACK_HOST,
@@ -5359,7 +5360,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
       if (!claimed) return "dup";
       try {
-        const inbox = withInbox(seatId, runId, text, isResumeLineKey(key));
+        // a handover turn ends the session: what waits in the inbox is the fresh session's to read
+        const inbox = isHandoverKey(key)
+          ? { text, messageIds: [] }
+          : withInbox(seatId, runId, text, isResumeLineKey(key));
         const envelope = writeLine(l, inbox.text, beforeWrite);
         markInboxRead(seatId, inbox);
         if (cost !== undefined) {

@@ -2407,7 +2407,7 @@ describe("Agent page: header and tile mockup", () => {
     expect((input as HTMLInputElement).disabled).toBe(false);
   });
 
-  it("keeps a rejected rename editable and shows the server validation error", async () => {
+  it("keeps a rejected rename editable and shows the server validation error on the field", async () => {
     stub({
       rows: [seat()],
       extra: SEAT_ROUTES({
@@ -2428,7 +2428,9 @@ describe("Agent page: header and tile mockup", () => {
     );
     fireEvent.change(input, { target: { value: "ORBIT" } });
     fireEvent.submit(input.closest("form") as HTMLFormElement);
-    expect((await screen.findByRole("alert")).textContent).toContain("call signs must be unique");
+    const box = await screen.findByRole("region", { name: "Fix before saving" });
+    expect(box.textContent).toContain("call signs must be unique");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
     expect((input as HTMLInputElement).value).toBe("ORBIT");
   });
 

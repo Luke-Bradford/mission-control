@@ -1,7 +1,7 @@
 import type { AgentDetailView, CrewRow } from "@mc/core";
 import { useState } from "react";
 import { useNow, useTz } from "../clock.ts";
-import { callSign, modelLine, seatStatus, seatTurn } from "../crew.ts";
+import { callSign, isSeatFree, modelLine, seatStatus, seatTurn } from "../crew.ts";
 import { firstLine } from "../fmt.ts";
 import { useRoleLabel } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -120,6 +120,8 @@ export function IdentityBand({ view, connected }: { view: AgentDetailView; conne
   const output = lastOutputText(row, now);
   const [more, setMore] = useState(false);
   const words = row.summary;
+  // A free seat's ticket, branch and words are from its last run, so they say so.
+  const free = row.kind === "crew" && row.role !== "FLIGHT" && isSeatFree(row);
   const subagents = row.digest?.background.filter((b) => b.type === "local_agent").length ?? 0;
   return (
     <section className="panel idb" id="ahead" aria-label={`${row.id} details`}>
@@ -168,14 +170,13 @@ export function IdentityBand({ view, connected }: { view: AgentDetailView; conne
       <p className="idb-strip">
         <span>{row.repoId}</span>
         <span>{modelLine(row)}</span>
-        {row.cli.effort && <span>effort {row.cli.effort}</span>}
-        {row.cli.version && <span>CLI {row.cli.version}</span>}
         <span>{row.accountId}</span>
-        {row.run?.branch && <span className="mono">{row.run.branch}</span>}
+        {row.run?.branch && !free && <span className="mono">{row.run.branch}</span>}
       </p>
       <p className="idb-ticket">
         {row.ticket ? (
           <>
+            {free && <span className="muted">Last run: </span>}
             {view.story.ticketHref ? (
               <a
                 href={view.story.ticketHref}
@@ -190,7 +191,11 @@ export function IdentityBand({ view, connected }: { view: AgentDetailView; conne
             <b>{row.ticketTitle ?? ""}</b>
           </>
         ) : (
-          <span className="muted">No ticket. Free to take the next Ready ticket in its area.</span>
+          <span className="muted">
+            {row.role === "FLIGHT"
+              ? "Watching the crew."
+              : "No ticket. Free to take the next Ready ticket in its area."}
+          </span>
         )}
       </p>
       {words && (
@@ -201,7 +206,7 @@ export function IdentityBand({ view, connected }: { view: AgentDetailView; conne
           onClick={() => setMore(!more)}
           title={more ? "Show less" : "Show all"}
         >
-          <span className="idb-words-h">In its words</span>
+          <span className="idb-words-h">{free ? "Last run, in its words" : "In its words"}</span>
           {words}
         </button>
       )}

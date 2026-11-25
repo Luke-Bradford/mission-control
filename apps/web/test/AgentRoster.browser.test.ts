@@ -244,7 +244,8 @@ describeRendered("Agents roster in a browser", () => {
             scrollHeight: list?.scrollHeight,
           });
         }, null);
-      // The roster list scrolls the chosen seat into view over a few frames, so poll until it settles.
+      // The roster sets its scroll position once, after layout and data settle, so poll until the
+      // chosen seat is in the frame.
       try {
         await vi.waitFor(
           async () => {

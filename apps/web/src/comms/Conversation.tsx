@@ -45,7 +45,7 @@ import {
 import { recordMentionsSeen, useMentions } from "../shell/operatorMessages.ts";
 import { setFlightPageThread } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
-import { CommsEnd, useTokenRenderer } from "./messages.tsx";
+import { CommsEnd, commsName, useTokenRenderer } from "./messages.tsx";
 import { type CommsView, noticeResource, ticketForRef, useNoticeResource } from "./model.ts";
 import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
 import { refRepo, resolveRef } from "./refLinks.ts";
@@ -721,8 +721,7 @@ function StoredContacts({
           key={contact.id}
           onClick={() => navigate(commsContactPath(agentId, contact.id))}
         >
-          {contact.id === COMMS_CAPCOM ? "You" : seatName(contact.id)} ·{" "}
-          {plural(contact.count, "message", undefined, locale)}
+          {commsName(contact.id, seatName)} · {plural(contact.count, "message", undefined, locale)}
           <small>
             {/* only what is addressed to the operator is "unread"; other counts are messages */}
             {contact.id === COMMS_CAPCOM && contact.unread > 0 ? `${contact.unread} unread · ` : ""}
@@ -773,6 +772,7 @@ function ModernConversation({
   onPrefillConsumed?: (token: number) => void;
 }) {
   const [crewEarlier, setCrewEarlier] = useState(false);
+  const nameOf = useSeatName();
   useEffect(() => {
     if (view.kind !== "crew") setCrewEarlier(false);
   }, [view.kind]);
@@ -936,6 +936,7 @@ function ModernConversation({
   const peerAgent =
     view.kind === "contact" && view.contactId !== COMMS_CAPCOM ? view.agentId : null;
   const showPins = view.kind === "crew" || view.kind === "inbox";
+  const shownPins = pins.filter((pin) => !hideNotices || pin.kind !== COMMS_NOTICE);
   const ticketContext = ticket.data?.ticket;
   const ticketBoardPath =
     ticketContext?.repoId !== null &&
@@ -978,14 +979,12 @@ function ModernConversation({
           )}
         </div>
       )}
-      {showPins && pins.length > 0 && (
+      {showPins && shownPins.length > 0 && (
         <div className="comms-pins">
           <b>Pinned</b>
-          {pins
-            .filter((pin) => !hideNotices || pin.kind !== COMMS_NOTICE)
-            .map((pin) => (
-              <PinnedMessage key={pin.id} message={pin} />
-            ))}
+          {shownPins.map((pin) => (
+            <PinnedMessage key={pin.id} message={pin} />
+          ))}
         </div>
       )}
       {view.kind === "crew" && (crewEarlier || crew.data?.hasEarlier || page?.hasMore) && (
@@ -1054,7 +1053,7 @@ function ModernConversation({
             href={commsContactPath(peerAgent, COMMS_CAPCOM)}
             onClick={(event) => followLink(event, commsContactPath(peerAgent, COMMS_CAPCOM))}
           >
-            Your conversation with {peerAgent}
+            Your conversation with {nameOf(peerAgent)}
           </a>
         </p>
       ) : to && view.kind !== "flight" ? (

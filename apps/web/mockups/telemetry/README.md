@@ -14,9 +14,9 @@ Checkpoint 3 of #1178. The operator approves this before any build ticket is fil
 
 Is the crew healthy right now? Overview says what is running. Telemetry says whether levels look normal, and why. The health band answers the first half at a glance; the five tabs answer the second.
 
-## Audit of the current page
+## Audit of the page before the build
 
-Source: `apps/web/src/pages/Telemetry.tsx`, `apps/web/src/telemetry/`, `telemetry()` in `apps/server/src/telemetry.ts`. Fit says whether the form answers the question. Windows differ across the page (now, today, Range, 14 days, latest run), and the Agent, Account and Ticket filters reach only some panels.
+Source: `apps/web/src/pages/Telemetry.tsx`, `apps/web/src/telemetry/`, `telemetry()` in `apps/server/src/telemetry/telemetry.ts`. Fit says whether the form answers the question. Windows differ across the page (now, today, Range, 14 days, latest run), and the Agent, Account and Ticket filters reach only some panels.
 
 | Panel | Question | Data | Form | Fit | Proposal |
 | --- | --- | --- | --- | --- | --- |
@@ -145,7 +145,7 @@ CI green first push, First-pass review, Rounds per PR, and Guard blocks by rule.
 
 ### Machine
 
-CPU and memory with lock bands, Memory pressure and swap, Agent and test-run memory, and the Test lock table. Needs swap and per-run memory series.
+CPU and memory with lock bands, Memory pressure and swap, Agent and test-run memory, and the Test lock table.
 
 Shared by all five: the health band, its verdict rule, the tab query string, the Charts and Table control, and the runs dialog route.
 

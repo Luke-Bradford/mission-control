@@ -636,7 +636,7 @@ export function ThroughputTable({
       <Panel
         id="tTickets"
         title="Tickets"
-        sub={`merged in the last ${TICKET_DAYS} days`}
+        sub={`merged in the last ${TICKET_DAYS} days, newest first`}
         className="tickets-panel"
       >
         {!t ? (
@@ -659,7 +659,9 @@ export function ThroughputTable({
                   <th>Ticket</th>
                   <th>Title</th>
                   <th>Size</th>
-                  <th className="r">Merged</th>
+                  <th className="r" aria-sort="descending">
+                    Merged
+                  </th>
                   <th className="r">Cycle</th>
                   <th className="r">~Cost</th>
                 </tr>

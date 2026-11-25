@@ -395,6 +395,8 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
                     columns={columnsOf(p, own)}
                     id={`kanban-${r.id}`}
                     {...kanbanProps}
+                    // The In progress figure is crew-wide; each repo's column counts its own cards.
+                    metrics={{}}
                   />
                 </section>
               );

@@ -304,19 +304,20 @@ export function pipelineStage(
   crew: CrewRow[],
   prs: PullRequestView[],
   now: number,
-  todayStart: number | null,
+  /** The start of the merged window: today, or the last 24 hours for the Merged lane. */
+  mergedSince: number | null,
   loops: RunLoopView[],
   requestedStage?: PipelineStage["stage"],
 ): PipelineStage["stage"] | null {
   const ref = ticketRef(item);
   const merged =
-    todayStart !== null &&
+    mergedSince !== null &&
     prs.some(
       (p) =>
         p.repoId === item.repoId &&
         (p.ticket === null ? p.closingIssues?.[0] === item.issueNumber : p.ticket === ref) &&
         p.mergedAt !== null &&
-        p.mergedAt >= todayStart &&
+        p.mergedAt >= mergedSince &&
         p.mergedAt <= now,
     );
   // Merged PRs and active work are independent stages in the Overview API.

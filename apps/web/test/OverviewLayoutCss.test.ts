@@ -15,7 +15,6 @@ describe("Overview layout (hud.css)", () => {
     expect(rule("select")).toContain("min-height: var(--sp-6)");
     expect(rule(String.raw`#agentsList \.need button`)).toContain("min-height: 24px");
     expect(rule(String.raw`\.repo-pick \.chip button`)).toContain("min-height: 24px");
-    expect(rule(String.raw`\.overview-lane`)).toContain("min-height: 24px");
     expect(rule(String.raw`\.trow \.rowlink`)).toContain("min-height: 24px");
     for (const selector of [
       String.raw`\.comms-actions button,\n\.comms-react-set button`,
@@ -52,9 +51,6 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-grid`)).toContain(
       "grid-template-rows: max-content max-content max-content",
     );
-    expect(rule(String.raw`\.overview-workspace`)).toContain(
-      "grid-template-columns: minmax(1050px, 1200px) minmax(340px, 1fr)",
-    );
     expect(css).toContain("@container overview (max-width: 1050px)");
     expect(css).toMatch(
       /\.overview-primary,\s*\.overview-secondary \{[^}]*display: flex;[^}]*flex-direction: column/,
@@ -62,13 +58,9 @@ describe("Overview layout (hud.css)", () => {
     expect(rule("#agentsList")).toContain("overflow-y: auto");
     expect(rule("#agentsList")).toContain("overflow-x: auto");
     expect(rule("#agentsList")).toContain("max-height: calc(12 * var(--table-row))");
-    expect(rule(String.raw`\.overview-lane-scroll`)).toContain("max-height: 160px");
-    expect(rule(String.raw`\.overview-next`)).toContain("max-height: 320px");
   });
 
-  it("uses eight compact KPI tiles and five content-sized Pipeline summaries", () => {
-    expect(rule(String.raw`\.overview-kpis`)).toContain("repeat(8, minmax(0, 1fr))");
-    expect(rule(String.raw`\.overview-kpi .spark`)).toContain("height: 24px");
+  it("uses five content-sized Pipeline summaries", () => {
     expect(rule(String.raw`\.pipeline-grid`)).toContain("display: flex");
     expect(rule(String.raw`\.pipeline-stage.empty`)).toContain("flex: 0 0 auto");
     expect(rule(String.raw`\.pipeline-stage.empty`)).toContain("min-width: 112px");
@@ -76,10 +68,7 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`#agentsList \.trow`)).toContain("min-width: 1050px");
   });
 
-  it("keeps measured Timeline spans labelled and tool instants distinct", () => {
-    expect(rule(String.raw`\.overview-lane-scroll`)).toContain("max-height: 160px");
-    expect(rule(String.raw`\.overview-span span`)).toContain("padding-inline: var(--sp-1)");
-    expect(rule(String.raw`\.overview-instant`)).toContain("position: absolute");
+  it("stacks the Timeline body", () => {
     expect(rule(String.raw`\.timeline-body`)).toContain("flex-direction: column");
   });
 
@@ -94,10 +83,7 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`#machP \.resrow > \.num`)).toContain("text-align: right");
   });
 
-  it("wraps KPI labels and allows exceptional Work controls to grow past a shared row", () => {
-    const label = rule(String.raw`\.overview-kpi .lbl`);
-    expect(label).toContain("white-space: normal");
-    expect(label).not.toContain("ellipsis");
+  it("allows exceptional Work controls to grow past a shared row", () => {
     const row = rule(String.raw`#agentsList \.trow`);
     expect(row).toContain("min-height: var(--table-row)");
     expect(row).toContain("height: auto");

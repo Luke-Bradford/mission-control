@@ -40,6 +40,9 @@ import { overrunText, tickLogOf } from "../engine/ticks.ts";
 import { parseJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
+/** A check run's conclusion when it was cancelled, not failed. */
+const CANCELLED = "CANCELLED";
+
 interface RecordState {
   initialized: boolean;
   signals: Record<string, FlightSignal & { toldAt: number | null; lastSeen?: number }>;
@@ -76,7 +79,7 @@ export interface SeatCall {
   ref: string | null;
   at: number;
 }
-export interface LoopHeartbeat {
+interface LoopHeartbeat {
   at: number;
   interval: number;
   completed: boolean;
@@ -213,6 +216,8 @@ export function observeFlightChecks(
       const id = `${pr.number}:${check.url?.match(/\/actions\/runs\/(\d+)(?:\/|$)/)?.[1] ?? "check"}:${check.name}`;
       const previous = state.checks[id];
       if (previous && previous.at > now) continue;
+      // a cancelled run did not fail: a later attempt passing is no flake
+      const failing = check.state === "failing" && check.conclusion !== CANCELLED;
       const failedAt = previous?.sha === pr.headSha ? previous.failedAt : null;
       const failedAttempt = previous?.sha === pr.headSha ? previous.failedAttempt : null;
       if (
@@ -234,18 +239,12 @@ export function observeFlightChecks(
         name: check.workflow ?? check.name,
         job: check.name,
         observedFailure:
-          check.state === "failing" ||
+          failing ||
           (previous?.sha === pr.headSha &&
             (previous.observedFailure === true || previous.failedAt !== null)),
         runId: check.url?.match(/\/actions\/runs\/(\d+)(?:\/|$)/)?.[1] ?? null,
-        failedAttempt:
-          check.state === "passing"
-            ? null
-            : check.state === "failing"
-              ? check.attempt
-              : failedAttempt,
-        failedAt:
-          check.state === "passing" ? null : (failedAt ?? (check.state === "failing" ? now : null)),
+        failedAttempt: check.state === "passing" ? null : failing ? check.attempt : failedAttempt,
+        failedAt: check.state === "passing" ? null : (failedAt ?? (failing ? now : null)),
         at: now,
       };
     }

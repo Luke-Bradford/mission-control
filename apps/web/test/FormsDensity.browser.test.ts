@@ -198,7 +198,9 @@ const FORMS = [
     // the real Agent page: the Setup tab of the side panel, where the form is narrowest
     steps: [
       ["css", '.seg[aria-label="Seat details"] button:last-child'],
-      // Change stays disabled until the focus read lands; a click before then does nothing
+      // Change stays disabled until the focus read lands, and a click before then does nothing.
+      // Only a seat's sandbox loses that race: its single-process browser (browserRunner.ts) is
+      // slow enough to reach this step first. The step waits for the button to be enabled.
       ["css", ".queue-focus button:not(:disabled)"],
     ],
   },
@@ -294,7 +296,9 @@ const drive = (page: RenderedPage, steps: readonly Step[]) =>
         const target = await until(
           () =>
             step[0] === "css"
-              ? document.querySelector<HTMLElement>(step[1])
+              ? [...document.querySelectorAll<HTMLElement>(step[1])].find(
+                  (el) => !(el as HTMLButtonElement).disabled,
+                )
               : [...document.querySelectorAll("button")].find(
                   (b) => b.textContent === step[1] && !b.disabled,
                 ),
@@ -1147,10 +1151,10 @@ describeRendered("F14 template editor and F15 Teams sources, rendered in the Set
     });
 });
 
-/** F16 to F18: the crew pause modal (new and edit, with a long audit) and the Away mode modal. */
+/** F19 to F21: the crew pause modal (new and edit, with a long audit) and the Away mode modal. */
 const PAUSE_FORMS = [
   {
-    id: "F16",
+    id: "F19",
     page: "pause",
     form: ".crew-pause-panel",
     cap: 640,
@@ -1158,14 +1162,14 @@ const PAUSE_FORMS = [
     edit: false,
   },
   {
-    id: "F17",
+    id: "F20",
     page: "pause",
     form: ".crew-pause-panel",
     cap: 640,
     open: "Edit crew pause",
     edit: true,
   },
-  { id: "F18", page: "away", form: ".awayctl", cap: 480, open: null, edit: false },
+  { id: "F21", page: "away", form: ".awayctl", cap: 480, open: null, edit: false },
 ] as const;
 type PauseForm = (typeof PAUSE_FORMS)[number];
 
@@ -1286,7 +1290,7 @@ async function expectPauseDense(page: RenderedPage, form: PauseForm) {
   expect(page.requests().filter((r) => r.method !== "GET")).toEqual([]);
 }
 
-describeRendered("F16 to F18 crew pause and Away mode, rendered", () => {
+describeRendered("F19 to F21 crew pause and Away mode, rendered", () => {
   for (const form of PAUSE_FORMS) {
     for (const [width, height] of VIEWPORTS) {
       it(
@@ -1316,7 +1320,7 @@ describeRendered("F16 to F18 crew pause and Away mode, rendered", () => {
   }
 
   it(
-    "F16 with an error summary showing still keeps its final action in view at 1600x700",
+    "F19 with an error summary showing still keeps its final action in view at 1600x700",
     async () => {
       const form = PAUSE_FORMS[0];
       const page = await openPause(form, { width: 1600, height: 700 });

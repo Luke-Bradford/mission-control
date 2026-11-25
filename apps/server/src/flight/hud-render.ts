@@ -452,6 +452,8 @@ export interface HudHelperOptions {
   graceMs?: number;
   /** How long the helper gets to close Chrome after SIGTERM before the group is killed. */
   closeMs?: number;
+  /** Deletes the helper's scratch folder; tests substitute one that fails. */
+  removeScratch?: (dir: string) => void;
 }
 
 const HELPER_PATH = fileURLToPath(new URL("./hud-helper.ts", import.meta.url));
@@ -526,7 +528,13 @@ export function renderHudInHelper(
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
       void stopHelper(child, closeMs).then(() => {
-        rmSync(scratch, { recursive: true, force: true });
+        try {
+          (options.removeScratch ?? ((dir) => rmSync(dir, { recursive: true, force: true })))(
+            scratch,
+          );
+        } catch {
+          // a scratch folder left behind costs disk, not the answer
+        }
         settle();
       });
     };

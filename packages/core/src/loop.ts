@@ -311,11 +311,17 @@ export function controllerCheckOf(body: string | null | undefined): string | nul
 /** The checklist text of a bullet line (`- x`, `* x`, `- [ ] x`), else null. */
 const bulletText = (line: string): string | null =>
   /^[-*+][ \t]+(?:\[[ xX]\][ \t]+)?(.*)$/.exec(line.trim())?.[1]?.trim() ?? null;
+/** A line's leading block-quote markers (`> > `). */
+const QUOTE_RE = /^ {0,3}(?:>[ \t]?)*/;
 const DONE_WHEN_RE = /^ {0,3}(#{1,6})[ \t]+done[ \t-]*when\b.*$/im;
 const SIZE_OR_SECURITY_RE = /^ {0,3}##[ \t]+(?:size|security)\b.*$/im;
-/** A heading line of `level` or above opens at `from`: the offset it starts at, or the end. */
-const sectionEnd = (plain: string, from: number, level: number): number => {
-  const next = new RegExp(`^ {0,3}#{1,${level}}(?:[ \\t]|$)`, "m").exec(plain.slice(from));
+/**
+ * A heading line of `level` or above opens at `from`: the offset it starts at, or the end. In a
+ * quoted section (`quoted`), a heading behind block-quote markers ends it too.
+ */
+const sectionEnd = (plain: string, from: number, level: number, quoted = false): number => {
+  const lead = quoted ? " {0,3}(?:>[ \\t]?)*" : " {0,3}";
+  const next = new RegExp(`^${lead}#{1,${level}}(?:[ \\t]|$)`, "m").exec(plain.slice(from));
   return next === null ? plain.length : from + next.index;
 };
 /**
@@ -334,7 +340,10 @@ export function withControllerCheckItem(
   const done = DONE_WHEN_RE.exec(withoutFences(out));
   if (done !== null) {
     const from = done.index + done[0].length;
-    const to = sectionEnd(withoutFences(out), from, done[1]?.length ?? 2);
+    const end = sectionEnd(withoutFences(out), from, done[1]?.length ?? 2);
+    // a controller-check section nested under done-when is not done-when's own text
+    const nested = CONTROLLER_CHECK_RE.exec(withoutFences(out).slice(from, end));
+    const to = nested === null ? end : from + nested.index;
     const blanked = withoutFences(out)
       .slice(from, to)
       .split(/(?<=\n)/);
@@ -354,13 +363,21 @@ export function withControllerCheckItem(
   const line = `- ${want}`;
   if (m !== null) {
     const start = m.index + m[0].length;
-    const end = sectionEnd(plain, start, m[1]?.length ?? 2);
+    // a quoted heading's items are quoted too; a fenced bullet is example text, not an item
+    const quote = (QUOTE_RE.exec(m[0])?.[0] ?? "").trim();
+    const end = sectionEnd(plain, start, m[1]?.length ?? 2, quote !== "");
     const section = out.slice(start, end);
-    if (section.split("\n").some((l) => bulletText(l) === want))
+    if (
+      plain
+        .slice(start, end)
+        .split("\n")
+        .some((l) => bulletText(l.replace(QUOTE_RE, "")) === want)
+    )
       return { body: out, added: false, removed };
     const at = start + section.trimEnd().length;
-    const lead = section.trim() === "" ? `${eol}${eol}` : eol;
-    return { body: out.slice(0, at) + lead + line + out.slice(at), added: true, removed };
+    const lead = section.trim() === "" ? `${eol}${quote}${eol}` : eol;
+    const quoted = quote === "" ? line : `${quote} ${line}`;
+    return { body: out.slice(0, at) + lead + quoted + out.slice(at), added: true, removed };
   }
   const block = `${CONTROLLER_CHECK_HEADING}${eol}${eol}${line}${eol}`;
   const before = SIZE_OR_SECURITY_RE.exec(plain);
@@ -1156,16 +1173,19 @@ function stateStep(s: LoopSnapshot): Step {
     pushed?.sha === pr.headSha &&
     headCommit === pr.headSha
   ) {
+    const lifted: RunLoop = {
+      ...loop,
+      phase: "review",
+      hold: liftPark(loop.hold),
+      ciFails: 0,
+      transient: 0,
+      lastRefusal: null,
+      unparkedAt: now,
+    };
+    // a review park lifted ends FLIGHT's rework grant, as the engine's lift of one does
+    if (loop.hold.kind === "review-ruling") delete lifted.flightReworkGrantEpoch;
     return {
-      loop: {
-        ...loop,
-        phase: "review",
-        hold: liftPark(loop.hold),
-        ciFails: 0,
-        transient: 0,
-        lastRefusal: null,
-        unparkedAt: now,
-      },
+      loop: lifted,
       actions: [
         {
           kind: "event",
@@ -1586,9 +1606,9 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
 
 /**
  * A FLIGHT rework grant permits exactly one more blocking RETRO outcome: on the head it was granted
- * for (`flightReworks`), or, at the review-round cap, in the epoch the grant started
- * (`flightReworkGrantEpoch`) and after it, until FLIGHT decides again, since the seat's fix is a new
- * head and a sync or CI ruling may start another epoch before it is reviewed.
+ * for (`flightReworks`), or in the epoch FLIGHT's rework of a review park started
+ * (`flightReworkGrantEpoch`) and after it, until a review park is lifted again, since the seat's fix
+ * is a new head and a sync or CI ruling may start another epoch before it is reviewed.
  */
 function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
   // FLIGHT's second review of this head always gets a fix round, whatever rework was granted before
@@ -1946,6 +1966,12 @@ export function reconcile(input: LoopSnapshot): { loop: RunLoop; actions: LoopAc
   };
   // the line went (its key is claimed): it is no longer pending
   if (loop.pendingLine && loop.pendingLine.key in s.claimed) loop.pendingLine = null;
+  // a merge-main line still unsent is moot once a newer push replaced the sha it was for
+  if (
+    loop.pendingLine?.key.startsWith(mergeMainKey(s.runId, "")) &&
+    loop.pendingLine.key !== mergeMainKey(s.runId, s.pushed?.sha ?? "")
+  )
+    loop.pendingLine = null;
   if (loop.hold?.worktree) {
     if (s.seat.holdsRun) {
       // a restart mid set-aside or mid wake left the run on its seat

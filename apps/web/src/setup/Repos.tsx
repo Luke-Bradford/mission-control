@@ -174,11 +174,14 @@ function RepoCard({
   const [planSignOff, setPlanSignOff] = useState<PlanSignoff>("never");
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
+  // Rules arriving set only the sign-off rule, so they never undo an edit to the other fields.
   useEffect(() => {
     setPlanSignOff((rules.data?.rules.plan_signoff?.value as PlanSignoff | undefined) ?? "never");
+  }, [rules.data]);
+  useEffect(() => {
     setGuidance(repo.guidance ?? EMPTY_GUIDANCE);
     setAccount(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
-  }, [repo, config.accounts, rules.data]);
+  }, [repo, config.accounts]);
   const save = async () => {
     setSaving(true);
     try {

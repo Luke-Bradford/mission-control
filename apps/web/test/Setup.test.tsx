@@ -1204,6 +1204,27 @@ describe("Setup › Repos & seats cards", () => {
     });
   });
 
+  it("keeps an account picked before the repo rules arrive", async () => {
+    let answer: (value: { status: number; body: unknown }) => void = () => {};
+    load({
+      "/api/repos/shop-app/rules": () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    const account = within(card).getByLabelText("Default account") as HTMLSelectElement;
+    fireEvent.change(account, { target: { value: "codex-main" } });
+    await act(async () => {
+      answer({ status: 200, body: repoRules("every") });
+    });
+    expect(((await within(card).findByLabelText("Plan sign-off")) as HTMLSelectElement).value).toBe(
+      "every",
+    );
+    expect(account.value).toBe("codex-main");
+  });
+
   it("does not write plan rules when the setting is unchanged", async () => {
     load({
       "/api/repos/shop-app/rules": repoRules("every"),

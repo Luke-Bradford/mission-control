@@ -16,6 +16,7 @@ import {
   FieldError,
   fieldProps,
   isUncertain,
+  refusesEntry,
   UNCERTAIN_TEXT,
   useSubmitGuard,
 } from "../components/formSupport.tsx";
@@ -147,8 +148,11 @@ function RenameSeat({ row }: { row: CrewRow }) {
       });
       close();
     } catch (e) {
-      setError(seatError(e));
-      setUncertain(isUncertain(e instanceof ApiError ? e.status : undefined));
+      const status = e instanceof ApiError ? e.status : undefined;
+      // A refused call sign is about the field; anything else is about the form.
+      if (refusesEntry(status)) setIssue(seatError(e));
+      else setError(seatError(e));
+      setUncertain(isUncertain(status));
       setFocusKey((key) => key + 1);
     } finally {
       hub.refetch(RESOURCES.crewChanges.path);
