@@ -1310,20 +1310,20 @@ async function ticketBranch(
     for (const branch of branches) {
       if (merged.has(branch) || open.has(branch)) continue;
       const tip = await inClone([
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "--end-of-options",
+        `refs/remotes/origin/${branch}^{commit}`,
+      ]).catch(() =>
+        inClone([
           "rev-parse",
           "--verify",
           "--quiet",
           "--end-of-options",
-          `refs/remotes/origin/${branch}^{commit}`,
-        ]).catch(() =>
-          inClone([
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            "--end-of-options",
-            `refs/heads/${branch}^{commit}`,
-          ]).catch(() => null),
-        );
+          `refs/heads/${branch}^{commit}`,
+        ]).catch(() => null),
+      );
       if (tip === null) continue;
       const inBase = await inClone(["merge-base", "--is-ancestor", tip.trim(), baseSha]).then(
         () => true,

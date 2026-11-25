@@ -9,13 +9,13 @@ import {
   isAgentWorking,
   METRIC_IDS,
   METRICS,
-  RATE_LIMIT_PARK_PREFIX,
   type MetricRow,
   type MetricsView,
   metricHover,
   metricLabel,
   metricReadings,
   percentile,
+  RATE_LIMIT_PARK_PREFIX,
 } from "../src/index.ts";
 
 const HOUR = 3_600_000;

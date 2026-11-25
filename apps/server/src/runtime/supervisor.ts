@@ -104,9 +104,9 @@ import {
   type ProfileOverride,
   pathGrantProblem,
   pathsNeedingGrant,
+  RATE_LIMIT_PARK_PREFIX,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
-  RATE_LIMIT_PARK_PREFIX,
   type RepoId,
   type RepoRules,
   ROLE_PROMPT_DIR,
@@ -3038,7 +3038,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             credentialRevision(await deps.flightEnvironment());
         if (
           credentialsChanged ||
-          store.getSetting(runtimeProfileKey(run.id)) !== (flight ? FLIGHT_RUNTIME_PROFILE : "seat-v1") ||
+          store.getSetting(runtimeProfileKey(run.id)) !==
+            (flight ? FLIGHT_RUNTIME_PROFILE : "seat-v1") ||
           profileDenies().some((profile) => !denied.includes(profile))
         ) {
           if (!(await endProcess(dir, run.id, keeperEndWait()))) return;
