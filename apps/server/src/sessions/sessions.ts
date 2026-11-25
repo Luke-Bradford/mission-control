@@ -72,6 +72,8 @@ export class SessionError extends Error {
 
 export interface SessionsService {
   view(): Promise<CmuxSessionsView>;
+  /** Drops the short-lived cmux read cache after a workspace lifecycle event. */
+  invalidate(): void;
   /** The workspace's screen, at most `lines` of its last lines. */
   read(id: string, lines: number): Promise<string>;
   focus(id: string): Promise<void>;
@@ -515,6 +517,9 @@ export function createSessions(deps: SessionsDeps): SessionsService {
   }
 
   return {
+    invalidate() {
+      cached = null;
+    },
     view() {
       if (cached !== null && now() - cached.at < VIEW_CACHE_MS) return cached.view;
       const view = read();
