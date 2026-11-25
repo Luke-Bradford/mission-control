@@ -67,9 +67,10 @@
 }
 
 /* Fixed widths hold the words that must never clip: State fits "Waiting on you" whole, and App
-   fits "localhost:5173" over "Not answering" when narrow, side by side when wide. */
+   fits "localhost:5173" over "Not answering" when narrow, side by side when wide. Session always
+   has room for the Yours or Crew tag and the unread button; the name gives way first. */
 .sess-table .c-name {
-  width: 14%;
+  width: max(140px, 14%);
 }
 .sess-table .c-folder {
   width: 14%;
@@ -121,13 +122,30 @@
   box-shadow: inset 3px 0 0 var(--warn);
 }
 
+.sess-who {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
 .sess-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
   color: var(--fg);
 }
 
+.sess-tags {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
 .sess-tag {
-  margin-left: var(--sp-2);
   padding: 0 var(--sp-1);
   border: 1px solid var(--line-2);
   border-radius: var(--r-s);
@@ -141,7 +159,6 @@
 }
 
 .sess-inbox {
-  margin-left: var(--sp-2);
   font: var(--fs-s) / var(--lh-s) var(--mono);
   color: var(--accent);
 }
@@ -273,6 +290,44 @@ button.sess-inbox[aria-expanded="true"] {
   color: var(--muted);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
+}
+
+/* Below 2200 px (rows have no vertical padding there) the name sits over its tags, so a name,
+   its tag and the unread button all fit a 40 px row in the narrower Session column. */
+@media (max-width: 2199px) {
+  .sess-who {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+  .sess-name {
+    max-width: 100%;
+    line-height: var(--lh-s);
+  }
+}
+
+/* 1280 to 1599 px: tighter cell padding and fixed columns cut to what their words need, so the
+   last line keeps a useful width beside the dock. */
+@media (max-width: 1599px) {
+  .sess-table th,
+  .sess-table td {
+    padding-inline: var(--sp-2);
+  }
+  .sess-table .c-folder {
+    width: 13%;
+  }
+  .sess-table .c-state {
+    width: 140px;
+  }
+  .sess-table .c-for {
+    width: 44px;
+  }
+  .sess-table .c-app {
+    width: 124px;
+  }
+  .sess-table .c-act {
+    width: 64px;
+  }
 }
 
 /* Row states last: they outrank the cell rules above. */

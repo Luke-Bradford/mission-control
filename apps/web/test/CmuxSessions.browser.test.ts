@@ -103,11 +103,18 @@ const metrics = (page: RenderedPage) =>
       pageBottom: page.getBoundingClientRect().bottom,
       dockLeft: dock?.getBoundingClientRect().left ?? null,
       pageRight: page.getBoundingClientRect().right,
-      // Words that must read whole: each state pill and each app's address and health, inside
+      // Words that must read whole: each state pill, owner tag, unread control and each app's
+      // address and health, inside
       // their own box and inside their cell's content box.
       clippedLabels: [
         ...document.querySelectorAll<HTMLElement>(
-          "#page-sessions tr.sess-row .pill, #page-sessions .sess-ans, #page-sessions .sess-applink",
+          [
+            "#page-sessions tr.sess-row .pill",
+            "#page-sessions .sess-ans",
+            "#page-sessions .sess-applink",
+            "#page-sessions .sess-tag",
+            "#page-sessions .sess-inbox",
+          ].join(", "),
         ),
       ]
         .filter((el) => {

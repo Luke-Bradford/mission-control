@@ -208,27 +208,33 @@ function SessionRow({
         onKeyDown={onKey}
       >
         <td>
-          <span className="sess-name">{r.name}</span>
-          <span className={`sess-tag ${r.owner}`}>{r.owner === "crew" ? "Crew" : "Yours"}</span>
-          {r.inbox.unread > 0 &&
-            (newest ? (
-              <button
-                type="button"
-                className="sess-inbox"
-                aria-label={`${r.inbox.unread} unread ${r.inbox.unread === 1 ? "message" : "messages"} for ${r.name}`}
-                aria-expanded={reading}
-                aria-controls={reading ? msgId : undefined}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRead();
-                }}
-                onKeyDown={(e) => e.stopPropagation()}
-              >
-                {r.inbox.unread} unread
-              </button>
-            ) : (
-              <span className="sess-inbox">{r.inbox.unread} unread</span>
-            ))}
+          <div className="sess-who">
+            <span className="sess-name" title={r.name}>
+              {r.name}
+            </span>
+            <span className="sess-tags">
+              <span className={`sess-tag ${r.owner}`}>{r.owner === "crew" ? "Crew" : "Yours"}</span>
+              {r.inbox.unread > 0 &&
+                (newest ? (
+                  <button
+                    type="button"
+                    className="sess-inbox"
+                    aria-label={`${r.inbox.unread} unread ${r.inbox.unread === 1 ? "message" : "messages"} for ${r.name}`}
+                    aria-expanded={reading}
+                    aria-controls={reading ? msgId : undefined}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRead();
+                    }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
+                    {r.inbox.unread} unread
+                  </button>
+                ) : (
+                  <span className="sess-inbox">{r.inbox.unread} unread</span>
+                ))}
+            </span>
+          </div>
         </td>
         <td className="sess-folder" title={r.folder ?? undefined}>
           {r.folder ? shortFolder(r.folder) : "—"}
