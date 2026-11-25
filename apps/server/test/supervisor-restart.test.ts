@@ -1214,8 +1214,10 @@ describe("a seat keeps running through a restart", () => {
     else store.setSetting(`runtime-profile:${runId}`, profile);
     const { sup } = make();
     sup.start();
-    await until(() => expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId }));
-    expect(starts()).toHaveLength(launches);
+    // the row already says idle on this run from before the restart: wait for the take-back itself
+    await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
+    await until(() => expect(starts()).toHaveLength(launches));
+    expect(store.seatSession("guido-1")).toMatchObject({ runId });
     if (launches === 2) expect(starts()[1]?.argv).toContain("--resume");
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
     await sup.stopAll();
