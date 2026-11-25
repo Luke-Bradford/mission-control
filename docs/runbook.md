@@ -200,7 +200,7 @@ profiles:
 - **Snapshot.** Each build or planner start copies the chosen profile, with a sha256 hash, onto its run. Editing the file changes later starts only. The file is read afresh on every start.
 - **A file that cannot be loaded** refuses starts (502, or FLIGHT's refusal text) naming the problem; the hub keeps running. Fix the file and the next start works.
 - **Limits.** The `tries` and `rounds` of the snapshot replace the defaults (3 and 3). The engine still judges the PR's combined CI; `checks` is briefed, not enforced one by one.
-- **Dollar cap.** `budget_usd` is separate from the template's token `budget` and is passed to Claude as `--max-budget-usd`. Omit it to leave Claude uncapped. When Claude reaches it, the run uses the normal budget park and names the dollars used and cap. A working run parks at once; a run whose PR is already pushed keeps moving until the CLI ends. Unlike a token park, Resume refuses a dollar park: the Claude process keeps the cap it started with, so end the run and start the ticket again.
+- **Dollar cap.** `budget_usd` is separate from the template's token `budget`. Claude seats now run interactively in cmux (see `docs/runbooks/cmux-seats.md`), and the CLI has no spend cap outside print mode, so a Claude run is no longer started with `--max-budget-usd`; the token budget still parks a run.
 - **Seen.** The crew row's loop carries the profile name and the step for the run's phase.
 
 ## Reviews of controller and personal PRs

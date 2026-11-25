@@ -1162,7 +1162,7 @@ describe("startRun", () => {
     expect(argv).not.toContain("--effort");
   });
 
-  it("passes a template's dollar cap to a Claude run", async () => {
+  it("passes no dollar cap to a Claude run: an interactive Claude has none", async () => {
     const profiles = DEFAULT_PROFILES.map((profile) =>
       profile.name === "small-change" ? { ...profile, budgetUsd: 12.5 } : profile,
     );
@@ -1171,7 +1171,7 @@ describe("startRun", () => {
     await sup.startRun("guido-1", 42);
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const argv = recorded()[0].argv as string[];
-    expect(argv[argv.indexOf("--max-budget-usd") + 1]).toBe("12.5");
+    expect(argv).not.toContain("--max-budget-usd");
   });
 
   it("runs the CLI with a minimal env, with no git identity (the commit tool sets it)", async () => {
