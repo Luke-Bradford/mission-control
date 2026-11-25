@@ -1,4 +1,11 @@
-import { type Crew, type MachineView, METRICS, type Telemetry } from "@mc/core";
+import {
+  type Crew,
+  type MachineView,
+  METRICS,
+  type Telemetry,
+  type TelemetryRange,
+} from "@mc/core";
+import { useEffect, useState } from "react";
 import { useNow } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { cost, dur, elapsed, percent } from "../fmt.ts";
@@ -12,6 +19,9 @@ import { Stat, type StatSpec } from "./Stat.tsx";
 /** Days the cost comparison averages over, and the days the Merged comparison averages over. */
 const COST_DAYS = 7;
 const MERGED_DAYS = 14;
+/** How long after the range on screen answers the band asks for the week, so opening the page asks once. */
+export const WEEK_READ_DELAY_MS = 6000;
+const WEEK: TelemetryRange = "7d";
 
 interface Inputs {
   /** The page's unfiltered telemetry: today, 14-day and now figures do not depend on the range. */
@@ -164,13 +174,26 @@ export function healthStats({
 /** The health band: eight figures, one row, on every tab. */
 export function HealthBand({
   t,
+  range,
   onNeedsRoute,
 }: {
   t: Telemetry | undefined;
+  /** The range `t` was read for; on 7d it is the week itself. */
+  range: TelemetryRange;
   onNeedsRoute: (s: StatSpec) => void;
 }) {
-  // The week's spend waits for the range on screen, so opening the page asks for one range first.
-  const t7 = useResource<Telemetry>(t === undefined ? null : RESOURCES.telemetry("7d")).data;
+  // The week's spend is asked for WEEK_READ_DELAY_MS after the range on screen has painted, so
+  // opening the page asks the hub for /api/telemetry once.
+  const loaded = t !== undefined;
+  const [weekDue, setWeekDue] = useState(false);
+  useEffect(() => {
+    if (!loaded || weekDue) return;
+    const id = setTimeout(() => setWeekDue(true), WEEK_READ_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [loaded, weekDue]);
+  const isWeek = range === WEEK;
+  const week = useResource<Telemetry>(weekDue && !isWeek ? RESOURCES.telemetry(WEEK) : null).data;
+  const t7 = isWeek ? t : week;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const machine = useResource<MachineView>(RESOURCES.machine).data;
   const now = useNow();
