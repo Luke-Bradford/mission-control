@@ -651,14 +651,16 @@ describe("FLIGHT's evidence", () => {
     });
   });
 
-  describe("a PR no run holds", () => {
+  describe("a crew PR nobody owns", () => {
     const state = () => flightState({ config, store, busy: [], now: nowMs });
     const unheld = () => state().prs.find((p) => p.pr === 7)?.unheld;
-    /** A crew run that held PR 7 and has ended without finishing it, as a stopped hand-over leaves it. */
-    const endedHolder = () =>
+    const fact = () => (JSON.parse(wakeFacts(state())) as Record<string, unknown[]>).unheld;
+    /** A crew run that carried PR 7 and ended at T0 without finishing it, as a hand-over leaves it. */
+    const endedHolder = (over: Partial<Run> = {}) =>
       store.upsertRun(
         run("r-guido", "guido-1", {
           ticket: "mc#7",
+          branch: "feature/7-x",
           endedAt: T0,
           status: "ok",
           loop: {
@@ -666,62 +668,97 @@ describe("FLIGHT's evidence", () => {
             phase: "parked",
             prNumber: 7,
             hold: {
-              kind: null,
+              kind: "ended",
               reason: "run ended (stopped)",
               ended: true,
               worktree: null,
               wake: false,
             },
           },
+          ...over,
         }),
       );
-    const withChecks = (...checks: ReturnType<typeof check>[]) =>
-      store.upsertPullRequests("mc", [stored(7, { checks })], nowMs);
+    const pr = (over: Partial<PullRequestView> = {}) =>
+      store.upsertPullRequests("mc", [stored(7, over)], nowMs);
 
-    it("is marked once its checks have all reported, with the head, the result and the review", () => {
+    it("is marked with its CI verdict once nobody has owned it for five minutes and CI has settled", () => {
       endedHolder();
-      withChecks(check("lint", "passing"), check("test", "pending"));
+      nowMs = T0 + 10 * MIN;
+      pr({ ci: "pending" });
       expect(unheld()).toBeUndefined();
-      withChecks(check("lint", "passing"), check("test", "passing"));
-      expect(unheld()).toBe("sha7:passed:unreviewed");
-      expect(state().mergeQueue?.find((q) => q.pr === 7)?.waitsOn).toContain(
-        "a seat: no run holds this PR",
-      );
-      withChecks(check("lint", "passing"), check("mc/review", "failing"));
+      expect(pending(state())).toBe(false);
+      pr({ ci: "passing" });
+      expect(unheld()).toBe("passing");
+      expect(fact()).toEqual(["7:sha7:passing:unreviewed"]);
+      expect(pending(state())).toBe(true);
+      pr({ ci: "failing" });
+      expect(fact()).toEqual(["7:sha7:failing:unreviewed"]);
+      pr({ ci: "passing" });
       review("sha7", "fail", 3);
-      expect(unheld()).toBe("sha7:failing:3");
+      expect(fact()).toEqual(["7:sha7:passing:3"]);
     });
 
-    it("is not marked while a run holds it, with no checks read, or when no crew run ever held it", () => {
-      withChecks(check("lint", "passing"));
-      expect(unheld()).toBeUndefined(); // a PR opened outside the crew
+    it("is not marked in the five minutes after its run ended: a hand-over, or a merge not yet read", () => {
       endedHolder();
-      store.upsertPullRequests("mc", [stored(7)], nowMs);
-      expect(unheld()).toBeUndefined(); // checks not read yet
-      withChecks(check("lint", "passing"));
-      expect(unheld()).toBe("sha7:passed:unreviewed");
-      live("guido-1", "r-next");
-      store.setRunLoop("r-next", { ...NEW_LOOP, phase: "ci", prNumber: 7 });
+      nowMs = T0 + 4 * MIN;
+      pr({ ci: "passing" });
+      expect(unheld()).toBeUndefined();
+      nowMs = T0 + 5 * MIN;
+      expect(unheld()).toBe("passing");
+    });
+
+    it("is not marked once a new run is on its branch, before that run has pushed", () => {
+      endedHolder();
+      nowMs = T0 + 10 * MIN;
+      pr({ ci: "passing" });
+      expect(unheld()).toBe("passing");
+      store.upsertRun(
+        run("r-next", "inco-1", {
+          ticket: "mc#7",
+          branch: "feature/7-x",
+          startedAt: nowMs,
+          loop: NEW_LOOP,
+        }),
+      );
       expect(unheld()).toBeUndefined();
     });
 
-    it("wakes FLIGHT at once on each new result, and not when a seat takes the PR", () => {
+    it("is not marked when no crew run carried it, or when the hub will review it next itself", () => {
+      nowMs = T0 + 10 * MIN;
+      pr({ ci: "passing" });
+      expect(unheld()).toBeUndefined(); // opened outside the crew
       endedHolder();
-      withChecks(check("lint", "pending"));
+      expect(unheld()).toBe("passing");
+      // out of draft, green and unreviewed: the hub queues its own review
+      pr({ ci: "passing", isDraft: false });
+      expect(unheld()).toBeUndefined();
+      pr({ ci: "failing", isDraft: false });
+      expect(unheld()).toBe("failing");
+      pr({ ci: "passing", isDraft: false });
+      review("sha7", "fail", 2);
+      expect(unheld()).toBe("passing");
+    });
+
+    it("is urgent on each new result and settles when a seat takes the PR", () => {
+      endedHolder();
+      nowMs = T0 + 10 * MIN;
+      pr({ ci: "pending" });
       const waiting = wakeFacts(state());
-      expect(JSON.parse(waiting)).not.toHaveProperty("unheld");
-      withChecks(check("lint", "passing"));
+      pr({ ci: "passing" });
       const green = wakeFacts(state());
-      expect(JSON.parse(green).unheld).toEqual(["7:sha7:passed:unreviewed"]);
       expect(urgentChange(waiting, green)).toBe(true);
-      // told once: the same result is the same fact
       expect(wakeFacts(state())).toBe(green);
-      withChecks(check("lint", "passing"), check("mc/review", "failing"));
       review("sha7", "fail", 3);
       const reviewed = wakeFacts(state());
       expect(urgentChange(green, reviewed)).toBe(true);
-      live("guido-1", "r-next");
-      store.setRunLoop("r-next", { ...NEW_LOOP, phase: "working", prNumber: 7 });
+      store.upsertRun(
+        run("r-next", "inco-1", {
+          ticket: "mc#7",
+          branch: "feature/7-x",
+          startedAt: nowMs,
+          loop: NEW_LOOP,
+        }),
+      );
       expect(onlySettled(reviewed, wakeFacts(state()))).toBe(true);
     });
   });
@@ -2631,6 +2668,31 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
     store.upsertRun(run("r-guido", "guido-1"));
     nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("does not hold the wake for a crew PR nobody owns until the batch", async () => {
+    flightOnly();
+    raiseBlocked();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    // a crew run carried PR 7 and ended; ten minutes on its CI is green and nobody owns it
+    store.upsertRun(
+      run("r-guido", "guido-1", {
+        ticket: "mc#7",
+        branch: "feature/7-x",
+        endedAt: T0,
+        status: "ok",
+        loop: { ...NEW_LOOP, phase: "parked", prNumber: 7 },
+      }),
+    );
+    nowMs = T0 + 10 * MIN;
+    store.upsertPullRequests("mc", [stored(7, { ci: "passing" })], nowMs);
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    // the same result is not told again
+    nowMs = T0 + 15 * MIN;
     await watch.check();
     expect(sendCalls).toHaveLength(2);
   });

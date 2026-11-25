@@ -1204,14 +1204,20 @@ export function flightState(i: {
         r.loop?.prNumber != null &&
         mine.some((s) => s.id === r.agentId),
     );
-  // PRs a crew run of this session held in the last day, whether or not that run has ended
-  const crewPrs = new Set(
-    store
-      .loopRuns(now - FLIGHT_METRICS_DAY_MS)
-      .filter((r) => r.repoId === session.repoId && mine.some((s) => s.id === r.agentId))
-      .map((r) => r.loop?.prNumber)
-      .filter((n) => n != null),
+  const flow = prFlow(store, session.repoId, now);
+  // PRs the flow says nobody owns and that are past its deadline for that (`<pr>:unowned:<since>`):
+  // no live run is bound to the PR, its branch or its ticket, and no review of it is under way
+  const unowned = new Set(
+    prFlowFacts(flow)
+      .map((fact) => fact.split(":"))
+      .filter((fact) => fact[1] === "unowned")
+      .map((fact) => Number(fact[0])),
   );
+  // Crew runs of this session still listed: live, or ended in the last day short of a merge.
+  // A PR none of them carried was opened outside the crew and is never FLIGHT's to place.
+  const crewRuns = store
+    .loopRuns(now - FLIGHT_METRICS_DAY_MS)
+    .filter((r) => r.repoId === session.repoId && mine.some((s) => s.id === r.agentId));
   const stale = store.stalePullRequests(session.repoId);
   const shown = shownPrs(store);
   const failedRounds = new Map(
@@ -1240,17 +1246,16 @@ export function flightState(i: {
         reviewed?.verdict == null || (reviewed.sha !== p.headSha && reviewed.sha !== carried)
           ? null
           : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha };
-      const checks = p.checks ?? [];
-      const failingChecks = checks.filter((c) => c.state === "failing").map((c) => c.name);
-      // nobody holds it and its checks have all reported: the result reaches no seat by itself
+      // Nobody owns it and its CI has settled (`ci` leaves out the hub's own review status): the
+      // result reaches no seat by itself. Not a ready PR that passed and has no review yet: the hub
+      // queues that review itself.
       const unheld =
         p.state === "open" &&
-        holder === undefined &&
-        p.headSha !== null &&
-        crewPrs.has(p.number) &&
-        checks.length > 0 &&
-        checks.every((c) => c.state !== "pending")
-          ? `${p.headSha}:${failingChecks.length > 0 ? "failing" : "passed"}:${review === null ? "unreviewed" : review.blocking}`
+        unowned.has(p.number) &&
+        (p.ci === "passing" || p.ci === "failing") &&
+        !(p.ci === "passing" && review === null && !p.isDraft) &&
+        crewRuns.some((r) => r.loop?.prNumber === p.number || r.branch === p.branch)
+          ? p.ci
           : undefined;
       return {
         ref: p.ticket ?? holder?.ticket ?? "",
@@ -1270,9 +1275,9 @@ export function flightState(i: {
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
         stale: stale.has(p.number),
         review,
-        failingChecks,
-        reviewRounds: failedRounds.get(p.number) ?? 0,
         ...(unheld === undefined ? {} : { unheld }),
+        failingChecks: (p.checks ?? []).filter((c) => c.state === "failing").map((c) => c.name),
+        reviewRounds: failedRounds.get(p.number) ?? 0,
       };
     });
 
@@ -1281,7 +1286,6 @@ export function flightState(i: {
       .pullRequests(session.repoId)
       .map((pr) => [pr.number, { checks: pr.checks ?? [], mergeable: pr.mergeable }]),
   );
-  const flow = prFlow(store, session.repoId, now);
   const mergeQueue = prs
     .filter((p) => p.state === "open")
     .map((p) => {
@@ -1298,7 +1302,6 @@ export function flightState(i: {
           ? [`${p.review.blocking} review finding${p.review.blocking === 1 ? "" : "s"}`]
           : []),
         ...(p.awaitingFlight === null || p.awaitingFlight === undefined ? [] : ["FLIGHT merge"]),
-        ...(p.unheld === undefined ? [] : ["a seat: no run holds this PR"]),
       ];
       return { pr: p.pr, waitsOn };
     })
@@ -1759,8 +1762,8 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
 /**
  * What a wake is about, as a stable string (no times): an operator message, a seat's question, a
  * failure the hub could not settle, or an idle build seat with open tickets. CI, PR flow and free
- * seats are the hub's own timers and show in the digest, never here: except a PR no run holds
- * (`unheld`), whose settled checks and review the engine has no seat to hand to.
+ * seats are the hub's own timers and show in the digest, never here. The one exception is a crew PR
+ * nobody owns (`unheld`): the engine has no run to hand its CI or review result to.
  */
 export function wakeFacts(s: FlightState & TeamsDigestState): string {
   // One stable fact per idle spell, once it has lasted 30 minutes. The digest carries the open
@@ -1772,9 +1775,10 @@ export function wakeFacts(s: FlightState & TeamsDigestState): string {
     .filter((seat) => !delivered.has(idleKey(seat)))
     .map(idleKey);
   const idleAgain = s.wake?.idle?.again ?? null;
+  // one fact per head, CI verdict and review result of a PR nobody owns
   const unheld = s.prs
     .filter((p) => p.unheld !== undefined)
-    .map((p) => `${p.pr}:${p.unheld}`)
+    .map((p) => `${p.pr}:${p.headSha}:${p.unheld}:${p.review?.blocking ?? "unreviewed"}`)
     .sort();
   return JSON.stringify({
     // once a day or less: an instruction change, the daily retrospective, an arrival from another team
@@ -1850,7 +1854,9 @@ export function pending(s: FlightState & TeamsDigestState): boolean {
     s.signals.some((s) => !s.told) ||
     s.triage.length > 0 ||
     (s.planned?.some((p) => p.minutesFromNow <= 0) ?? false) ||
-    s.prs.some((p) => p.awaitingFlight != null || p.awayBugDecision != null) ||
+    s.prs.some(
+      (p) => p.awaitingFlight != null || p.awayBugDecision != null || p.unheld !== undefined,
+    ) ||
     s.questions.length > 0 ||
     wakeItems(s).length > 0 ||
     stoppedSeats(s).length > 0 ||
@@ -1869,9 +1875,8 @@ const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker"]);
 /**
  * Fact categories a wake does not wait the gap for: an operator message, a seat's question, an
  * instruction change, FLIGHT's own plan falling due, and the daily retrospective. Each is the
- * operator's or FLIGHT's own doing, or at most daily. `unheld` is the exception: a PR with settled
- * checks and no run stands still until FLIGHT gives it a seat, and it changes once per CI or review
- * result.
+ * operator's or FLIGHT's own doing, or at most daily. `unheld` is the exception: a crew PR nobody
+ * owns stands still until FLIGHT places it, so its settled CI or review is not left for the batch.
  */
 const URGENT_CATEGORIES: readonly string[] = [
   "operator",

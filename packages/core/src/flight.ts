@@ -1209,11 +1209,11 @@ export interface FlightState {
     /** Reviews of the PR that reported blocking findings or a failed verdict. */
     reviewRounds?: number;
     /**
-     * Set on an open PR a crew run held in the last day and none holds now, once its checks have
-     * settled: the head, the checks' result and the review's blocking count. No run means the
-     * engine has nobody to hand the result to, so each new value wakes FLIGHT at once.
+     * The CI verdict of a crew PR that nobody owns (`prFlow`'s "nobody", past its deadline) and
+     * whose CI has settled. The engine has no run to hand the result to, so FLIGHT is woken for
+     * it at once (wake fact `unheld`); absent on every other PR.
      */
-    unheld?: string;
+    unheld?: "passing" | "failing";
   }[];
   /** Items waiting for triage, oldest first, including those held from the operator. */
   items: {
