@@ -7,7 +7,7 @@ import {
   TELEMETRY_RANGES,
   type Telemetry,
 } from "@mc/core";
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ticketRef } from "../board/cards.ts";
 import { useNow, useTz } from "../clock.ts";
@@ -657,12 +657,15 @@ function Totals({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   );
 }
 
-/** One owner's share of a day and repo: ~USD, its tokens on hover; `—` when it used none. */
+/** One owner's share of a day and repo: ~USD over its tokens, both visible; `—` when it used none. */
 function SpendTd({ c, strong = false }: { c: SpendCell; strong?: boolean }) {
   if (c.tokens === 0 && c.costUsd === 0) return <td className="r num muted">{DASH}</td>;
   return (
-    <td className={`r num${strong ? "" : " fg2"}`} title={`${kTokens(c.tokens)} tok`}>
+    <td className={`r num${strong ? "" : " fg2"}`}>
       {cost(c.costUsd)}
+      <span className="s muted" style={{ display: "block" }}>
+        {kTokens(c.tokens)} tok
+      </span>
     </td>
   );
 }
@@ -689,7 +692,7 @@ function SpendByOwner({ t, scope }: { t: Telemetry | undefined; scope: Scope }) 
       ) : (
         <>
           <div className="pb tw" style={{ maxHeight: 440, overflowY: "auto" }}>
-            <table>
+            <table style={{ "--table-row": "40px" } as CSSProperties}>
               <thead>
                 <tr>
                   <th>Day</th>
@@ -704,14 +707,7 @@ function SpendByOwner({ t, scope }: { t: Telemetry | undefined; scope: Scope }) 
                 {split.rows.map((r) => (
                   <tr key={`${r.day}\n${r.repo ?? ""}`}>
                     <td className="muted">{dayLabel(r.day)}</td>
-                    <td
-                      title={r.repo ?? undefined}
-                      style={{
-                        maxWidth: 240,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
+                    <td className="wrap" style={{ overflowWrap: "anywhere" }}>
                       {r.repo ?? DASH}
                     </td>
                     <SpendTd c={r.operator} />

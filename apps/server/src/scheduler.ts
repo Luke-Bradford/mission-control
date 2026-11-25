@@ -1579,13 +1579,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       guarded("sessionSpend", async () => {
         const r = (
           c.sessionSpend ??
-          ((at: number) =>
-            readSessionSpend({
-              store,
-              root: CLAUDE_PROJECTS_DIR,
-              tz: config.operator.timezone,
-              now: at,
-            }))
+          ((at: number) => readSessionSpend({ config, store, root: CLAUDE_PROJECTS_DIR, now: at }))
         )(now());
         if (r.added > 0) emit("agents");
         recordStatus("sessionSpend", true, null);

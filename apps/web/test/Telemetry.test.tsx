@@ -1726,6 +1726,10 @@ describe("Cost and tokens tab", () => {
     expect(body).toHaveLength(2);
     expect(body[0]?.textContent).toContain("shop-app");
     expect(body[0]?.textContent).toContain("~$4.25");
+    // token counts are shown, not only on hover
+    expect(body[0]?.textContent).toContain("3.5k tok");
+    expect(p.querySelector("[title]")).toBeNull();
+    expect(p.querySelector("table")?.style.getPropertyValue("--table-row")).toBe("40px");
     expect(body[1]?.textContent).toContain("—");
     const foot = p.querySelector("tfoot tr")?.textContent ?? "";
     expect(foot).toContain("Account total");

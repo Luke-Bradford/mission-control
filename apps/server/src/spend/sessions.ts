@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { type Dirent, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
   SESSION_SPEND_WEEK_DAYS,
@@ -12,7 +12,11 @@ import {
 } from "@mc/core";
 import { type CcConfig, crewSeatDef, isInside, realish } from "../config.ts";
 import { dayFormatter, lastDays } from "../hud/views.ts";
-import type { SessionSpendRecord } from "../store/session-spend.ts";
+import type {
+  SessionSpendLastUsage,
+  SessionSpendRecord,
+  SpendOwner,
+} from "../store/session-spend.ts";
 import type { Store } from "../store.ts";
 import { offsetSince, readNewLines } from "../transcript/tail.ts";
 
@@ -30,15 +34,30 @@ function weekStartOf(now: number, tz: string): number {
   return startOfLocalDay(today - (SESSION_SPEND_WEEK_DAYS - 1) * DAY_MS + DAY_MS / 2, tz);
 }
 
-/** Every `*.jsonl` under `root`, at any depth; [] when `root` cannot be read. */
-function transcriptFiles(root: string): string[] {
-  try {
-    return readdirSync(root, { recursive: true, withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.endsWith(".jsonl"))
-      .map((e) => join(e.parentPath, e.name));
-  } catch {
-    return [];
-  }
+/**
+ * Every `*.jsonl` under `root`, at any depth, and the folders that could not be listed. Throws when
+ * `root` itself cannot be read (missing or refused), so the pass fails instead of looking empty.
+ */
+function transcriptFiles(root: string): { paths: string[]; unreadable: string[] } {
+  const paths: string[] = [];
+  const unreadable: string[] = [];
+  const walk = (dir: string, top: boolean): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch (e) {
+      if (top) throw new Error(`cannot read ${dir}: ${e instanceof Error ? e.message : String(e)}`);
+      unreadable.push(dir);
+      return;
+    }
+    for (const e of entries) {
+      const path = join(dir, e.name);
+      if (e.isDirectory()) walk(path, false);
+      else if (e.isFile() && e.name.endsWith(".jsonl")) paths.push(path);
+    }
+  };
+  walk(root, true);
+  return { paths, unreadable };
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
@@ -90,29 +109,45 @@ function usageOf(line: string, stem: string): Usage | null {
   };
 }
 
+const KINDS = ["input", "output", "cacheWrite5m", "cacheWrite1h", "cacheRead"] as const;
+
 /**
  * Reads the usage records appended to every Claude transcript under `root` since the last pass and
- * adds them to the store, one row per session, local day and model. A file is read on from where
- * the last pass stopped; its first read starts at the local day 6 days ago. Claude Code writes one
- * line per content block, each repeating the message id and usage, so a message counts once, from
- * its last line read. Starts no process and calls no model. Never throws for a bad file.
+ * adds them to the store, one row per file, session, local day and model, with the session's owner
+ * and repo as decided now. A file is read on from where the last pass stopped; its first read
+ * starts at the local day 6 days ago. Claude Code writes one line per content block, each
+ * repeating the message id and usage so far, so a message counts once: a repeat adds only what
+ * its counts grew by, on this pass or a later one. A file that shrank is read again from its start
+ * and replaces its earlier rows. Starts no process and calls no model.
+ *
+ * Throws when `root` cannot be read (nothing is recorded, readAt is kept) or, after reading the
+ * rest, when some transcripts could not be read (their offsets are kept).
  */
-export function readSessionSpend(i: { store: Store; root: string; tz: string; now: number }): {
+export function readSessionSpend(i: {
+  config: CcConfig;
+  store: Store;
+  root: string;
+  now: number;
+}): {
   files: number;
   added: number;
 } {
-  const { store, root, tz, now } = i;
+  const { config, store, root, now } = i;
+  const tz = config.operator.timezone;
   const day = dayFormatter(tz);
   const weekStart = weekStartOf(now, tz);
+  const attribute = attribution(config, store);
   let files = 0;
   let added = 0;
   let budget = SESSION_SPEND_PASS_BYTES;
-  const paths = transcriptFiles(root);
+  const { paths, unreadable } = transcriptFiles(root);
+  const failed = [...unreadable];
   for (const path of paths) {
     let st: { size: number; mtimeMs: number };
     try {
       st = statSync(path);
     } catch {
+      failed.push(path);
       continue;
     }
     const prev = store.sessionSpendFile(path);
@@ -120,7 +155,7 @@ export function readSessionSpend(i: { store: Store; root: string; tz: string; no
     if (!prev && st.mtimeMs < weekStart) {
       // older than the week: nothing in it is shown; read only what is appended from now on
       store.addSessionSpend(
-        { path, offset: st.size, size: st.size, mtime: st.mtimeMs, lastMessage: null },
+        { path, offset: st.size, size: st.size, mtime: st.mtimeMs, last: null },
         [],
       );
       continue;
@@ -129,89 +164,123 @@ export function readSessionSpend(i: { store: Store; root: string; tz: string; no
     files++;
     const stem = basename(path, ".jsonl");
     let offset = prev ? prev.offset : offsetSince(path, weekStart, { maxBytes: st.size });
-    let last = prev?.lastMessage ?? null;
+    let last: SessionSpendLastUsage | null = prev?.last ?? null;
+    let reset = false;
     const rows = new Map<string, SessionSpendRecord>();
-    let pending: Usage | null = null;
-    const flush = () => {
-      if (pending === null) return;
-      const p = pending;
-      pending = null;
-      const d = day(p.at);
-      const key = `${p.sessionId}\0${d}\0${p.model}`;
-      const cost = tokensCostUsd(p.model, p.tokens, p.fast);
-      const row = rows.get(key);
+    const add = (
+      key: { sessionId: string; day: string; model: string; cwd: string | null },
+      tokens: SpendTokens,
+      fast: boolean,
+      at: number,
+      messages: number,
+    ) => {
+      const k = `${key.sessionId}\0${key.day}\0${key.model}`;
+      const cost = tokensCostUsd(key.model, tokens, fast);
+      const row = rows.get(k);
       if (row) {
-        row.input += p.tokens.input;
-        row.output += p.tokens.output;
-        row.cacheWrite5m += p.tokens.cacheWrite5m;
-        row.cacheWrite1h += p.tokens.cacheWrite1h;
-        row.cacheRead += p.tokens.cacheRead;
+        for (const kind of KINDS) row[kind] += tokens[kind];
         row.costUsd = row.costUsd === null || cost === null ? null : row.costUsd + cost;
-        row.messages++;
-        row.lastAt = Math.max(row.lastAt, p.at);
-        if (p.cwd !== null) row.cwd = p.cwd;
-      } else {
-        rows.set(key, {
-          sessionId: p.sessionId,
-          day: d,
-          model: p.model,
-          cwd: p.cwd,
-          ...p.tokens,
-          costUsd: cost,
-          messages: 1,
-          lastAt: p.at,
-        });
+        row.messages += messages;
+        row.lastAt = Math.max(row.lastAt, at);
+        return;
       }
-      added++;
+      const { owner, repo } = attribute(key.sessionId, key.cwd);
+      rows.set(k, {
+        path,
+        sessionId: key.sessionId,
+        day: key.day,
+        model: key.model,
+        owner,
+        repo,
+        ...tokens,
+        costUsd: cost,
+        messages,
+        lastAt: at,
+      });
     };
-    let failed = false;
+    let unread = false;
     for (;;) {
+      let error = false;
       const r = readNewLines(path, offset, {
         onError: () => {
-          failed = true;
+          error = true;
         },
       });
+      if (error && r.lines.length === 0 && r.nextOffset === offset && !r.reset) {
+        unread = true;
+        break;
+      }
       if (r.reset) {
+        reset = true;
         last = null;
-        pending = null;
         rows.clear();
       }
       for (const line of r.lines) {
         const u = usageOf(line, stem);
         if (u === null) continue;
-        if (u.id === last) {
-          // a later line of the message being read: its usage is the fuller one
-          if (pending?.id === u.id) pending = u;
+        if (last !== null && u.id === last.id) {
+          // a later line of the message last counted: add only what its counts grew by
+          const grown = { ...last.tokens };
+          let any = false;
+          for (const kind of KINDS) {
+            const more = u.tokens[kind] - last.tokens[kind];
+            grown[kind] = Math.max(0, more);
+            if (more > 0) {
+              any = true;
+              last.tokens[kind] = u.tokens[kind];
+            }
+          }
+          if (any) add({ ...last, cwd: u.cwd }, grown, last.fast, u.at, 0);
           continue;
         }
-        flush();
-        pending = u;
-        last = u.id;
+        const d = day(u.at);
+        add(
+          { sessionId: u.sessionId, day: d, model: u.model, cwd: u.cwd },
+          u.tokens,
+          u.fast,
+          u.at,
+          1,
+        );
+        added++;
+        last = {
+          id: u.id,
+          sessionId: u.sessionId,
+          day: d,
+          model: u.model,
+          fast: u.fast,
+          tokens: { ...u.tokens },
+        };
       }
       budget -= r.nextOffset - (r.reset ? 0 : offset);
       if (r.nextOffset === offset && !r.reset) break;
       offset = r.nextOffset;
       if (budget <= 0) break;
     }
-    flush();
-    if (failed && rows.size === 0 && offset === (prev?.offset ?? offset)) continue;
+    if (unread && rows.size === 0 && !reset) {
+      failed.push(path);
+      continue;
+    }
     store.addSessionSpend(
       {
         path,
         offset,
         // a pass that stopped short reads on next time, even when the file has not changed
-        size: budget <= 0 ? -1 : st.size,
+        size: budget <= 0 || unread ? -1 : st.size,
         mtime: st.mtimeMs,
-        lastMessage: last,
+        last,
       },
       [...rows.values()],
+      reset,
     );
+    if (unread) failed.push(path);
   }
   store.setSetting(SESSION_SPEND_READ_SETTING, String(now));
+  if (failed.length > 0)
+    throw new Error(
+      `${failed.length} of the transcripts under ${root} could not be read: ${failed.slice(0, 3).join(", ")}`,
+    );
   return { files, added };
 }
-
-type Owner = "operator" | "crew" | "flight";
 
 /** The repo of a folder by its git checkout: the main checkout's folder name; cached, no git run. */
 const repoCache = new Map<string, string | null>();
@@ -243,15 +312,16 @@ function repoOfCwd(cwd: string): string | null {
   return found;
 }
 
-interface Classified {
-  owner: Owner;
+interface Attribution {
+  owner: SpendOwner;
   repo: string | null;
 }
 
-/** Decides each session's owner and repo now, from the runs, the seats and the folder it ran in. */
-function classifier(config: CcConfig, store: Store, records: readonly SessionSpendRecord[]) {
-  const ids = [...new Set(records.map((r) => r.sessionId))];
-  const owners = store.sessionSpendOwners(ids);
+/**
+ * Decides a session's owner and repo from the runs, the seats and the folder it ran in, as they
+ * are now; the rows keep the answer. Cached for one pass.
+ */
+function attribution(config: CcConfig, store: Store) {
   const crew = config.crew;
   const crewRoots = crew
     ? [crew.worktrees, `${crew.worktrees}-sessions`, ...crew.sessions.map((s) => s.checkout)].map(
@@ -261,24 +331,24 @@ function classifier(config: CcConfig, store: Store, records: readonly SessionSpe
   const seatRepo = new Map(
     (crew?.sessions ?? []).flatMap((s) => s.seats.map((seat) => [seat.id, s.repoId] as const)),
   );
-  const cache = new Map<string, Classified>();
-  return (r: SessionSpendRecord): Classified => {
-    const key = `${r.sessionId}\0${r.cwd ?? ""}`;
+  const cache = new Map<string, Attribution>();
+  return (sessionId: string, cwd: string | null): Attribution => {
+    const key = `${sessionId}\0${cwd ?? ""}`;
     const hit = cache.get(key);
     if (hit) return hit;
-    const known = owners.get(r.sessionId);
-    let out: Classified;
+    const known = store.sessionSpendOwner(sessionId);
+    let out: Attribution;
     if (known) {
       out = {
         owner: crewSeatDef(config, known.agentId).loop === "watch" ? "flight" : "crew",
-        repo: known.repoId ?? seatRepo.get(known.agentId) ?? (r.cwd ? repoOfCwd(r.cwd) : null),
+        repo: known.repoId ?? seatRepo.get(known.agentId) ?? (cwd ? repoOfCwd(cwd) : null),
       };
     } else {
-      const real = r.cwd ? realish(r.cwd) : null;
+      const real = cwd ? realish(cwd) : null;
       out = {
         owner:
           real !== null && crewRoots.some((root) => isInside(real, root)) ? "crew" : "operator",
-        repo: r.cwd ? repoOfCwd(r.cwd) : null,
+        repo: cwd ? repoOfCwd(cwd) : null,
       };
     }
     cache.set(key, out);
@@ -294,19 +364,19 @@ const addTo = (c: SpendCell, r: SessionSpendRecord): void => {
 
 /**
  * Every Claude session on this Mac over the last SESSION_SPEND_WEEK_DAYS local days, by local day
- * and repo, split into the operator's sessions, the crew and FLIGHT. Each session falls in exactly
- * one group, so the rows add up to `total`, the sum of every stored row in the window.
+ * and repo, split into the operator's sessions, the crew and FLIGHT. Each stored row falls in
+ * exactly one group, the one recorded when its lines were read (a later config change moves
+ * nothing), so the rows add up to `total`, the sum of every stored row in the window.
  */
 export function sessionSpendSplit(config: CcConfig, store: Store, now: number): SessionSpendSplit {
   const tz = config.operator.timezone;
   const days = lastDays(dayFormatter(tz)(now), SESSION_SPEND_WEEK_DAYS);
   const records = store.sessionSpendSince(days[0] as string);
-  const classify = classifier(config, store, records);
   const rows = new Map<string, SessionSpendRow>();
   const total = cell();
   let unpricedTokens = 0;
   for (const r of records) {
-    const { owner, repo } = classify(r);
+    const { owner, repo } = r;
     const key = `${r.day}\0${repo ?? ""}`;
     let row = rows.get(key);
     if (!row) {

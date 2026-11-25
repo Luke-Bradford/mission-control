@@ -1,5 +1,6 @@
 import {
   appendFileSync,
+  chmodSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
@@ -9,10 +10,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run } from "@mc/core";
+import { type Run, SESSION_SPEND_RETENTION_DAYS } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { readSessionSpend, sessionSpendFor, sessionSpendSplit } from "../src/spend/sessions.ts";
+import {
+  readSessionSpend,
+  SESSION_SPEND_READ_SETTING,
+  sessionSpendFor,
+  sessionSpendSplit,
+} from "../src/spend/sessions.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-11-25T15:00:00Z");
@@ -58,7 +64,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const read = (now = NOW) => readSessionSpend({ store, root, tz: TZ, now });
+const read = (now = NOW) => readSessionSpend({ config, store, root, now });
 
 /** One assistant turn, as Claude Code writes it. */
 const turn = (
@@ -164,7 +170,7 @@ describe("session spend", () => {
     expect(split.rows.every((r) => r.operator.tokens === r.total.tokens)).toBe(true);
 
     expect(read(NOW + 60_000).added).toBe(0);
-    expect(readSessionSpend({ store, root, tz: TZ, now: NOW + 90_000 }).added).toBe(0);
+    expect(readSessionSpend({ config, store, root, now: NOW + 90_000 }).added).toBe(0);
     expect(sessionSpendFor(store, ["sess-op"], NOW + 90_000, TZ).get("sess-op")?.today.tokens).toBe(
       2600,
     );
@@ -280,10 +286,184 @@ describe("session spend", () => {
     expect(src).not.toMatch(/node:child_process/);
   });
 
-  it("a missing root adds nothing", () => {
-    expect(readSessionSpend({ store, root: join(dir, "gone"), tz: TZ, now: NOW })).toEqual({
-      files: 0,
-      added: 0,
+  it("a missing root fails the pass and records nothing", () => {
+    expect(() => readSessionSpend({ config, store, root: join(dir, "gone"), now: NOW })).toThrow(
+      /cannot read/,
+    );
+    expect(store.getSetting(SESSION_SPEND_READ_SETTING)).toBeNull();
+    expect(sessionSpendSplit(config, store, NOW).readAt).toBeNull();
+  });
+
+  it("an empty root is a successful read", () => {
+    expect(read()).toEqual({ files: 0, added: 0 });
+    expect(sessionSpendSplit(config, store, NOW).readAt).toBe(NOW);
+  });
+
+  it("an unreadable transcript fails the pass, keeps its offset and is read once it can be", () => {
+    const p = join(root, "p");
+    mkdirSync(p);
+    const u = { input_tokens: 10, output_tokens: 10 };
+    writeFileSync(join(p, "ok.jsonl"), turn("ok", "/x", "m1", NOW - 1000, u));
+    const locked = join(p, "locked.jsonl");
+    writeFileSync(locked, turn("locked", "/x", "m1", NOW - 1000, u));
+    chmodSync(locked, 0o000);
+    try {
+      expect(() => read()).toThrow(/1 of the transcripts .* could not be read/);
+    } finally {
+      chmodSync(locked, 0o644);
+    }
+    expect(sessionSpendFor(store, ["ok"], NOW, TZ).get("ok")?.today.tokens).toBe(20);
+    expect(sessionSpendFor(store, ["locked"], NOW, TZ).get("locked")).toBeUndefined();
+    read(NOW + 30_000);
+    expect(sessionSpendFor(store, ["locked"], NOW, TZ).get("locked")?.today.tokens).toBe(20);
+    expect(sessionSpendFor(store, ["ok"], NOW, TZ).get("ok")?.today.tokens).toBe(20);
+  });
+
+  it("a later block of a message read on a later pass adds only what it grew by", () => {
+    const p = join(root, "p");
+    mkdirSync(p);
+    const file = join(p, "s.jsonl");
+    writeFileSync(file, turn("s", "/x", "m1", NOW - 3000, { input_tokens: 10, output_tokens: 7 }));
+    read();
+    appendFileSync(
+      file,
+      turn("s", "/x", "m1", NOW - 2000, { input_tokens: 10, output_tokens: 120 }) +
+        turn("s", "/x", "m1", NOW - 1000, { input_tokens: 10, output_tokens: 120 }),
+    );
+    read(NOW + 30_000);
+    read(NOW + 60_000);
+    const c = sessionSpendFor(store, ["s"], NOW + 60_000, TZ).get("s");
+    expect(c?.today.tokens).toBe(130);
+    expect(c?.today.costUsd).toBeCloseTo((10 * 4 + 120 * 20) / 1e6, 12);
+    // in one pass too
+    writeFileSync(
+      join(p, "t.jsonl"),
+      turn("t", "/x", "m1", NOW - 3000, { input_tokens: 10, output_tokens: 7 }) +
+        turn("t", "/x", "m1", NOW - 2000, { input_tokens: 10, output_tokens: 120 }),
+    );
+    read(NOW + 90_000);
+    expect(sessionSpendFor(store, ["t"], NOW + 90_000, TZ).get("t")?.today.tokens).toBe(130);
+  });
+
+  it("a truncated transcript replaces its earlier spend, and leaves other files' alone", () => {
+    const p = join(root, "p");
+    mkdirSync(p);
+    const file = join(p, "s.jsonl");
+    // a subagent transcript shares the session id
+    mkdirSync(join(p, "s", "subagents"), { recursive: true });
+    writeFileSync(
+      join(p, "s", "subagents", "agent-1.jsonl"),
+      turn("s", "/x", "sub1", NOW - 5000, { input_tokens: 100, output_tokens: 0 }),
+    );
+    writeFileSync(
+      file,
+      turn("s", "/x", "m1", NOW - 4000, { input_tokens: 20, output_tokens: 10 }) +
+        turn("s", "/x", "m2", NOW - 3000, { input_tokens: 20, output_tokens: 10 }),
+    );
+    read();
+    expect(sessionSpendFor(store, ["s"], NOW, TZ).get("s")?.today.tokens).toBe(160);
+    writeFileSync(file, turn("s", "/x", "m9", NOW - 1000, { input_tokens: 4, output_tokens: 2 }));
+    read(NOW + 30_000);
+    expect(sessionSpendFor(store, ["s"], NOW + 30_000, TZ).get("s")?.today.tokens).toBe(106);
+  });
+
+  it("owner and repo stay as read when the config changes later", () => {
+    store.setSeatSession({
+      seatId: "flight-1",
+      runId: null,
+      cliSessionId: "sess-flight",
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
     });
+    const p = join(root, "p");
+    mkdirSync(p);
+    const file = join(p, "sess-flight.jsonl");
+    writeFileSync(
+      file,
+      turn("sess-flight", "/x", "d1", NOW - 2000, { input_tokens: 30, output_tokens: 3 }),
+    );
+    read();
+    const before = sessionSpendSplit(config, store, NOW);
+    expect(before.rows).toHaveLength(1);
+    expect(before.rows[0]).toMatchObject({ repo: "shop-app", flight: { tokens: 33 } });
+    // the seat becomes a build seat in another repo
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("no crew session");
+    const moved = {
+      ...config,
+      repos: [...config.repos, { ...config.repos[0], id: "other", github: "o/other" }],
+      crew: {
+        ...config.crew,
+        sessions: [
+          {
+            ...session,
+            repoId: "other",
+            seats: session.seats.map((s) => (s.id === "flight-1" ? { ...s, role: "GUIDO" } : s)),
+          },
+        ],
+      },
+    } as CcConfig;
+    const after = sessionSpendSplit(moved, store, NOW);
+    expect(after.rows).toEqual(before.rows);
+    // a new turn on a later pass is read under the new config, the earlier one keeps its owner
+    appendFileSync(
+      file,
+      turn("sess-flight", "/x", "d2", NOW - 1000, { input_tokens: 1, output_tokens: 1 }),
+    );
+    readSessionSpend({ config: moved, store, root, now: NOW + 30_000 });
+    expect(sessionSpendSplit(moved, store, NOW + 30_000).rows[0]).toMatchObject({
+      repo: "shop-app",
+      flight: { tokens: 35 },
+    });
+  });
+
+  it("maintenance keeps 90 days of spend and drops the offsets of gone or old files", async () => {
+    const p = join(root, "p");
+    mkdirSync(p);
+    const u = { input_tokens: 1, output_tokens: 1 };
+    const DAY = 24 * 3_600_000;
+    const keepAt = NOW - (SESSION_SPEND_RETENTION_DAYS - 1) * DAY;
+    const dropAt = NOW - (SESSION_SPEND_RETENTION_DAYS + 1) * DAY;
+    const record = (path: string, sessionId: string, at: number) =>
+      store.addSessionSpend({ path, offset: 1, size: 1, mtime: at, last: null }, [
+        {
+          path,
+          sessionId,
+          day: new Date(at).toISOString().slice(0, 10),
+          model: "claude-opus-5-5",
+          owner: "operator",
+          repo: null,
+          input: 1,
+          output: 1,
+          cacheWrite5m: 0,
+          cacheWrite1h: 0,
+          cacheRead: 0,
+          costUsd: 0,
+          messages: 1,
+          lastAt: at,
+        },
+      ]);
+    const present = join(p, "present.jsonl");
+    writeFileSync(present, turn("present", "/x", "m1", NOW - 1000, u));
+    const oldFile = join(p, "old.jsonl");
+    writeFileSync(oldFile, turn("old", "/x", "m1", NOW - 1000, u));
+    record(present, "kept", keepAt);
+    record(oldFile, "dropped", dropAt);
+    record(join(p, "gone.jsonl"), "gone", keepAt);
+    const rows = () =>
+      store
+        .sessionSpendSince("2000-01-01")
+        .map((r) => r.sessionId)
+        .sort();
+    await store.pruneHistory(NOW);
+    expect(rows()).toEqual(["gone", "kept"]);
+    expect(store.sessionSpendFile(present)).not.toBeNull();
+    expect(store.sessionSpendFile(oldFile)).toBeNull();
+    expect(store.sessionSpendFile(join(p, "gone.jsonl"))).toBeNull();
+    await store.pruneHistory(NOW);
+    expect(rows()).toEqual(["gone", "kept"]);
+    expect(store.sessionSpendFile(present)).not.toBeNull();
   });
 });

@@ -553,8 +553,12 @@ export class Store {
     return this.sessionSpendQ.sessionSpendFile(path);
   }
 
-  addSessionSpend(file: SessionSpendFile, records: readonly SessionSpendRecord[]): void {
-    this.sessionSpendQ.addSessionSpend(file, records);
+  addSessionSpend(
+    file: SessionSpendFile,
+    records: readonly SessionSpendRecord[],
+    reset = false,
+  ): void {
+    this.sessionSpendQ.addSessionSpend(file, records, reset);
   }
 
   sessionSpendSince(sinceDay: string): SessionSpendRecord[] {
@@ -565,10 +569,8 @@ export class Store {
     return this.sessionSpendQ.sessionSpendOf(sessionIds, sinceDay);
   }
 
-  sessionSpendOwners(
-    sessionIds: readonly string[],
-  ): Map<string, { agentId: string; repoId: string | null }> {
-    return this.sessionSpendQ.sessionSpendOwners(sessionIds);
+  sessionSpendOwner(sessionId: string): { agentId: string; repoId: string | null } | null {
+    return this.sessionSpendQ.sessionSpendOwner(sessionId);
   }
 
   private runQueriesCache: ReturnType<typeof runQueries> | undefined;
