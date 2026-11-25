@@ -6,9 +6,9 @@ Query: `?tab=crew|cost|throughput|quality|machine`, `&state=normal|loading|empty
 
 The shell follows the real one: page links on top, FLIGHT's 48 px rail on the right, key hints below. The layout reacts to the width of the work area, not the window, so opening the dock recomposes it.
 
-Approval: approved by the operator. The five tabs are built (#1977 to #1981).
+Approval: waiting for the operator.
 
-Checkpoint 3 of #1178.
+Checkpoint 3 of #1178. The operator approves this before any build ticket is filed. FLIGHT records the approval and files the tickets.
 
 ## Page question
 
@@ -151,4 +151,4 @@ Shared by all five: the health band, its verdict rule, the tab query string, the
 
 ## Evidence
 
-The controller has now rendered the proposal and the current production page with fictional fixtures. [The retained review account](../../../../docs/reviews/2026-11-09/telemetry-mockup-1397/README.md) links the actual manifests and source-bound checks. It includes matched proposal iterations, all five tabs at the required sizes/themes, drawer, stress, short and 4K cases, and six current-page comparisons. The operator has approved the design, and the build tickets are done.
+The controller has now rendered the proposal and the current production page with fictional fixtures. [The retained review account](../../../../docs/reviews/2026-11-09/telemetry-mockup-1397/README.md) links the actual manifests and source-bound checks. It includes matched proposal iterations, all five tabs at the required sizes/themes, drawer, stress, short and 4K cases, and six current-page comparisons. Operator design approval remains outstanding; no build tickets are started.
