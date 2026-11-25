@@ -1,13 +1,15 @@
 // @vitest-environment node
-import { mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CmuxSessionRow, CmuxSessionState, CmuxSessionsView } from "@mc/core";
-import { expect, it } from "vitest";
+import { afterAll, expect, it } from "vitest";
 import {
   BROWSER_TEST_TIMEOUT_MS,
   browserSession,
   describeRendered,
   type RenderedPage,
+  type ScreenshotClip,
 } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
 import { NOW } from "./fixtures.ts";
@@ -130,11 +132,64 @@ const metrics = (page: RenderedPage) =>
     };
   }, undefined);
 
-async function capture(page: RenderedPage, name: string) {
+/** What each kept image is, for the evidence manifest (see docs/runbooks/visual-qa.md). */
+interface Shot {
+  image: string;
+  phase: "before" | "after";
+  scope: "viewport" | "focused";
+  width: number;
+  height: number;
+  scheme: "light" | "dark" | "browser default";
+  state: string;
+  clip?: ScreenshotClip;
+  source?: string;
+}
+const shots: Shot[] = [];
+
+async function capture(
+  page: RenderedPage,
+  name: string,
+  about: Omit<Shot, "image"> | null = null,
+  clip?: ScreenshotClip,
+) {
   if (!evidence) return;
   mkdirSync(evidence, { recursive: true });
-  await page.screenshot(join(evidence, `${name}.png`));
+  await page.screenshot(join(evidence, `${name}.png`), clip);
+  if (about !== null) shots.push({ image: `${name}.png`, ...about, ...(clip ? { clip } : {}) });
 }
+
+const head = () => {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {
+    return "unknown";
+  }
+};
+
+// The manifest binds every kept image to the commit it was rendered from.
+afterAll(() => {
+  if (!evidence || shots.length === 0) return;
+  writeFileSync(
+    join(evidence, "sessions-manifest.json"),
+    `${JSON.stringify(
+      {
+        page: "/sessions",
+        renderedSource: head(),
+        harness:
+          "apps/web/test/CmuxSessions.browser.test.ts in the real app shell (test/desktopBrowser.html)",
+        browser: "headless Chromium via the repo's browser runner, device scale 1, zoom 100%",
+        data: "fixture rows from this test; the desktop fixture for the rest of the shell",
+        clock: new Date(NOW).toISOString(),
+        capturedAt: new Date().toISOString(),
+        baseline:
+          "The /sessions address is new: on main it renders the shell's Page not found panel. The before images are that panel, rendered by this head's shell at an address with no page (so the header already shows the Sessions tab, which main's does not).",
+        shots,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+});
 
 describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
   for (const [width, height] of [
@@ -149,7 +204,14 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
         async () => {
           const page = await open(width, height, scheme, view(6, true));
           try {
-            await capture(page, `sessions-${width}x${height}-${scheme}-6`);
+            await capture(page, `sessions-${width}x${height}-${scheme}-6`, {
+              phase: "after",
+              scope: "viewport",
+              width,
+              height,
+              scheme,
+              state: "six sessions across two repos, one waiting, two apps, a long last line",
+            });
             const m = await metrics(page);
             expect(m.docWidth).toBeLessThanOrEqual(width);
             expect(m.docHeight).toBeLessThanOrEqual(height);
@@ -381,4 +443,104 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
       },
       BROWSER_TEST_TIMEOUT_MS,
     );
+});
+
+describeRendered("Sessions page review evidence: before, after and the Write route", () => {
+  for (const [width, height] of [
+    [1920, 940],
+    [2560, 1145],
+  ] as const)
+    for (const scheme of ["light", "dark"] as const) {
+      it(
+        `before: main had no page at this address, at ${width}×${height} in ${scheme}`,
+        async () => {
+          const page = await renderAt({
+            page: "test/desktopBrowser.html",
+            width,
+            height,
+            colorScheme: scheme,
+            search: "?path=/sessions-before-2235",
+            api: desktopFixture().api,
+          });
+          try {
+            await page.box("#page-not-found");
+            await page.evaluate(() => document.fonts.ready.then(() => null), undefined);
+            await capture(page, `sessions-before-${width}x${height}-${scheme}`, {
+              phase: "before",
+              scope: "viewport",
+              width,
+              height,
+              scheme,
+              state: "Page not found: the address had no page before this change",
+              source: "reconstructed with this head's shell at an address with no page",
+            });
+            const text = await page.evaluate(
+              () => document.querySelector("#page-not-found")?.textContent ?? "",
+              undefined,
+            );
+            expect(text).toContain("Page not found");
+          } finally {
+            await page.close();
+          }
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+
+      it(
+        `the table up close with Write open, at ${width}×${height} in ${scheme}`,
+        async () => {
+          const page = await open(width, height, scheme, view(6, true));
+          try {
+            const table = await page.box("#page-sessions");
+            const clip = {
+              x: Math.floor(table.x),
+              y: Math.floor(table.y),
+              width: Math.ceil(table.width),
+              height: Math.ceil(table.height),
+            };
+            await capture(
+              page,
+              `sessions-${width}x${height}-${scheme}-table`,
+              {
+                phase: "after",
+                scope: "focused",
+                width,
+                height,
+                scheme,
+                state: "the Sessions panel at normal density, long last line cut with an ellipsis",
+                source: `crop of sessions-${width}x${height}-${scheme}-6.png's page`,
+              },
+              clip,
+            );
+            await page.click("tr.sess-row button.sess-write");
+            await page.box("tr.sess-composer input");
+            await capture(page, `sessions-${width}x${height}-${scheme}-write-open`, {
+              phase: "after",
+              scope: "viewport",
+              width,
+              height,
+              scheme,
+              state: "Write clicked on the first row: its one-line composer is open and focused",
+            });
+            const m = await page.evaluate(() => {
+              const input = document.querySelector<HTMLElement>("tr.sess-composer input");
+              const b = input?.getBoundingClientRect();
+              return {
+                focused: document.activeElement === input,
+                onScreen: b ? b.height > 0 && b.bottom <= innerHeight : false,
+                docHeight: document.documentElement.scrollHeight,
+              };
+            }, undefined);
+            expect(m.focused).toBe(true);
+            expect(m.onScreen).toBe(true);
+            expect(m.docHeight).toBeLessThanOrEqual(height);
+            // opening the composer sends nothing
+            expect(page.requests().some((r) => r.path.endsWith("/send"))).toBe(false);
+          } finally {
+            await page.close();
+          }
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
 });
