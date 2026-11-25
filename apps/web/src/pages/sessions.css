@@ -301,13 +301,14 @@ button.sess-inbox[aria-expanded="true"] {
     gap: 0;
   }
   /* Buttons keep their 24 px target, so the text line stacked with one (the name over its unread
-     button, the answer under the app link) gives 1 px to the row's border. */
+     button, the answer under the app link) overlaps it by a quarter step (1 px) so the row stays within 40 px. */
   .sess-name {
     max-width: 100%;
-    line-height: calc(var(--lh-s) - 1px);
+    line-height: var(--lh-s);
+    margin-block-end: calc(var(--sp-1) / -4);
   }
   .sess-ans {
-    line-height: calc(var(--lh-s) - 1px);
+    margin-block-start: calc(var(--sp-1) / -4);
   }
 }
 
