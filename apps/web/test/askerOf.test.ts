@@ -11,4 +11,7 @@ describe("askerOf (#1543)", () => {
     expect(askerOf(item({ agentId: null, brief: brief({ for: "operator" }) }))).toBe("FLIGHT");
     expect(askerOf(item({ agentId: null, brief: undefined }))).toBe("the hub");
   });
+  it("writes a seat id as a call sign when no crew row names it", () => {
+    expect(askerOf(item({ agentId: "guido-1" }))).toBe("GUIDO-1");
+  });
 });

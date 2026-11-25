@@ -103,6 +103,72 @@ describe("Comms routes", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Hide hub notices" }));
     await screen.findByText(notice.text);
   });
+  it("drops the Pinned label when the only pin is a hidden hub notice", async () => {
+    const notice = {
+      id: "comms:2",
+      at: NOW,
+      from: "MC",
+      to: "crew",
+      text: "CI failed. Read the check.",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: true,
+      operator: false,
+      kind: "notice",
+    };
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: ROWS },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/crew": { messages: [notice] },
+      "/api/comms/crew?notices=hide": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [notice] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    expect(await screen.findByText("Pinned")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hide hub notices" }));
+    await waitFor(() => expect(screen.queryByText("Pinned")).toBeNull());
+  });
+
+  it("marks FLIGHT's message count as a floor when older messages exist", async () => {
+    const message = (n: number) => ({
+      id: `comms:${n}`,
+      at: NOW,
+      from: "CAPCOM",
+      to: "flight",
+      text: `Message ${n}`,
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: true,
+    });
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: ROWS },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/crew": { messages: [] },
+      "/api/comms/flight": { messages: [message(1), message(2)], hasMore: true, cursor: "c" },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    const nav = await screen.findByRole("navigation", { name: "Comms" });
+    expect(await within(nav).findByText("2+ messages")).toBeTruthy();
+  });
+
   it("keeps the loaded messages and counts on screen while the notices switch loads", async () => {
     const base = {
       at: NOW,

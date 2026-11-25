@@ -336,8 +336,7 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/agent/SideTabs.tsx": "pane: an item the seat raised",
   "src/agent/chooseSeat.ts": "page: the chosen seat",
   "src/attention.ts": "page: Needs you item (pane only for items that are not the operator's)",
-  "src/board/Card.tsx":
-    "page: the ticket (card, title), Needs you item (You chip), seat (agent tag), trace",
+  "src/board/Card.tsx": "page: the ticket (card, title), Needs you item (You chip), trace",
   "src/browserNotifications.ts": "page: the notification's target",
   "src/comms/CommsGraph.tsx": "page: the conversation a map seat or link opens",
   "src/comms/Conversation.tsx":

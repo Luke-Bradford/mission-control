@@ -1,4 +1,10 @@
-import { ATTENTION_LABEL, type AttentionItem, type CrewRow, needsYouAlert } from "@mc/core";
+import {
+  ATTENTION_LABEL,
+  type AttentionItem,
+  type CrewRow,
+  needsYouAlert,
+  seatCallSign,
+} from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { callSign as callSignOf } from "../crew.ts";
@@ -26,13 +32,18 @@ export const titleOf = (item: AttentionItem): string =>
 export const askerIdOf = (item: AttentionItem): string | null => item.asker ?? item.agentId;
 
 /**
- * Who asks: the seat or loop behind the item, else FLIGHT when it briefed the question, else the
- * hub (an alert).
+ * Who asks: the seat or loop behind the item by call sign (its id written as one when no crew row
+ * names it), else FLIGHT when it briefed the question, else the hub (an alert).
  */
-export const askerOf = (item: AttentionItem, callSign?: string | null): string =>
-  item.alert || needsYouAlert(item)
-    ? "the hub"
-    : (callSign ?? askerIdOf(item) ?? (item.brief?.for === "operator" ? "FLIGHT" : "the hub"));
+export const askerOf = (item: AttentionItem, callSign?: string | null): string => {
+  if (item.alert || needsYouAlert(item)) return "the hub";
+  const id = askerIdOf(item);
+  return (
+    callSign ??
+    (id === null ? null : seatCallSign(id)) ??
+    (item.brief?.for === "operator" ? "FLIGHT" : "the hub")
+  );
+};
 
 /** The recommended option's label, when the brief names one. */
 export function recommendedLabel(item: AttentionItem): string | null {

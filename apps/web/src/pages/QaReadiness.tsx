@@ -282,7 +282,9 @@ function QueueGroup({
                   ? p.uat?.since == null
                     ? "Age unknown"
                     : elapsed(Math.max(0, now - p.uat.since))
-                  : (p.ci ?? "In review")}
+                  : p.ci
+                    ? `CI ${p.ci}`
+                    : "In review"}
               </span>
               <span className="uat-queue-meta">
                 {p.repoId} · {prLabel(p.number)} ·{" "}

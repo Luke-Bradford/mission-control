@@ -150,7 +150,12 @@ export function CommsNav({
   onNavigate: (path: string) => void;
   hideNotices?: boolean;
 }) {
-  const flight = useNoticeResource<CommsMessagesResponse>(RESOURCES.commsFlight, hideNotices).data;
+  // The hub sends FLIGHT's newest page; `hasMore` says older messages exist beyond it.
+  const flight = useNoticeResource<CommsMessagesResponse & { hasMore?: boolean }>(
+    RESOURCES.commsFlight,
+    hideNotices,
+  ).data;
+  const flightCount = flight?.messages.length ?? 0;
   const toYou = unseenMentionsFor(useMentions(), "flight", flightId);
   // Observed loops appear in `/api/crew` too, but are not stored-Comms agents.  In particular,
   // `/api/comms/agents/:id` correctly rejects them, so never mount an AgentNavRow for one.
@@ -178,7 +183,9 @@ export function CommsNav({
         <i aria-hidden="true" />
         <span className="comms-nav-agent">
           <b>FLIGHT and you</b>
-          <small>{plural(flight?.messages.length ?? 0, "message")}</small>
+          <small>
+            {flight?.hasMore ? `${flightCount}+ messages` : plural(flightCount, "message")}
+          </small>
         </span>
         <span className="comms-nav-counts">
           <CountBadges flight={toYou} />

@@ -7,6 +7,7 @@ import {
   seatClass,
   shortAge,
   stepRoster,
+  SEAT_STOPPED_WORK,
   workLine,
 } from "../src/agent/roster.ts";
 import { crewRow, HOUR, MIN, NOW, seatRow } from "./fixtures.ts";
@@ -111,6 +112,9 @@ describe("what a card says", () => {
       full: "Free",
     });
     expect(workLine(flight("flight-1")).text).toBe("Watching the crew");
+    expect(workLine(dev("guido-2", "shop-app", { run: null, hudState: "stopped" })).text).toBe(
+      SEAT_STOPPED_WORK,
+    );
   });
 
   it("context is a dash (null) when idle, never 0, and a rounded percent when running", () => {

@@ -77,8 +77,14 @@ export function briefPictures(item: AttentionItem): { label: string; url: string
 export function briefLinks(item: AttentionItem): { label: string; url: string }[] {
   const seen = new Set<string>();
   const out: { label: string; url: string }[] = [];
+  // Only a picture the page draws is left out; a plain link to a picture route stays a link.
+  const drawn = new Set(
+    briefPictures(item)
+      .map((p) => p.url)
+      .filter((url) => pictureRoute(url)),
+  );
   const add = (label: string, url: string) => {
-    if (seen.has(url) || pictureRoute(url)) return;
+    if (seen.has(url) || drawn.has(url)) return;
     seen.add(url);
     out.push({ label, url });
   };
