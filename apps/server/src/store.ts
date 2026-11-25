@@ -548,6 +548,8 @@ export class Store {
       statement: (sql) => this.statement(sql),
       run: (id) => this.run(id),
       raiseNote: (n) => this.raiseNote(n),
+      openNoteKeys: () => this.notes().map((n) => n.key),
+      clearNote: (key, at) => this.clearNote(key, at),
     });
   }
 

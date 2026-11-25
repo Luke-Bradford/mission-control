@@ -8132,6 +8132,24 @@ describe("superuser housekeeping", () => {
       true,
     );
   });
+  it("dismisses a round note, which has no run and holds nothing", async () => {
+    elevated();
+    store.raiseNote({
+      key: "chatter:mc#7:flight-1:guido-1",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: "mc",
+      text: "flight-1 and guido-1 exceeded 6 rounds on mc#7.",
+      at: NOW,
+    });
+    expect(
+      await call("dismiss_item", { key: "note:chatter:mc#7:flight-1:guido-1" }),
+    ).not.toHaveProperty("isError", true);
+    expect(store.notes().find((n) => n.key === "chatter:mc#7:flight-1:guido-1")?.dismissedAt).toBe(
+      NOW,
+    );
+  });
   it("answers a repo-less held Update note as protected, not missing (#1886)", async () => {
     elevated();
     store.raiseNote({

@@ -1023,6 +1023,27 @@ describe("Comms API", () => {
     });
   });
 
+  it("clears a round note once the pair is quiet for the window, and raises it again on new rounds", () => {
+    const ticket = "shop-app#706";
+    const chatterNotes = () => store.notes().filter((note) => note.key.startsWith("chatter:"));
+    const rounds = (at: number) => {
+      for (let round = 0; round < 7; round++) {
+        commsRow("alpha", "beta", `question ${round}`, at, ticket);
+        commsRow("beta", "alpha", `reply ${round}`, at, ticket);
+      }
+    };
+    rounds(clock);
+    expect(chatterNotes()).toHaveLength(1);
+    // another pair's message inside the window leaves the note alone
+    commsRow("gamma", "delta", "unrelated", clock + HOUR, "shop-app#707");
+    expect(chatterNotes()).toHaveLength(1);
+    // the next message stored after the window has passed clears it, with nobody dismissing it
+    commsRow("gamma", "delta", "unrelated", clock + 2 * HOUR + 1, "shop-app#707");
+    expect(chatterNotes()).toEqual([]);
+    rounds(clock + 5 * HOUR);
+    expect(chatterNotes()).toHaveLength(1);
+  });
+
   it("does not flag chatter whose seven rounds span more than two hours", async () => {
     const ticket = "shop-app#706";
     for (let round = 0; round < 7; round++) {

@@ -15,6 +15,7 @@ import {
   type CommsReactionKind,
   type CommsSenderKind,
   commsCutMarker,
+  isChatterNoteKey,
   type Run,
   type TokenUsage,
 } from "@mc/core";
@@ -39,6 +40,9 @@ export interface CommsHost {
   statement(sql: string): StatementSync;
   run(id: string): Run | null;
   raiseNote(n: NoteInput): void;
+  /** The keys of the notes still open (a dismissed note is still open until it is cleared). */
+  openNoteKeys(): string[];
+  clearNote(key: string, at: number): void;
 }
 
 type Row = Record<string, SQLInputValue>;
@@ -204,10 +208,27 @@ export class CommsQueries {
         };
         this.insertComms(context, cutCommsText(context.text), null);
       }
+      this.clearQuietChatterNotes(row.at);
       this.raiseChatterNote(row);
     }, true);
     const stored = id === null ? null : this.commsMessage(`comms:${id}`);
     return stored !== null && repeat ? { ...stored, repeat: true } : stored;
+  }
+
+  /**
+   * Clears each round note whose pair is no longer past the limit in the rolling window, so a note
+   * about a conversation that ended does not wait for anyone to dismiss it. Runs as a message is
+   * stored: the hub needs no timer for it, and a pair that crosses the limit again raises it anew.
+   */
+  private clearQuietChatterNotes(at: number): void {
+    const open = this.host.openNoteKeys().filter(isChatterNoteKey);
+    if (open.length === 0) return;
+    const past = new Set(
+      this.commsChatter(at - COMMS_CHATTER_WINDOW_MS, at).map(
+        (pair) => `${CHATTER_NOTE_PREFIX}${pair.ticket}:${pair.from}:${pair.to}`,
+      ),
+    );
+    for (const key of open) if (!past.has(key)) this.host.clearNote(key, at);
   }
 
   /** Opens one durable FLIGHT-facing note when a pair first crosses the rolling chatter limit. */
