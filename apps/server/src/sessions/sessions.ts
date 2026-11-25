@@ -31,6 +31,7 @@ import {
 } from "../runtime/cmux.ts";
 import type { Store } from "../store.ts";
 import { gitPlace } from "./branch.ts";
+import type { createBranchPrs } from "./pr.ts";
 
 /** cmux is not running; the hub never starts it for a read. */
 export const CMUX_NOT_RUNNING_TEXT = "cmux is not running.";
@@ -107,6 +108,7 @@ export interface SessionsDeps {
   now?: () => number;
   log?: (m: string) => void;
   repos?: () => { id: string; github: string }[];
+  prs?: Pick<ReturnType<typeof createBranchPrs>, "prOf">;
 }
 
 /** Any HTTP answer is an answer; refused or timed out is not. Redirects are not followed. */
@@ -507,28 +509,16 @@ export function createSessions(deps: SessionsDeps): SessionsService {
           if (row.folder === null) return row;
           const place = await gitPlace(row.folder);
           const branch = place?.branch ?? null;
-          const repo = deps
-            .repos?.()
-            .find((candidate) => candidate.github.toLowerCase() === place?.github);
-          const stored =
-            branch === null || repo === undefined
+          const found =
+            branch === null || place?.github === null || place?.github === undefined || !deps.prs
               ? null
-              : (store.openPullRequests(repo.id).find((pr) => pr.branch === branch) ?? null);
+              : await deps.prs.prOf(place.github, branch);
           const issue = branch === null ? null : branchIssue(branch);
           return {
             ...row,
             branch,
-            ticket: issue === null ? null : { number: issue, repoId: repo?.id ?? null },
-            pr:
-              stored === null
-                ? null
-                : {
-                    number: stored.number,
-                    url: stored.url,
-                    isDraft: stored.isDraft,
-                    ci: stored.ci,
-                    review: stored.review,
-                  },
+            ticket: issue === null ? null : { number: issue, repoId: found?.repoId ?? null },
+            pr: found?.pr ?? null,
           };
         }),
       );

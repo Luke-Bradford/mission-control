@@ -158,6 +158,7 @@ import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { startCmuxEvents } from "./sessions/events.ts";
+import { createBranchPrs } from "./sessions/pr.ts";
 import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
 import { createSessionSidebar } from "./sessions/sidebar.ts";
 import { onSignal } from "./shutdown.ts";
@@ -1031,11 +1032,13 @@ export async function main(): Promise<void> {
   // Every cmux workspace on this Mac (the Sessions page, and FLIGHT's cmux_sessions and cmux_send).
   // A preview hub reads them but never tells a session its app stopped.
   const cmux = createCmux([CMUX_COMMAND], (m) => log(m));
+  const branchPrs = createBranchPrs({ store, repos: () => config.repos, gh });
   const sessions = createSessions({
     cmux,
     store,
     seatIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     repos: () => config.repos.map((repo) => ({ id: repo.id, github: repo.github })),
+    prs: branchPrs,
     tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
     log: (m) => log(m),
   });
