@@ -1333,8 +1333,8 @@ export interface AttentionBrief {
   /** Missing on briefs written before triage routing was introduced. */
   for?: "operator" | "flight";
   /**
-   * The ticket (`repo#n`) the question is about, when the item has none of its own (#1543): a
-   * crew error, a stray, FLIGHT's own question.
+   * The ticket (`repo#n`) the question is about, when the item has none of its own (#1543), such
+   * as FLIGHT's own question.
    */
   ticket?: string;
   /** One line, at most 90 characters: what the operator reads in the list (#1510). */

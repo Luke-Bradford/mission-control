@@ -3978,6 +3978,13 @@ describe("push and draft_pr", () => {
       expect(body).not.toContain("forged links");
     });
 
+    it("drops a hub heading that follows blank lines", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view());
+      await edit("\n\n#42 — T\n\nNew text.");
+      expect((edits()[0]?.body ?? "").startsWith("New text.")).toBe(true);
+    });
+
     it("refuses a body that is only the heading", async () => {
       store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
       expect(await edit("#42 — T\n")).toEqual({ text: MC_PR_BODY_EMPTY, isError: true });

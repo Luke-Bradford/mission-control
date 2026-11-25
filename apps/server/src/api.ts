@@ -6838,12 +6838,6 @@ export function githubRate(store: Store): GithubRateState {
   }
 }
 
-/**
- * One row per account and window that has samples. Only 7d rows are projected (5h windows are too
- * short for the 24h pace model), from the current window's samples only (`at >= resetAt - 7d`,
- * resetAt from the latest sample), so a previous window's pace never leaks into the projection.
- */
-
 /** A window's readings for a chart: the last in each hour, oldest first, so the reply stays small. */
 function hourlyReadings(samples: readonly UsageSample[]): { at: number; pct: number }[] {
   const hours = new Map<number, { at: number; pct: number }>();
@@ -6854,6 +6848,12 @@ function hourlyReadings(samples: readonly UsageSample[]): { at: number; pct: num
   }
   return [...hours.values()].sort((a, b) => a.at - b.at);
 }
+
+/**
+ * One row per account and window that has samples. Only 7d rows are projected (5h windows are too
+ * short for the 24h pace model), from the current window's samples only (`at >= resetAt - 7d`,
+ * resetAt from the latest sample), so a previous window's pace never leaks into the projection.
+ */
 export function limitRows(config: CcConfig, store: Store, now: number): LimitRow[] {
   const rows: LimitRow[] = [];
   for (const acct of config.accounts) {

@@ -366,6 +366,7 @@ export function telemetry(
 
   // Daily counts over the same window as the ticket series, whatever range was asked for.
   const dayIndex = new Map(days.map((day, index) => [day, index]));
+  const firstPassSet = new Set(firstPass);
   const quality14: NonNullable<Telemetry["quality14"]> = days.map((day) => ({
     day,
     ciPrs: 0,
@@ -388,7 +389,7 @@ export function telemetry(
     const entry = quality14[dayIndex.get(dayOf(p.mergedAt)) ?? -1];
     if (!rvs || !entry || !mergedKeys.has(key)) continue;
     entry.reviewedPrs += 1;
-    if (firstPass.includes(rvs)) entry.firstPassPrs += 1;
+    if (firstPassSet.has(rvs)) entry.firstPassPrs += 1;
     entry.roundsSum += Math.max(...rvs.map((r) => r.round));
   }
 
@@ -559,7 +560,8 @@ export function telemetry(
       const overlaps = (intervals: Interval[]) =>
         intervals.some(([start, end]) => start < b && end > a);
       const recordedAt = events[eventIndex - 1]?.at ?? -Infinity;
-      // A crew seat records every state change, so its last event still holds while any run is
+      // A crew seat's turn starts and ends are recorded too (on the tick that sees them, once the
+      // hub has seen the seat), not only notable states, so its last event still holds while any run is
       // active, even a run (a resume, a later attempt) that began after that event. A loop's
       // ordinary transitions are not recorded, so its event must predate the run it supports.
       const supported = active.some(
