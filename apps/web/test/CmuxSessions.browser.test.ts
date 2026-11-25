@@ -300,8 +300,11 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
           : base;
         const page = await open(1280, 800, scheme, sessions);
         const cells = () =>
-          page.evaluate(() => {
-            const row = document.querySelectorAll<HTMLElement>("tr.sess-row")[1] as HTMLElement;
+          page.evaluate((repo) => {
+            // the rows are sorted by state, so find the long one by its repo
+            const row = [...document.querySelectorAll<HTMLElement>("tr.sess-row")].find((r) =>
+              r.textContent?.includes(repo),
+            ) as HTMLElement;
             const scroll = document.querySelector<HTMLElement>(".sess-scroll") as HTMLElement;
             const folder = row.querySelector<HTMLElement>(".sess-folder") as HTMLElement;
             const link = row.querySelector<HTMLElement>(".sess-applink") as HTMLElement;
@@ -324,7 +327,7 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
               linkClipped: clipped(link),
               answerClipped: clipped(row.querySelector<HTMLElement>(".sess-ans") as HTMLElement),
             };
-          }, undefined);
+          }, LONG_REPO);
         try {
           const before = await cells();
           // Cut short until the row has focus.
