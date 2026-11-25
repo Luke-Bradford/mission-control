@@ -19,7 +19,13 @@ const alive = (pid: number): boolean => {
 
 async function run(
   mode: string,
-  over: { deadlineMs?: number; graceMs?: number; closeMs?: number; signal?: AbortSignal } = {},
+  over: {
+    deadlineMs?: number;
+    graceMs?: number;
+    closeMs?: number;
+    signal?: AbortSignal;
+    removeScratch?: (dir: string) => void;
+  } = {},
 ) {
   const folder = mkdtempSync(join(tmpdir(), "hud-helper-"));
   const pidfile = join(folder, "pid");
@@ -100,6 +106,14 @@ describe("renderHudInHelper", () => {
     const scratch = readFileSync(marker, "utf8");
     expect(scratch).not.toBe(tmpdir());
     expect(existsSync(scratch)).toBe(false);
+  });
+
+  it("settles with the helper's answer when removing the scratch folder throws", async () => {
+    const removeScratch = (): void => {
+      throw new Error("EBUSY: folder in use");
+    };
+    expect(await (await run("ok", { removeScratch })).result).toEqual(Buffer.from("png"));
+    await expect((await run("fail", { removeScratch })).result).rejects.toThrow("render exploded");
   });
 
   it("reports a crashed helper", async () => {
