@@ -4737,9 +4737,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             throw e;
           }
         });
+      // Read before the run is stored: a throw between storing it and the launch would leave it active.
+      let reviewCommands: SeatCommands["review"];
       try {
         if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
         if (external && !(await readSubject())) throw notWanted;
+        reviewCommands = (await commandsOf(info.repo)).review;
       } catch (error) {
         await inClone(checkout, () =>
           removeCheckout(checkout, scratch.path, { force: true }),
@@ -4781,14 +4784,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         loopKind: def.loop,
         ...(advice === null ? {} : { advice }),
       };
-      // Read before the run is stored: a throw between here and the launch would leave it active.
-      const reviewCommands = (await commandsOf(info.repo)).review;
       store.upsertRun(run);
       if (scratch.installNote !== undefined) {
         store.setReviewInstallNote(reviewId, scratch.installNote);
         const flight = config.crew?.sessions
           .flatMap((session) => session.seats)
-          .find((seat) => !seat.retiring && seatDef(seat).loop === "watch");
+          .find(
+            (seat) => !seat.retiring && !seatUnavailable(seat) && seatDef(seat).loop === "watch",
+          );
         if (flight !== undefined)
           store.addComms({
             at: now(),

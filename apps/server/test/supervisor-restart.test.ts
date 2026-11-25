@@ -1201,6 +1201,26 @@ describe("a seat keeps running through a restart", () => {
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
   });
 
+  it.each([
+    ["an older profile is relaunched", "seat-v0", 2],
+    ["no profile (from before seats had one) is attached to", null, 1],
+  ])("a crew seat's surviving keeper with %s", async (_name, profile, launches) => {
+    const first = make();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.stopAll();
+    if (profile === null) store.deleteSetting(`runtime-profile:${runId}`);
+    else store.setSetting(`runtime-profile:${runId}`, profile);
+    const { sup } = make();
+    sup.start();
+    await until(() => expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId }));
+    expect(starts()).toHaveLength(launches);
+    if (launches === 2) expect(starts()[1]?.argv).toContain("--resume");
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    await sup.stopAll();
+  });
+
   it("a hub replaced by a newer one lets go: the keeper and its CLI live on and the newer hub gets the turn (#1912)", async () => {
     const { sup } = make();
     sup.start();
@@ -2327,7 +2347,10 @@ describe("a seat keeps running through a restart", () => {
 
   it("an engine end whose old keeper will not stop says so in a blocked note", async () => {
     const { runId, dir0, keeperPid, end, real, hub } = await ghostFlight(Number.POSITIVE_INFINITY);
+    // the worktree cannot be removed either: each failure keeps a note of its own
+    prep.failRemove = true;
     try {
+      expect(store.seatSession("flight-1")?.worktree).toEqual(expect.any(String));
       await hub.sup.endRunByEngine(runId);
       expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });
       expect(store.notes().filter((n) => n.key === `cleanup-keeper:${runId}`)).toMatchObject([
@@ -2336,6 +2359,14 @@ describe("a seat keeps running through a restart", () => {
           seatId: "flight-1",
           runId,
           text: expect.stringContaining("its CLI could not be stopped and may still be running"),
+        },
+      ]);
+      expect(store.notes().filter((n) => n.key === `cleanup:${runId}`)).toMatchObject([
+        {
+          kind: "blocked",
+          seatId: "flight-1",
+          runId,
+          text: expect.stringContaining("could not be removed; remove"),
         },
       ]);
       expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false);

@@ -1174,6 +1174,21 @@ describe("startReview", () => {
     expect(store.run(runId)?.endedAt).toBeNull();
   });
 
+  it("a review whose commands cannot be read fails to start and stores no run", async () => {
+    const r = reviewOfPush();
+    const { sup } = make({
+      scratchRetro: true,
+      hubRepo: "elsewhere",
+      rules: async () => {
+        throw new Error("rules unreadable");
+      },
+    });
+    sup.start();
+    await expect(sup.startReview("retro", r.reviewId)).rejects.toThrow();
+    expect(store.runs("retro", 10)).toEqual([]);
+    expect(userLines()).toEqual([]);
+  });
+
   it("a PR that changes no web files gets no preview line", async () => {
     const r = reviewOfPush();
     const reviewPreviews = {
@@ -1645,12 +1660,16 @@ describe("startReview", () => {
       area: [],
     };
     /** Starts the review, ends it with a clean report, and says what the hub did about installing. */
-    async function reviewAndReport(r: ReturnType<typeof reviewOfPush>, flight = FLIGHT_SEAT) {
+    async function reviewAndReport(
+      r: ReturnType<typeof reviewOfPush>,
+      flight = FLIGHT_SEAT,
+      more: CrewSeatConfig[] = [],
+    ) {
       const installs: string[] = [];
       prep.installRunner = async (command) => {
         installs.push(command);
       };
-      const { sup } = make({ scratchRetro: true, extraSeat: flight });
+      const { sup } = make({ scratchRetro: true, extraSeat: flight, extraSeats: more });
       sup.start();
       const { runId } = await sup.startReview("retro", r.reviewId);
       // the engine marks it running; the reviewer then reports
@@ -1694,6 +1713,22 @@ describe("startReview", () => {
       await reviewAndReport(r, { ...FLIGHT_SEAT, retiring: true });
       expect(flightNotes()).toEqual([]);
       expect(store.review(r.reviewId)?.state).toBe("reported");
+    });
+
+    it("tells the usable FLIGHT seat, not an unavailable one before it", async () => {
+      const r = reviewOfPush({
+        base: { "package.json": pkg({ scripts: { check: "old" } }), "pnpm-lock.yaml": LOCK },
+        files: { "package.json": pkg({ scripts: { check: "new" } }) },
+      });
+      await reviewAndReport(r, { ...FLIGHT_SEAT, modelVendor: "codex", model: "unknown" }, [
+        { ...FLIGHT_SEAT, id: "flight-2" },
+      ]);
+      expect(flightNotes()).toEqual([]);
+      expect(
+        store
+          .comms(0)
+          .filter((m) => m.to === "flight-2" && m.text.includes("reviewed without an install")),
+      ).toHaveLength(1);
     });
 
     it("reviews an added dependency read-only, says so, tells FLIGHT, and still reports", async () => {
