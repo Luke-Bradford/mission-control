@@ -1,5 +1,5 @@
 import type { CrewRow, FlightView, PromptWakeCost, RunLoopView } from "@mc/core";
-import { PROMPT_SECTIONS } from "@mc/core";
+import { FLIGHT_VIEW_LIMIT, PROMPT_SECTIONS } from "@mc/core";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PromptTab } from "../src/agent/PromptTab.tsx";
@@ -121,6 +121,18 @@ it("the FLIGHT panel lists a bar for each wake, newest first", async () => {
   expect(within(wakes[0] as HTMLElement).getByText("8,200 tokens")).toBeTruthy();
   expect(within(wakes[2] as HTMLElement).getByText("10 tokens")).toBeTruthy();
   expect(wakes[0]?.textContent).toContain(hhmm(NOW, "Europe/London"));
+});
+
+it("the FLIGHT panel says the hub sends at most its limit, and counts a full list as a floor", async () => {
+  stubFetch({
+    [RESOURCES.config.path]: CREW_CONFIG,
+    [RESOURCES.flight.path]: flightWith(
+      Array.from({ length: FLIGHT_VIEW_LIMIT }, (_, n) => wake(n + 1)),
+    ),
+  });
+  render(<PromptWakes />);
+  expect(await screen.findByText(`${FLIGHT_VIEW_LIMIT}+ wakes`)).toBeTruthy();
+  expect(document.querySelector("#promptP")?.textContent).toContain(`at most ${FLIGHT_VIEW_LIMIT}`);
 });
 
 it("the FLIGHT panel says there is no section data when no wake was recorded", async () => {

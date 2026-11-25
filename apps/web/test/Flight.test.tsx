@@ -1371,7 +1371,13 @@ describe("FLIGHT's brief", () => {
     });
     render(<FlightTabs />);
     fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT knows" }));
-    fireEvent.click(await screen.findByText("FLIGHT's notes"));
+    const heading = await screen.findByText("FLIGHT's notes");
+    // The collapsed header says "updated" once, before its age.
+    await waitFor(() =>
+      expect(document.querySelector("#briefP")?.textContent).toMatch(/· updated \d+ min ago/),
+    );
+    expect(document.querySelector("#briefP")?.textContent).not.toContain("updated updated");
+    fireEvent.click(heading);
     const secs = await screen.findAllByTestId("brief-section");
     expect(secs).toHaveLength(4);
     expect(secs.map((e) => e.querySelector("h3")?.textContent)).toEqual(

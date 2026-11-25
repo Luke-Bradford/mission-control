@@ -690,14 +690,20 @@ describe("Comms routes", () => {
       "/api/comms/agents/alpha": {
         messages: [pin],
         inbox: [],
-        contacts: [{ id: "beta", count: 1, unread: 3, lastMessage: pin }],
+        contacts: [
+          { id: "beta", count: 1, unread: 3, lastMessage: pin },
+          { id: "MC", count: 1, unread: 0, lastMessage: pin },
+        ],
         unread: 1,
         inboxUnread: 0,
       },
       "/api/comms/agents/alpha?summary=1": {
         messages: [pin],
         inbox: [],
-        contacts: [{ id: "beta", count: 1, unread: 3, lastMessage: pin }],
+        contacts: [
+          { id: "beta", count: 1, unread: 3, lastMessage: pin },
+          { id: "MC", count: 1, unread: 0, lastMessage: pin },
+        ],
         unread: 1,
         inboxUnread: 0,
       },
@@ -717,6 +723,9 @@ describe("Comms routes", () => {
     // beta is not the operator: its figure is a message count, never "unread"
     expect(await screen.findByText(/beta · 1 message/i)).toBeTruthy();
     expect(screen.queryByText(/unread/)).toBeNull();
+    // The hub's thread is named in words, and the read-only note names the seat by call sign.
+    expect(screen.getByText(/^Mission Control · 1 message/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Your conversation with ALPHA" })).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(reads).toBe(2));
