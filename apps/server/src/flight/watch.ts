@@ -221,19 +221,22 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   };
   /** Checks again when the guard's cooldown ends, so the restart does not wait for the next tick. */
   let guardTimer: NodeJS.Timeout | null = null;
-  const writeGuard = (g: Guard): void => {
-    store.setSetting(FLIGHT_GUARD_SETTING, JSON.stringify(g));
+  const armGuard = (retryAt: number | null): void => {
     if (guardTimer !== null) clearTimeout(guardTimer);
     guardTimer = null;
-    if (g.retryAt === null || stopped) return;
+    if (retryAt === null || stopped) return;
     guardTimer = setTimeout(
       () => {
         guardTimer = null;
         if (!stopped) void check();
       },
-      Math.max(0, g.retryAt - now()),
+      Math.max(0, retryAt - now()),
     );
     guardTimer.unref();
+  };
+  const writeGuard = (g: Guard): void => {
+    store.setSetting(FLIGHT_GUARD_SETTING, JSON.stringify(g));
+    armGuard(g.retryAt);
   };
   /** The last start threw and made no session: it is retried sooner than a run that died. */
   let lastStartThrew = false;
@@ -885,6 +888,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       });
       interval = setInterval(() => void check(), FLIGHT_TICK_MS);
       interval.unref();
+      // a cooldown kept from before a restart still ends on time
+      armGuard(readGuard().retryAt);
       void check();
     },
     stop() {

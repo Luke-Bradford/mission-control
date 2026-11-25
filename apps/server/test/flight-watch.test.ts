@@ -44,6 +44,7 @@ import {
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_TICK_MS,
   FLIGHT_WAKE_HEAD,
+  FLIGHT_WAKE_SETTING,
   type FlightLedgerEntry,
   type FlightSeatState,
   type FlightState,
@@ -89,6 +90,7 @@ import {
   flightView,
   flightWake,
   flightWakeHistory,
+  lastRecordedWake,
   markItemsShown,
   markPrsShown,
   ownReply,
@@ -2844,6 +2846,28 @@ describe("the FLIGHT watcher", () => {
         expect(notesOpen()).toEqual([]);
       });
 
+      it("restarts FLIGHT when the cooldown ends after the hub restarted, not at a tick", async () => {
+        liveCrew();
+        await tripGuard();
+        const started = startCalls.length;
+        const { retryAt } = JSON.parse(store.getSetting(FLIGHT_GUARD_SETTING) ?? "{}") as {
+          retryAt: number;
+        };
+        watch.stop();
+        nowMs = retryAt - FLIGHT_GUARD_COOLDOWN_MS + 2 * MIN; // the hub restarts into the cooldown
+        makeWatch();
+        watch.start();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(startCalls).toHaveLength(started);
+        // ticks fall every 5 minutes from the start; none restarts FLIGHT before retryAt
+        await vi.advanceTimersByTimeAsync(FLIGHT_GUARD_COOLDOWN_MS - 3 * MIN);
+        expect(startCalls).toHaveLength(started);
+        // retryAt is 28 minutes after the start and the next tick is at 30: only the cooldown's timer fires
+        nowMs = retryAt;
+        await vi.advanceTimersByTimeAsync(MIN);
+        expect(startCalls).toHaveLength(started + 1);
+      });
+
       it("keeps the cooldown through a hub restart", async () => {
         liveCrew();
         await tripGuard();
@@ -3305,6 +3329,33 @@ describe("wakeSummary", () => {
       expect(pending(unparked)).toBe(false);
       expect(wakeFacts(state({ aside: [aside] }))).not.toBe(wakeFacts(unparked));
     });
+  });
+});
+
+describe("the stored wake record", () => {
+  const put = (record: object) => store.setSetting(FLIGHT_WAKE_SETTING, JSON.stringify(record));
+  it("keeps a whole record, and one from before next was kept", () => {
+    put({ repo: "mc", at: T0, wokeOn: ["q (1)"], next: T0 + MIN });
+    expect(lastRecordedWake(store, "mc")).toBe(T0);
+    put({ repo: "mc", at: T0, wokeOn: ["q (1)"], next: null });
+    expect(lastRecordedWake(store, "mc")).toBe(T0);
+    put({ repo: "mc", at: T0, wokeOn: ["q (1)"] });
+    expect(lastRecordedWake(store, "mc")).toBe(T0);
+  });
+  it("discards a record with a wokeOn entry that is not text, or a next that is not a time", () => {
+    for (const bad of [
+      { repo: "mc", at: T0, wokeOn: ["q (1)", 7], next: null },
+      { repo: "mc", at: T0, wokeOn: ["q (1)"], next: "soon" },
+    ]) {
+      put(bad);
+      expect(lastRecordedWake(store, "mc")).toBe(0);
+    }
+    // JSON keeps no Infinity, but a hand-edited 1e999 reads as one
+    store.setSetting(
+      FLIGHT_WAKE_SETTING,
+      `{"repo":"mc","at":${T0},"wokeOn":["q (1)"],"next":1e999}`,
+    );
+    expect(lastRecordedWake(store, "mc")).toBe(0);
   });
 });
 
