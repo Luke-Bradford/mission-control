@@ -361,7 +361,7 @@ function ReportNext({ report }: { report: AuditReport }) {
                                 {f.links.length === 0
                                   ? "No link."
                                   : f.links.map((l) => (
-                                      <a key={l.href} href={l.href}>
+                                      <a key={`${l.label}:${l.href}`} href={l.href}>
                                         {l.label}
                                       </a>
                                     ))}
@@ -464,7 +464,10 @@ function DoNext({
                           <i aria-hidden="true">{isOpen ? "▾" : "▸"}</i>
                           {a.title}
                         </button>
-                        <div className="audit-why">{a.why}</div>
+                        {/* One line, cut by CSS: the title keeps the whole reason. */}
+                        <div className="audit-why" title={a.why}>
+                          {a.why}
+                        </div>
                       </td>
                       <td className="src">{a.source}</td>
                       <td className="meas">

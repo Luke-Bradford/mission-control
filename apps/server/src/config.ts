@@ -428,6 +428,18 @@ export function isPreview(port: number, env: NodeJS.ProcessEnv): boolean {
 }
 
 /**
+ * The config file this server may write, or undefined. An implicit branch preview reads the live
+ * config as its snapshot, but must never write it; a preview given its own `MC_CONFIG` may.
+ */
+export function writableConfigPath(
+  configPath: string,
+  preview: boolean,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  return !preview || env.MC_CONFIG !== undefined ? configPath : undefined;
+}
+
+/**
  * Whether this server may run crew (it still needs a `crew` section and the lock): never with
  * `MC_NO_CREW=1`, and a preview only with `MC_CREW=1`, so a preview on a copy of the database
  * never resumes the live hub's runs by default.

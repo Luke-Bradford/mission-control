@@ -1,16 +1,19 @@
-import type { PromptWakeCost } from "@mc/core";
+import { FLIGHT_VIEW_LIMIT, type PromptWakeCost } from "@mc/core";
 import { useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
-import { NO_SECTION_DATA, PromptCostBar } from "../hud/PromptCost.tsx";
+import { PromptCostBar } from "../hud/PromptCost.tsx";
 import { FLIGHT_NO_SEAT, type FlightView } from "./flightTypes.ts";
 import { Pending } from "./Pending.tsx";
 
-export const NO_WAKE_SECTION_DATA = NO_SECTION_DATA.replace("this run", "FLIGHT's wakes");
+export const NO_WAKE_SECTION_DATA = "No section data for FLIGHT's wakes";
 
 const newestFirst = (a: PromptWakeCost, b: PromptWakeCost): number =>
   b.at - a.at || b.wake - a.wake;
+
+/** A wake's heading: a seat's first prompt is its start; the count restarts with each session. */
+export const wakeLabel = (wake: number): string => (wake === 0 ? "Start" : `Wake ${wake}`);
 
 /** What each of FLIGHT's wakes in the last day cost, by prompt section, newest first. */
 export function PromptWakes() {
@@ -22,10 +25,14 @@ export function PromptWakes() {
     <Panel
       id="promptP"
       title="Prompt cost"
-      sub="estimated tokens by section for each wake in the last 24 hours, newest first"
+      sub={`estimated tokens by section for each wake in the last 24 hours, newest first, at most ${FLIGHT_VIEW_LIMIT}`}
       actions={
         view?.seat ? (
-          <span className="flight-count">{plural(wakes.length, "wake")}</span>
+          <span className="flight-count">
+            {wakes.length >= FLIGHT_VIEW_LIMIT
+              ? `${FLIGHT_VIEW_LIMIT}+ wakes`
+              : plural(wakes.length, "wake")}
+          </span>
         ) : undefined
       }
     >
@@ -47,7 +54,7 @@ export function PromptWakes() {
               {wakes.map((w) => (
                 <li key={`${w.runId}:${w.wake}`} data-testid="prompt-wake">
                   <h3 className="s">
-                    Wake {w.wake}
+                    {wakeLabel(w.wake)}
                     {tz !== null && <span className="muted"> · {hhmm(w.at, tz)}</span>}
                   </h3>
                   <PromptCostBar cost={w} empty="No tokens recorded for this wake" />

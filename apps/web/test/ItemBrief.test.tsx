@@ -43,6 +43,11 @@ describe("decision brief evidence", () => {
     expect(screen.queryByText("Fallback question")).toBeNull();
   });
 
+  it("leaves out The question when the brief has no source text", () => {
+    render(<ItemBrief brief={brief({ original: "", ask: undefined })} />);
+    expect(screen.queryByRole("heading", { name: "The question" })).toBeNull();
+  });
+
   it.each([undefined, []])("omits empty actions (%s)", (did) => {
     render(<ItemBrief original="Question" brief={brief({ did })} />);
     expect(screen.queryByRole("heading", { name: "What FLIGHT did" })).toBeNull();
@@ -155,6 +160,7 @@ it("retains catch-up and checked findings in the new sections", () => {
   render(
     <ItemBrief
       brief={brief({
+        original: "Which port should the preview use?",
         catchUp: {
           kind: "old",
           line: "Returned for review",

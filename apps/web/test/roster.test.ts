@@ -4,6 +4,7 @@ import {
   contextShown,
   hourMarks,
   rosterGroups,
+  SEAT_STOPPED_WORK,
   seatClass,
   shortAge,
   stepRoster,
@@ -111,6 +112,9 @@ describe("what a card says", () => {
       full: "Free",
     });
     expect(workLine(flight("flight-1")).text).toBe("Watching the crew");
+    expect(workLine(dev("guido-2", "shop-app", { run: null, hudState: "stopped" })).text).toBe(
+      SEAT_STOPPED_WORK,
+    );
   });
 
   it("context is a dash (null) when idle, never 0, and a rounded percent when running", () => {

@@ -143,7 +143,9 @@ function Next({ view, run }: { view: RunLoopView; run?: RunView }) {
       <h2>Next</h2>
       <p>
         {held
-          ? `${stepLabel(current.step)} ${current.outcome}${current.reason ? `: ${reasonLine(current.reason).line}` : ""}.`
+          ? endSentence(
+              `${stepLabel(current.step)} ${current.outcome}${current.reason ? `: ${reasonLine(current.reason).line}` : ""}`,
+            )
           : conditional
             ? `If ${stepLabel(current.step)} pass → ${stepLabel(routeAfter(current.step, "pass") as LoopStep)}; if it fails → Working${current.step === "ci" ? (limits ? ` (CI fix ${Math.min((view.loop?.ciFails ?? 0) + 1, limits.tries)} of ${limits.tries})` : " (CI cap unavailable)") : ""}.`
             : next
@@ -155,6 +157,9 @@ function Next({ view, run }: { view: RunLoopView; run?: RunView }) {
     </section>
   );
 }
+
+/** Ends a line with a full stop unless it already ends with one or with a cut mark. */
+export const endSentence = (line: string): string => (/[.…]$/.test(line) ? line : `${line}.`);
 
 /** Full operator trace for one recorded run. */
 export function RunTrace({

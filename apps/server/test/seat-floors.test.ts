@@ -366,7 +366,8 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
     // the seat's own environment: the limit the model is told is the check's. A call that really
     // runs past ten minutes is the controller's check on the ticket.
     const seat = await run("echo ok", 5_000, {});
-    expect(seat.timeoutHelp()).toContain(`max ${CHECK_BASH_TIMEOUT_MS} `);
+    // the number alone, as a whole number: the CLI's wording around it may change
+    expect(seat.timeoutHelp()).toMatch(new RegExp(`(?<!\\d)${CHECK_BASH_TIMEOUT_MS}(?!\\d)`));
     await seat.close();
     // a small limit shows the CLI enforces the variable as well as reports it: the 15 s timeout is
     // cut to 2 s, so the command never prints. The CLI keeps the limit at or above its default.

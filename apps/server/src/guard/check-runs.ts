@@ -72,16 +72,18 @@ export function withoutOwnCd(command: string, worktree: string | null): string {
  * still loads the Mac); a command that only mentions a check, or adds an argument to it, does not.
  */
 export function lockedCheck(command: string, checks: readonly string[]): string | null {
+  return lockedChecks(command, checks)[0] ?? null;
+}
+
+/** Every configured check a shell command runs, in `checks` order; see lockedCheck. */
+export function lockedChecks(command: string, checks: readonly string[]): string[] {
   const ran = splitCommands(command).map(lockForm);
-  for (const check of checks) {
+  return checks.filter((check) => {
     const want = splitCommands(check)[0];
-    if (want === undefined) continue;
+    if (want === undefined) return false;
     const form = lockForm(want);
-    if (ran.some((argv) => argv.length === form.length && argv.every((w, i) => w === form[i]))) {
-      return check;
-    }
-  }
-  return null;
+    return ran.some((argv) => argv.length === form.length && argv.every((w, i) => w === form[i]));
+  });
 }
 
 /** A vitest or `pnpm test` command: it loads the Mac like a check, so it waits for one too. */
@@ -320,10 +322,10 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         const matched = checksRun(withoutOwnCd(command, own), checks);
         if (matched.length === 0) {
           // a configured check inside a chain, a pipe or a list is not counted: say so
-          const inside = lockedCheck(command, checks);
-          if (inside === null) return;
+          const inside = lockedChecks(command, checks);
+          if (inside.length === 0) return;
           const at = await d.state(key.runId).catch(() => null);
-          noteDrop(key.runId, "not-plain", [inside], at?.head ?? null, command);
+          noteDrop(key.runId, "not-plain", inside, at?.head ?? null, command);
           return;
         }
         const at = await d.state(key.runId);

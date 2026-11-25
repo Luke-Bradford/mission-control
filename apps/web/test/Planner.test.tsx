@@ -105,6 +105,40 @@ describe("Planner tab", () => {
     );
     expect(await screen.findByText("No plan is waiting for you")).toBeTruthy();
   });
+  it("with a repo filter, Try again and a decision read the plans path the page shows", async () => {
+    window.history.replaceState({}, "", "/planner?repo=mc");
+    let fail = true;
+    load({
+      "/api/plans": () =>
+        fail ? { status: 500, body: { error: "down" } } : { status: 200, body: view },
+      "POST /api/plans/mc/7/approve": () => ({
+        status: 200,
+        body: { plan: plan(), moved: true, moveError: null },
+      }),
+    });
+    render(<Planner />);
+    await screen.findByRole("alert");
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await waitFor(() =>
+      expect(fetcher.mock.calls.some(([path]) => path === "/api/plans/mc/7/approve")).toBe(true),
+    );
+    await waitFor(() =>
+      expect(fetcher.mock.calls.filter(([path]) => path === "/api/plans").length).toBeGreaterThan(
+        2,
+      ),
+    );
+    // The page subscribes to the bare path; a filtered path would refetch nothing it shows.
+    expect(fetcher.mock.calls.some(([path]) => String(path).startsWith("/api/plans?"))).toBe(false);
+  });
+  it("says history holds the plans you signed off", async () => {
+    window.history.replaceState({}, "", "/planner?view=history");
+    load();
+    render(<Planner />);
+    expect(await screen.findByText("Plans you signed off, newest first.")).toBeTruthy();
+    expect(screen.getByText("1 signed off")).toBeTruthy();
+  });
   it("requires a note before it sends a plan back", async () => {
     load({
       "POST /api/plans/mc/7/send-back": () => ({

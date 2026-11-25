@@ -178,7 +178,9 @@ it("shows legacy hub records with unknown tool outcomes separately from reported
   render(<QaReadiness />);
   expect(await screen.findByText("Retained hub command records")).toBeTruthy();
   expect(screen.getByText(/unknown · exit not recorded/)).toBeTruthy();
-  expect(screen.getByText(/Reported: 2 passed · 1 failed/)).toBeTruthy();
+  const counts = screen.getByText(/Reported: 2 passed · 1 failed/);
+  // The report contract names no duration unit, so no duration figure or unit is shown.
+  expect(counts.textContent).toMatch(/^Reported: 2 passed · 1 failed · \d+ skipped$/);
   expect(screen.getByText(/Recorded resolution: review 1, finding 0 · fixed/)).toBeTruthy();
   expect(screen.queryByText(/QA passed/)).toBeNull();
 });

@@ -128,6 +128,21 @@ describe("Tickets list", () => {
     expect(screen.queryByText(/No ticket matches/)).toBeNull();
   });
 
+  it("shows no 'Showing 40 of N' note while a board is still loading", async () => {
+    hub.clear();
+    const many = Array.from({ length: 45 }, (_, i) =>
+      boardItem({ repoId: "site-builder", issueNumber: 100 + i, title: `Ticket ${100 + i}` }),
+    );
+    fetchWith({
+      "/api/repos": REPOS,
+      "/api/boards/site-builder": many,
+      [COUNTS]: counts(many.map((t) => ({ ticket: `site-builder#${t.issueNumber}`, count: 1 }))),
+    });
+    render(<TicketsList />);
+    expect(await screen.findByText("Loading tickets…")).toBeTruthy();
+    expect(screen.queryByText(/^Showing \d+ of \d+/)).toBeNull();
+  });
+
   it("says the counts could not be read, and shows no list, when they never loaded", async () => {
     hub.clear();
     stubFetch({ ...BOARDS, [COUNTS]: () => ({ status: 500, body: { error: "boom" } }) });

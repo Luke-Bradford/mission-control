@@ -139,5 +139,9 @@ export function useSubmitGuard(): {
 export const isUncertain = (status: number | undefined): boolean =>
   status === undefined || status >= 500;
 
+/** A refusal of what was typed (400 or 422), so it belongs on the field; any other "no" is the form's. */
+export const refusesEntry = (status: number | undefined): boolean =>
+  status === 400 || status === 422;
+
 export const UNCERTAIN_TEXT =
   "The result is unknown: the connection dropped or the server did not answer. Your entries are kept. Mission Control is rereading what is saved; check it before saving again.";

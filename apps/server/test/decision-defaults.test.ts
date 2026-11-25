@@ -158,6 +158,34 @@ describe("decision defaults", () => {
     expect(decisionDefault(store, item("pr:repo#9:1", "pr"))).toBeNull();
   });
 
+  it("never defaults a hard-rule flag, even with a current defaultable binding", () => {
+    const bound = (kind: AttentionItem["kind"]): AttentionItem => {
+      const base = item("note:hard-rule", kind);
+      if (!base.brief) throw new Error("test brief missing");
+      const action = { kind: "ordinary-run-guidance" as const, seatId: "GUIDO-1", runId: "r" };
+      base.brief = {
+        ...base.brief,
+        state: { completeness: "complete", freshness: "current", reason: "fixture" },
+        binding: {
+          version: 2,
+          sourceRevision: "s",
+          meaningKey: "m",
+          epoch: "e",
+          epochId: 1,
+          preparedAt: ASKED,
+          preparedBy: { service: "stalled-comms" },
+          actions: [{ optionId: "go", action, defaultable: true, effect: "Deliver guidance" }],
+        },
+      };
+      return base;
+    };
+    // the same bound brief on an ordinary decision is defaulted: only the flag kind stops it
+    expect(decisionDefault(store, bound("decision"), config(), NOW)).toMatchObject({
+      option: { id: "go" },
+    });
+    expect(decisionDefault(store, bound("flag"), config(), NOW)).toBeNull();
+  });
+
   it("never defaults a non-flag note held by a stopped seat", () => {
     vi.spyOn(store, "notes").mockReturnValue([
       { key: "ready:r", runId: "r", dismissedAt: null },

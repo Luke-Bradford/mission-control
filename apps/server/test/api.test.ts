@@ -126,7 +126,13 @@ import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/telemetry/machine-capacity.ts";
-import { UpdateError, type Updater } from "../src/update.ts";
+import {
+  HUB_UPDATE_HELD_KEY,
+  HUB_UPDATE_HELD_SINCE,
+  HUB_UPDATE_PERSON_KEY,
+  UpdateError,
+  type Updater,
+} from "../src/update.ts";
 import { repoCheckout } from "./repo-checkout.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -6167,6 +6173,8 @@ describe("reload", () => {
       diskTotalBytes: 100 * 1024 ** 3,
       agents: null,
     };
+    // The stub stands in for the real reloader's copy of the thresholds, which crew-apply.test.ts
+    // covers ("applies machine-capacity thresholds on reload"); this test is the route's live read.
     const reloader = stubReloader();
     reloader.reload = async () => {
       const crew = config.crew;
@@ -6522,6 +6530,13 @@ describe("crew routes", () => {
       decision: "Operator override: started GUIDO-1 despite machine capacity hold.",
       basis: "disk free is 16.0 GB (below 20 GB)",
     });
+  });
+
+  it("start with force and no capacity hold starts plainly and records no override", async () => {
+    const r = await post5("start", { issue: 5, force: true });
+    expect(r.statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+    expect(store.flightDecisions(0, 10)).toEqual([]);
   });
 
   it("transfers one seat explicitly and returns the supervisor outcome", async () => {
@@ -7765,8 +7780,8 @@ describe("update routes", () => {
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
   });
 
-  it("drops the held-Update notes once an Update has run (#1886)", async () => {
-    for (const key of ["hub-update-held", "hub-update-person"])
+  const holdUpdate = () => {
+    for (const key of [HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY])
       store.raiseNote({
         key,
         kind: "blocked",
@@ -7776,11 +7791,33 @@ describe("update routes", () => {
         text: "A new version of Mission Control is waiting.",
         at: NOW - 1,
       });
-    store.setSetting("hub-update-held-since", String(NOW - 1));
-    updaterResult = async () => ({ restarting: true });
-    await post("/api/update");
-    expect(store.notes()).toEqual([]);
-    expect(store.getSetting("hub-update-held-since")).toBeNull();
+    store.setSetting(HUB_UPDATE_HELD_SINCE, String(NOW - 1));
+  };
+
+  it.each([{ restarting: true }, { swapped: true }, { upToDate: true }] as const)(
+    "drops the held-Update notes once an Update has run (#1886): %j",
+    async (result) => {
+      holdUpdate();
+      const seen: string[] = [];
+      bus.subscribe((t) => seen.push(t));
+      updaterResult = async () => result;
+      await post("/api/update");
+      expect(store.notes()).toEqual([]);
+      expect(store.getSetting(HUB_UPDATE_HELD_SINCE)).toBeNull();
+      expect(seen).toContain("attention");
+    },
+  );
+
+  it("keeps the held-Update notes when the Update fails", async () => {
+    holdUpdate();
+    updaterResult = async () => {
+      throw new UpdateError(500, "update failed at build; see update.log");
+    };
+    expect((await post("/api/update")).statusCode).toBe(500);
+    expect(store.notes().map((n) => n.key)).toEqual(
+      expect.arrayContaining([HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY]),
+    );
+    expect(store.getSetting(HUB_UPDATE_HELD_SINCE)).toBe(String(NOW - 1));
   });
 
   it("restarts a successful Update when the client disconnects before its response", async () => {

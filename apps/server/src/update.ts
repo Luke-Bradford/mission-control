@@ -112,12 +112,13 @@ export interface HeldRange {
 }
 /**
  * The one item for a range auto-Update holds. FLIGHT runs it in a quiet moment while it is seated
- * and on a superuser repo (hud/hud.ts gives it the triage window); otherwise it is the operator's.
+ * and on a superuser repo (hud/hud.ts keeps it FLIGHT's while FLIGHT is triaging); otherwise it is
+ * the operator's.
  */
 export const HUB_UPDATE_HELD_KEY = "hub-update-held";
 /** An Update only a person can run (a shortcut in the change, pnpm, a checkout off main): the operator's at once. */
 export const HUB_UPDATE_PERSON_KEY = "hub-update-person";
-/** Setting: when the current held Update was first held, so a note rewritten as main moves keeps its window. */
+/** Setting: when the current held Update was first held. Kept and cleared with the note; no timer reads it. */
 export const HUB_UPDATE_HELD_SINCE = "hub-update-held-since";
 /** The 409 `update({ auto: true })` answers for a range that is not all on the allowlist. */
 export const HUB_CODE_NEEDS_PERSON =

@@ -840,66 +840,82 @@ describe("PrEvidence gate", () => {
       cleaned = r;
     });
     const started: string[] = [];
-    const t = setup({
-      captureMs: 40,
-      startSide: async ({ sha, signal }) => {
-        started.push(sha);
-        if (sha === HEAD) {
-          await new Promise<void>((r) =>
-            signal.addEventListener("abort", () => r(), { once: true }),
-          );
-          cancelling();
-          await release;
-          throw signal.reason;
-        }
-        return { origin: `http://side/${sha}`, stop: async () => {} };
-      },
-    });
-    const first = t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
-    const second = t.evidence.ensure({ pr: 8, sha: NEXT, paths: WEB });
-    await cleaning;
-    expect(started).toEqual([MAIN, HEAD]);
-    cleaned();
-    await Promise.all([first, second]);
-    expect(started).toEqual([MAIN, HEAD, MAIN, NEXT]);
-    expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
+    // the deadline passes when the test says so, not after a real 40 ms
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const t = setup({
+        captureMs: 40,
+        startSide: async ({ sha, signal }) => {
+          started.push(sha);
+          if (sha === HEAD) {
+            await new Promise<void>((r) =>
+              signal.addEventListener("abort", () => r(), { once: true }),
+            );
+            cancelling();
+            await release;
+            throw signal.reason;
+          }
+          return { origin: `http://side/${sha}`, stop: async () => {} };
+        },
+      });
+      const first = t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+      const second = t.evidence.ensure({ pr: 8, sha: NEXT, paths: WEB });
+      await vi.waitFor(() => expect(started).toEqual([MAIN, HEAD]));
+      vi.advanceTimersByTime(40);
+      await cleaning;
+      expect(started).toEqual([MAIN, HEAD]);
+      cleaned();
+      await Promise.all([first, second]);
+      expect(started).toEqual([MAIN, HEAD, MAIN, NEXT]);
+      expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("stops an expired side before another capture starts and never saves its late render", async () => {
-    // unset when the side expires before its render starts, which a loaded CI runner can do in 40 ms
     let release: ((png: Buffer) => void) | undefined;
     let active = 0;
     let maxActive = 0;
     let blocked = true;
-    const t = setup({
-      captureMs: 40,
-      startSide: async ({ sha }) => {
-        active++;
-        maxActive = Math.max(maxActive, active);
-        return {
-          origin: `http://side/${sha}`,
-          stop: async () => {
-            active--;
-          },
-        };
-      },
-      render: async (origin, _path, scheme) => {
-        if (origin.endsWith(HEAD) && blocked) {
-          blocked = false;
-          return new Promise((r) => {
-            release = r;
-          });
-        }
-        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
-      },
-    });
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
-    expect(active).toBe(0);
-    await t.evidence.ensure({ pr: 8, sha: NEXT, paths: WEB });
-    release?.(encodePng(pageBox(HEAD, "light")));
-    await new Promise((r) => setTimeout(r, 10));
-    expect(maxActive).toBe(1);
-    expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
-    expect(t.store.manifest("mc", 8, NEXT)).not.toBeNull();
+    // the deadline passes once the head's render has started, when the test says so
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const t = setup({
+        captureMs: 40,
+        startSide: async ({ sha }) => {
+          active++;
+          maxActive = Math.max(maxActive, active);
+          return {
+            origin: `http://side/${sha}`,
+            stop: async () => {
+              active--;
+            },
+          };
+        },
+        render: async (origin, _path, scheme) => {
+          if (origin.endsWith(HEAD) && blocked) {
+            blocked = false;
+            return new Promise((r) => {
+              release = r;
+            });
+          }
+          return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+        },
+      });
+      const first = t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+      await vi.waitFor(() => expect(release).toBeDefined());
+      vi.advanceTimersByTime(40);
+      await first;
+      expect(active).toBe(0);
+      await t.evidence.ensure({ pr: 8, sha: NEXT, paths: WEB });
+      release?.(encodePng(pageBox(HEAD, "light")));
+      await new Promise((r) => setImmediate(r));
+      expect(maxActive).toBe(1);
+      expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
+      expect(t.store.manifest("mc", 8, NEXT)).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shutdown cancels an in-flight render, cleans up and starts no queued capture", async () => {

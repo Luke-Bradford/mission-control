@@ -14,6 +14,27 @@ afterEach(() => {
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe("parseTopic", () => {
+  it("a plan decision (the plans topic) refetches the ticket page's history", async () => {
+    let plan = "old plan";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) =>
+        Response.json(path === "/api/operator/bootstrap" ? { token: "fixture-token" } : { plan }),
+      ),
+    );
+    const ref = RESOURCES.ticketHistory("mc", 7);
+    const off = hub.subscribe(ref.path, ref.topic, () => {});
+    try {
+      await vi.waitFor(() => expect(hub.snapshot(ref.path, ref.topic).data).toEqual({ plan }));
+      plan = "signed-off plan";
+      hub.refetchTopic("plans");
+      await vi.waitFor(() => expect(hub.snapshot(ref.path, ref.topic).data).toEqual({ plan }));
+    } finally {
+      off();
+      forgetOperatorToken();
+    }
+  });
+
   it("accepts only known topics from the stream", () => {
     expect(parseTopic('{"topic":"limits"}')).toBe("limits");
     expect(parseTopic('{"topic":"nope"}')).toBeNull();

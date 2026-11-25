@@ -218,8 +218,8 @@ function AgentTime({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
         </ul>
       </div>
       <p className="pnote">
-        Same shapes as Crew state. Each bar sums to 100% of the seat's day; focus a bar for its
-        shares.
+        Same shapes as Crew state, plus Unknown for time no state accounts for. Each bar sums to
+        100% of the seat's day; focus a bar for its shares.
       </p>
       {capcom?.longest && (
         <p className="pnote">

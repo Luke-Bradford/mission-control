@@ -1804,7 +1804,7 @@ describe("repos together or apart", () => {
     seed();
     const [shopApp] = await apartKanbans();
     await waitFor(() =>
-      expect(headsOf(shopApp)).toEqual(["Backlog 0", "Ready 1", "In progress · now 4", "Done 0"]),
+      expect(headsOf(shopApp)).toEqual(["Backlog 0", "Ready 1", "In progress 0", "Done 0"]),
     );
   });
 
@@ -1820,7 +1820,7 @@ describe("repos together or apart", () => {
         "Backlog 0",
         "Blocked 1",
         "Ready 1",
-        "In progress · now 4",
+        "In progress 0",
         "Done 0",
       ]),
     );
@@ -1853,7 +1853,7 @@ describe("repos together or apart", () => {
     act(() => resolveProfiles?.(Response.json(PROFILES)));
     await waitFor(() => expect(view.container.querySelectorAll(".repokanban")).toHaveLength(2));
     const [shopApp] = Array.from(view.container.querySelectorAll<HTMLElement>(".repokanban"));
-    expect(headsOf(shopApp)).toEqual(["Backlog 0", "Ready 1", "In progress · now 4", "Done 0"]);
+    expect(headsOf(shopApp)).toEqual(["Backlog 0", "Ready 1", "In progress 0", "Done 0"]);
   });
 
   it("Apart before profiles load: every column, headed by the repo id alone", async () => {

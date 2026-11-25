@@ -563,7 +563,6 @@ function option<T extends string>(v: unknown, known: readonly T[]): T | null {
 
 const num = (v: unknown): number => (typeof v === "number" ? v : 0);
 
-/** What an issue body waits on, as the card's `after`; nothing when it names no dependency. */
 /** What a bug's body names, for the QA board's escaped defects; nothing for other cards. */
 function defectRefsOf(repo: string, labels: string[], body: unknown): { defectRefs?: DefectRefs } {
   if (!isBugLabelled(labels)) return {};
@@ -571,6 +570,7 @@ function defectRefsOf(repo: string, labels: string[], body: unknown): { defectRe
   return refs.prs.length + refs.shas.length + refs.paths.length > 0 ? { defectRefs: refs } : {};
 }
 
+/** What an issue body waits on, as the card's `after`; nothing when it names no dependency. */
 function afterOf(body: unknown): { after?: NonNullable<BoardItem["after"]> } {
   const after = bodyDependencies(str(body, ""));
   return after.issues.length > 0 || after.prs.length > 0 ? { after } : {};

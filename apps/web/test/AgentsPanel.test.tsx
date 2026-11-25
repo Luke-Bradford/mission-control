@@ -1321,10 +1321,12 @@ describe("the Work line of an idle seat with an open run", () => {
     const crewPause = { seats: "all", reason: "Account at its stop line", at: 0, by: "operator" };
     const text = await work({ loop: open, crewPause } as Parameters<typeof seatRow>[0]);
     expect(text).not.toContain("Run open");
+    expect(text).toContain("Account at its stop line");
   });
 
   it("keeps FLIGHT's own line while it idles between checks", async () => {
-    const flight = seatRow({ id: "flight-1", role: "FLIGHT", hudState: "idle", loop: open });
+    // The stub's config names "flight" as the watch seat, so this row is the FLIGHT row.
+    const flight = seatRow({ id: "flight", role: "FLIGHT", hudState: "idle", loop: open });
     stub([flight], true, []);
     const { container } = render(<AgentsPanel />);
     await waitFor(() => expect(container.querySelector(".trow.flight")).toBeTruthy());

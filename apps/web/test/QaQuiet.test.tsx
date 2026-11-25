@@ -92,8 +92,8 @@ describe("QA page when nothing waits", () => {
     render(<QaReadiness />);
     expect(await screen.findByText("0 in UAT · 6 in review")).toBeTruthy();
     expect(screen.getAllByRole("link", { name: /Change [1-6]/ })).toHaveLength(6);
-    expect(screen.getAllByText("pending")).toHaveLength(2);
-    expect(screen.getAllByText("failing")).toHaveLength(2);
+    expect(screen.getAllByText("CI pending")).toHaveLength(2);
+    expect(screen.getAllByText("CI failing")).toHaveLength(2);
   });
   it("opens no PR and says so in one line", async () => {
     rows = [pr(3, null)];
@@ -133,6 +133,23 @@ describe("QA page when nothing waits", () => {
     await settled(fetcher, `/api/qa/uat/mc/3?head=${SHA}`);
     await screen.findByText("No page changes");
     expect(screen.queryByRole("heading", { name: "Before and after" })).toBeNull();
+  });
+  it("does not say no page changes when no changed paths were captured", async () => {
+    rows = [pr(3, null)];
+    window.history.replaceState({}, "", "/qa?repo=mc&pr=3");
+    const fetcher = serve({
+      [`/api/qa/uat/mc/3?head=${SHA}`]: {
+        ...detail(3, false),
+        files: [],
+        webChanged: false,
+        visualEvidenceAvailable: false,
+      },
+      [`/api/qa-reports?repoId=mc&prNumber=3&headSha=${SHA}`]: { reports: [] },
+    });
+    render(<QaReadiness />);
+    await settled(fetcher, `/api/qa/uat/mc/3?head=${SHA}`);
+    await screen.findByText("Changed paths have not been captured.");
+    expect(screen.queryByText("No page changes")).toBeNull();
   });
   it("keeps evidence quiet while a non-web change is loading", async () => {
     rows = [pr(3, null)];

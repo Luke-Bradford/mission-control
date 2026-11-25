@@ -94,7 +94,8 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
         "A pipeline stage opens the Board filtered to that stage.",
       ),
       rule(/^#\d+ /, TICKET, "A card in the pipeline opens its ticket page."),
-      rule(/^(Mac|Tokens)$/, /^\/telemetry$/, "Resource figures lead to Telemetry."),
+      rule(/^Mac$/, /^\/telemetry\?tab=machine$/, "The Mac row leads to Telemetry's Machine tab."),
+      rule(/^Tokens$/, /^\/telemetry\?tab=cost$/, "Token spend leads to Telemetry's Cost tab."),
       rule(/-main$/, /^\/setup\/accounts$/, "An account chip opens Setup accounts."),
     ],
   },
@@ -335,8 +336,7 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/agent/SideTabs.tsx": "pane: an item the seat raised",
   "src/agent/chooseSeat.ts": "page: the chosen seat",
   "src/attention.ts": "page: Needs you item (pane only for items that are not the operator's)",
-  "src/board/Card.tsx":
-    "page: the ticket (card, title), Needs you item (You chip), seat (agent tag), trace",
+  "src/board/Card.tsx": "page: the ticket (card, title), Needs you item (You chip), trace",
   "src/browserNotifications.ts": "page: the notification's target",
   "src/comms/CommsGraph.tsx": "page: the conversation a map seat or link opens",
   "src/comms/Conversation.tsx":

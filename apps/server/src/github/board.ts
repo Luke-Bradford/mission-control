@@ -4,8 +4,10 @@ import {
   hudColumnOf,
   type MoveColumn,
   optionForColumn,
+  PRIORITY_FIELD,
   type PullRequestView,
   type RepoId,
+  SIZE_FIELD,
   STATUS_FIELD,
   seatDef,
 } from "@mc/core";
@@ -297,8 +299,8 @@ export async function checkCardFieldOptions(
   if (repo?.flightPowers !== "superuser") return { ok: false, reason: "Superuser required." };
   try {
     for (const [name, value] of [
-      ["Size", fields.size],
-      ["Priority", fields.priority],
+      [SIZE_FIELD, fields.size],
+      [PRIORITY_FIELD, fields.priority],
     ] as const) {
       if (value === undefined) continue;
       const field = await readStatusField(
@@ -328,8 +330,8 @@ export async function editCardFields(
   try {
     const edits = [];
     for (const [name, value] of [
-      ["Size", fields.size],
-      ["Priority", fields.priority],
+      [SIZE_FIELD, fields.size],
+      [PRIORITY_FIELD, fields.priority],
     ] as const) {
       if (value === undefined) continue;
       const field = await readStatusField(

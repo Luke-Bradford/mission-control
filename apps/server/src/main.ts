@@ -67,6 +67,7 @@ import {
   isPreview,
   loadConfig,
   portFromEnv,
+  writableConfigPath as writableConfigPathOf,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
 import { runFirstClean } from "./disk/first-clean.ts";
@@ -149,7 +150,6 @@ import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
 import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./run/rotating-log.ts";
-import { CMUX_COMMAND } from "./runtime/cmux.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { watchPreviewParent } from "./runtime/preview-parent.ts";
 import { installHubErrorHandlers } from "./runtime/process-errors.ts";
@@ -159,7 +159,7 @@ import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
 import { Store } from "./store.ts";
-import { restartFileService } from "./telemetry/file-service-restart.ts";
+import { hubFileServiceRestart } from "./telemetry/file-service-restart.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import {
   commitsOf,
@@ -443,14 +443,10 @@ export async function main(): Promise<void> {
     dataDir: dirname(dbPath),
     worktrees: config.crew?.worktrees,
   });
+  const fileServiceRestart = hubFileServiceRestart(preview, join(dirname(dbPath), "diagnostics"));
   const scheduler = createScheduler({
     config,
-    ...(preview
-      ? {}
-      : {
-          restartFileService: (at: number, opts: { diagnose: boolean }) =>
-            restartFileService(join(dirname(dbPath), "diagnostics"), at, opts),
-        }),
+    ...(fileServiceRestart === undefined ? {} : { restartFileService: fileServiceRestart }),
     hubDiskUse: () => {
       void hubDiskUse.read().catch(() => {});
       return hubDiskUse.last();
@@ -504,9 +500,7 @@ export async function main(): Promise<void> {
     preview && previewParentPid !== undefined
       ? watchPreviewParent(Number(previewParentPid))
       : undefined;
-  // An implicit branch preview reads the live config as its snapshot, but must never write it.
-  const writableConfigPath =
-    !preview || process.env.MC_CONFIG !== undefined ? configPath : undefined;
+  const writableConfigPath = writableConfigPathOf(configPath, preview, process.env);
   // A web PR's screenshot pairs: kept under the private data dir, captured on the live hub only.
   const evidenceStore = prEvidenceStore(join(dirname(dbPath), "pr-evidence"));
   const evidenceCheckout = hubRoot ?? undefined;
@@ -686,8 +680,6 @@ export async function main(): Promise<void> {
           log: (line) => log(line),
         });
   const supervisor = createSupervisor({
-    // every Claude seat runs as a cmux workspace the operator can see, type into and clear
-    cmuxCommand: [CMUX_COMMAND],
     auditPack: (seatId) =>
       buildAuditPack({ config, store, busy: supervisor.busy(), now: Date.now(), seatId }),
     flightEnvironment: async () => ({

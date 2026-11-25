@@ -190,7 +190,7 @@ A docked seat's card shrinks to one line.
 | Refused calls (CLI side) | transcript `system/permission_denied` | **new parse** (slice 1a); `stream.ts` does not read it today |
 | Refused calls (hub guard) | `guard_hits` | exists |
 | Edit churn `+n −m` | Edit/Write/MultiEdit inputs: `old_string`/`new_string`, `content` | **new count** (slice 1a); `streamjson.ts` reads these only for a one-line detail |
-| The branch's real diff | `git diff --numstat` against the base, per worktree | builds on `apps/server/src/files.ts`, which #343 (PR #350) extends for crew seats (slice 3) |
+| The branch's real diff | `git diff --numstat` against the base, per worktree | builds on `apps/server/src/repo/files.ts`, which #343 (PR #350) extends for crew seats (slice 3) |
 | Merge conflicts between branches | `git merge-tree` on open PRs' head commits (`pull_requests.head_sha`) | **new** (slice 6) |
 | Review findings | `review_findings` and the latest `reviews` row for the ticket | exists |
 | CI | `pull_requests.checks` at the head SHA | exists |

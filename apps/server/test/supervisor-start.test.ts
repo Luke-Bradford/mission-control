@@ -469,6 +469,26 @@ describe("startRun eligibility", () => {
       },
     );
 
+    const SPANNING = "Paths: apps/server/**, packages/core/**\n";
+    it("starts a Paths: line spanning two areas of the seat with no grant", async () => {
+      const { sup } = make({
+        rules: withRules(),
+        guidoArea: ["apps/server", "packages/core"],
+        fetchTicket: ticketWith({ body: SPANNING }),
+      });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual([]);
+    });
+
+    it("refuses that spanning Paths: line for a seat whose area is one of them", async () => {
+      await refused(
+        422,
+        grantUngrantableText("packages/core/**", pathGrantProblem("packages/core/**") as string),
+        { guidoArea: ["apps/server"], fetchTicket: ticketWith({ body: SPANNING }) },
+      );
+    });
+
     it("refuses an outside glob with the text it always had", async () => {
       await refused(422, grantUngrantableText("docs/**", pathGrantProblem("docs/**") as string), {
         fetchTicket: ticketWith({ body: "Paths: apps/server/**, docs/**\n" }),
@@ -1162,7 +1182,7 @@ describe("startRun", () => {
     expect(argv).not.toContain("--effort");
   });
 
-  it("passes no dollar cap to a Claude run: an interactive Claude has none", async () => {
+  it("passes a template's dollar cap to a Claude run", async () => {
     const profiles = DEFAULT_PROFILES.map((profile) =>
       profile.name === "small-change" ? { ...profile, budgetUsd: 12.5 } : profile,
     );
@@ -1171,7 +1191,7 @@ describe("startRun", () => {
     await sup.startRun("guido-1", 42);
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const argv = recorded()[0].argv as string[];
-    expect(argv).not.toContain("--max-budget-usd");
+    expect(argv[argv.indexOf("--max-budget-usd") + 1]).toBe("12.5");
   });
 
   it("runs the CLI with a minimal env, with no git identity (the commit tool sets it)", async () => {
@@ -1185,6 +1205,8 @@ describe("startRun", () => {
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const env = recorded()[0].env as Record<string, string>;
     expect(env).toMatchObject(CREW_GIT_ENV);
+    // the hub's Node folder leads PATH, ahead of any other folder that holds a node
+    expect(env.PATH?.split(":")[0]).toBe(dirname(process.execPath));
     const allowed = new Set([
       ...Object.keys(CREW_GIT_ENV),
       "HOME",
@@ -2422,6 +2444,72 @@ describe("reused worktrees", () => {
       const left = store.runs("guido-1", 1)[0];
       expect(left?.id).not.toBe(first.runId);
       expect(left).toMatchObject({ status: "failed", endedAt: expect.any(Number) });
+    } finally {
+      cloneGit.mockRestore();
+      upsertRun.mockRestore();
+    }
+  });
+
+  it("leaves a start's run running for the next hub when the hub stops while a seat row holds it", async () => {
+    const { sup } = make();
+    sup.start();
+    const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    await sup.endRun("guido-1");
+    const firstRun = store.run(first.runId);
+    if (firstRun?.loop?.phase === undefined) throw new Error("missing first run loop");
+    store.setRunLoop(first.runId, { ...firstRun.loop, prNumber: 1 });
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: TICKET.title,
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    const cloneGit = vi.spyOn(checkouts, "cloneGitDir");
+    const originalUpsertRun = store.upsertRun.bind(store);
+    const upsertRun = vi.spyOn(store, "upsertRun");
+    try {
+      upsertRun.mockImplementation((run, folded) => {
+        if (run.id !== first.runId && run.status === "running")
+          cloneGit.mockImplementation(async () => {
+            // the seat row holds the new run, as a resume would find it
+            store.setSeatSession({
+              seatId: "guido-1",
+              runId: run.id,
+              cliSessionId: null,
+              state: "starting",
+              reason: null,
+              worktree: null,
+              updatedAt: 1,
+            });
+            void sup.stopAll();
+            throw new Error("clone failed");
+          });
+        return originalUpsertRun(run, folded);
+      });
+      await expect(sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } })).rejects.toThrow(
+        "clone failed",
+      );
+      const left = store.runs("guido-1", 1)[0];
+      expect(left?.id).not.toBe(first.runId);
+      expect(left).toMatchObject({ status: "running", endedAt: null });
+      expect(store.seatSession("guido-1")?.runId).toBe(left?.id);
     } finally {
       cloneGit.mockRestore();
       upsertRun.mockRestore();

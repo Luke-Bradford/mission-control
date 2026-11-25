@@ -197,6 +197,8 @@ export function ItemBrief({
   approval?: boolean;
 }) {
   const ask = brief?.ask?.trim();
+  // A brief with no source text has no question to show, so the heading is left out too.
+  const question = original ?? (brief?.original ? <Markdown text={brief.original} /> : null);
   const body = (
     <div className="brief">
       {brief?.catchUp ? (
@@ -212,18 +214,25 @@ export function ItemBrief({
       ) : (
         catchUp
       )}
-      <BriefSection
-        plain={plain}
-        title="The question"
-        after={
-          <>
-            {afterOriginal}
-            {links}
-          </>
-        }
-      >
-        {original ?? (brief?.original && <Markdown text={brief.original} />)}
-      </BriefSection>
+      {question ? (
+        <BriefSection
+          plain={plain}
+          title="The question"
+          after={
+            <>
+              {afterOriginal}
+              {links}
+            </>
+          }
+        >
+          {question}
+        </BriefSection>
+      ) : (
+        <>
+          {afterOriginal}
+          {links}
+        </>
+      )}
       {brief && (
         <>
           <BriefSection

@@ -66,7 +66,9 @@ export function crewOrder(rows: CrewRow[], items: AttentionItem[], now = Date.no
     if (needLine(r, items, now).length) return 0;
     if (r.hudState === "running") return 1;
     if (r.hudState === "stopped") return 4;
+    // A paused loop is held, like a parked one, whatever its last state was.
     if (
+      r.paused ||
       ["waiting", "blocked", "parked", "stalled", "error"].includes(r.hudState) ||
       ["ci", "review", "parked"].includes(r.loop?.phase ?? "")
     )

@@ -69,11 +69,17 @@ export interface WorkLine {
   full: string;
 }
 
-/** The ticket number and its short title; "Free" for a seat with no open run. */
+/** A stopped seat with no run is not free: it takes no work until it is started. */
+export const SEAT_STOPPED_WORK = "Not taking work";
+
+/** The ticket number and its short title; "Free" for a seat with no open run, unless it is stopped. */
 export function workLine(row: CrewRow): WorkLine {
   if (row.role === "FLIGHT")
     return { ticket: null, text: "Watching the crew", full: "Watching the crew" };
-  if (row.kind === "crew" && isSeatFree(row)) return { ticket: null, text: "Free", full: "Free" };
+  if (row.kind === "crew" && isSeatFree(row))
+    return row.hudState === "stopped"
+      ? { ticket: null, text: SEAT_STOPPED_WORK, full: SEAT_STOPPED_WORK }
+      : { ticket: null, text: "Free", full: "Free" };
   const number = row.ticket?.split("#").at(-1);
   const title = row.ticketTitle ?? row.focus ?? (row.kind === "crew" ? "Working" : "Running");
   return {
@@ -83,7 +89,10 @@ export function workLine(row: CrewRow): WorkLine {
   };
 }
 
-/** The context in use as a whole percent; null (a dash on screen) when the seat is idle or unmeasured. */
+/**
+ * The context in use as a whole percent; null (a dash on screen) when a seat other than FLIGHT is
+ * idle or free, or when nothing is measured. FLIGHT's figure shows while it is idle too.
+ */
 export function contextShown(row: CrewRow): number | null {
   if (row.role !== "FLIGHT" && (row.hudState === "idle" || isSeatFree(row))) return null;
   const pct = contextPct(row);

@@ -3,6 +3,7 @@ import {
   type AuditReportFinding,
   auditToldKey,
   type FlightState,
+  wrapExternalText,
 } from "@mc/core";
 import type { Store } from "../store.ts";
 
@@ -14,7 +15,10 @@ export interface FlightAudit {
   top: AuditReportFinding[];
 }
 
-/** The newest report of the repo that FLIGHT has not been told, with its top findings; else undefined. */
+/**
+ * The newest report of the repo that FLIGHT has not been told, with its top findings; else
+ * undefined. The report is AUDIT's own words, so each one reaches FLIGHT as outside text.
+ */
 export function pendingAudit(store: Store, repoId: string): FlightAudit | undefined {
   const report = store.latestAuditReport(repoId);
   if (report === null) return undefined;
@@ -22,11 +26,18 @@ export function pendingAudit(store: Store, repoId: string): FlightAudit | undefi
   return {
     id: report.id,
     at: report.at,
-    verdict: report.verdict,
+    verdict: wrapExternalText(report.verdict),
     top: report.findings
       .slice()
       .sort((a, b) => a.rank - b.rank)
-      .slice(0, AUDIT_FLIGHT_TOP),
+      .slice(0, AUDIT_FLIGHT_TOP)
+      .map((f) => ({
+        ...f,
+        problem: wrapExternalText(f.problem),
+        evidence: wrapExternalText(f.evidence),
+        cause: wrapExternalText(f.cause),
+        links: f.links.map((l) => ({ ...l, label: wrapExternalText(l.label) })),
+      })),
   };
 }
 

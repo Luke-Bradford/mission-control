@@ -5,7 +5,7 @@ import { useSecond, useTz } from "../clock.ts";
 import { NEED_TEXT_MAX, needText } from "../comms/needText.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
-import { dayMonth, wkdTime } from "../fmt.ts";
+import { dayMonth, hhmm } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 
 /** What releases a hold, in words (the Hold form's own wording for the four the operator can set). */
@@ -17,7 +17,7 @@ export function holdConditionText(
     case "date":
       return tz === null
         ? "until a set date"
-        : `until ${dayMonth(condition.at, tz)} ${wkdTime(condition.at, tz).slice(-5)}`;
+        : `until ${dayMonth(condition.at, tz)} ${hhmm(condition.at, tz)}`;
     case "ticket":
       return `until ${condition.ticket} merges`;
     case "crew":

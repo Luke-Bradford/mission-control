@@ -112,7 +112,7 @@ import {
   seatUnavailable,
 } from "../config.ts";
 import { asideWakeDue } from "../engine/aside.ts";
-import { reviewerOf } from "../engine/engine.ts";
+import { FILE_MINOR_SUFFIX, reviewerOf } from "../engine/engine.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { runawayLiftedAt, runawayTrip, runawayWait } from "../flight/runaway.ts";
 import { flightRunsUpdate } from "../flight/seat.ts";
@@ -279,9 +279,7 @@ function loopViews(
               ? "working"
               : hud === "waiting"
                 ? "waiting-agent"
-                : hud === "blocked"
-                  ? "waiting-you"
-                  : "idle",
+                : "idle",
         stateSince: seatRow?.updatedAt ?? (latest ? (latest.endedAt ?? latest.startedAt) : 0),
         currentRun: latest ? runSummary(latest) : null,
         paused: false,
@@ -2035,7 +2033,7 @@ function crewItems(
     const run = n.runId === null ? null : store.run(n.runId);
     // the unfiled-minor-findings flag is raised after the merge and waits for a fix: it outlives its run
     if (
-      !n.key.endsWith(":file-minor") &&
+      !n.key.endsWith(FILE_MINOR_SUFFIX) &&
       !outlivesRun(n) &&
       run !== null &&
       endedWorkOver(config, store, run, boardOf, now)

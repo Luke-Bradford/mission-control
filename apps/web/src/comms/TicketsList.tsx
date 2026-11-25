@@ -166,7 +166,7 @@ export function TicketsList() {
           </ul>
         </>
       )}
-      {showList && found.length > SHOWN && (
+      {showList && !waiting && found.length > SHOWN && (
         <p className="note">{`Showing ${SHOWN} of ${found.length}. Type more to narrow it.`}</p>
       )}
     </section>
