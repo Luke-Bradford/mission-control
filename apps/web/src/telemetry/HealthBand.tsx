@@ -169,7 +169,8 @@ export function HealthBand({
   t: Telemetry | undefined;
   onNeedsRoute: (s: StatSpec) => void;
 }) {
-  const t7 = useResource<Telemetry>(RESOURCES.telemetry("7d")).data;
+  // The week's spend waits for the range on screen, so opening the page asks for one range first.
+  const t7 = useResource<Telemetry>(t === undefined ? null : RESOURCES.telemetry("7d")).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const machine = useResource<MachineView>(RESOURCES.machine).data;
   const now = useNow();
