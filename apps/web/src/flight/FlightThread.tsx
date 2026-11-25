@@ -276,7 +276,9 @@ export function FlightThread({
         ))}
         {run?.live && (
           <p role="status">
-            FLIGHT is working… since {run.since === null || !tz ? "—" : hhmm(run.since, tz, locale)}
+            {/* The hub sends the session's start, not the current turn's, so it says so. */}
+            FLIGHT's session is running · started{" "}
+            {run.since === null || !tz ? "—" : hhmm(run.since, tz, locale)}
           </p>
         )}
       </div>

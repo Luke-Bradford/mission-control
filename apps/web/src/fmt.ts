@@ -168,9 +168,10 @@ const round = (x: number, places: number): number => {
 
 /** `512 B`, `3.4 KB`, `12.3 MB`, `1.20 GB`; binary units throughout. */
 export function bytes(n: number): string {
-  if (n < 2 ** 10) return `${Math.round(n)} B`;
-  if (n < 2 ** 20) return `${fixed(n / 2 ** 10, 1)} KB`;
-  if (n < 2 ** 30) return `${fixed(n / 2 ** 20, 1)} MB`;
+  // Each unit is judged on the rounded figure, so 1023.96 KB reads 1.0 MB, never 1024.0 KB.
+  if (Math.round(n) < 2 ** 10) return `${Math.round(n)} B`;
+  if (round(n / 2 ** 10, 1) < 2 ** 10) return `${fixed(n / 2 ** 10, 1)} KB`;
+  if (round(n / 2 ** 20, 1) < 2 ** 10) return `${fixed(n / 2 ** 20, 1)} MB`;
   return `${fixed(n / 2 ** 30, 2)} GB`;
 }
 

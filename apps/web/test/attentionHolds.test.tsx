@@ -52,4 +52,12 @@ it("words each release condition", () => {
   expect(holdConditionText({ kind: "manual" }, null)).toBe("until you release it");
   expect(holdConditionText({ kind: "crew" }, null)).toBe("until the crew resumes");
   expect(holdConditionText({ kind: "date", at: 1 }, null)).toBe("until a set date");
+  // 2026-11-25 14:30 UTC is 14:30 in London and 09:30 in New York.
+  const at = Date.UTC(2026, 10, 25, 14, 30);
+  expect(holdConditionText({ kind: "date", at }, "Europe/London")).toBe("until 25 Nov 14:30");
+  expect(holdConditionText({ kind: "date", at }, "America/New_York")).toBe("until 25 Nov 09:30");
+  expect(holdConditionText({ kind: "ci", pr: "shop-app#12", state: "passing" }, null)).toBe(
+    "until shop-app#12 CI is passing",
+  );
+  expect(holdConditionText({ kind: "item", key: "q1" }, null)).toBe("until another item resolves");
 });

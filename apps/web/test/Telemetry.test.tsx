@@ -780,6 +780,10 @@ describe("Agents", () => {
       "Idle",
       "Unknown",
     ]);
+    // Crew state has no Unknown shape, so the note names it as the one addition.
+    expect(panel("tUtil").textContent).toContain(
+      "Same shapes as Crew state, plus Unknown for time no state accounts for.",
+    );
   });
 
   it("legend names every shape the bar draws, and Unknown differs from Parked", async () => {
@@ -824,6 +828,14 @@ describe("Agents", () => {
       "Failed",
       "Slowest",
     ]);
+    // The server sends tools by call count, most first: the table and its subtitle say so.
+    expect(
+      [...lat.querySelectorAll("th[aria-sort]")].map((t) => [
+        t.textContent,
+        t.getAttribute("aria-sort"),
+      ]),
+    ).toEqual([["Calls", "descending"]]);
+    expect(lat.textContent).toContain("most calls first");
     expect([...lat.querySelectorAll("tbody tr")].map((r) => r.textContent)).toEqual([
       "Bash2122.8s41s6just test (11m 00s, studio)",
       "Read6110.1s—0—",

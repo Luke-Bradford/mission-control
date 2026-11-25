@@ -303,6 +303,31 @@ describe("Plan and mockups in the question", () => {
     expect(within(other as HTMLElement).queryByRole("button", { name: /full size/ })).toBeNull();
   });
 
+  it("marks a relative link in a story section as not attached, as the plan does", async () => {
+    routes([ask()], {
+      [TICKET]: history(ticketBody("1. x")),
+      [matPath("q1")]: {
+        packets: [
+          packet({
+            story: [
+              {
+                heading: "This page",
+                text: "See [notes](notes.md).",
+                images: [],
+                comparison: null,
+                children: [],
+              },
+            ],
+          }),
+        ],
+      },
+    });
+    render(<Needs item="q1" />);
+    const article = await screen.findByRole("article", { name: "Layout story" });
+    expect(within(article).getByText("(not attached to this question)")).toBeTruthy();
+    expect(within(article).queryByRole("link", { name: "notes" })).toBeNull();
+  });
+
   it("shows source, kept time and historical status of a plan packet; relative links are not links", async () => {
     routes([ask()], {
       [TICKET]: history(ticketBody("1. x")),

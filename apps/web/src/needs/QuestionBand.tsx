@@ -1,4 +1,10 @@
-import { ATTENTION_LABEL, type AttentionItem, type CrewRow, needsYouAlert } from "@mc/core";
+import {
+  ATTENTION_LABEL,
+  type AttentionItem,
+  type CrewRow,
+  needsYouAlert,
+  seatCallSign,
+} from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { callSign as callSignOf } from "../crew.ts";
@@ -27,12 +33,19 @@ export const askerIdOf = (item: AttentionItem): string | null => item.asker ?? i
 
 /**
  * Who asks: the seat or loop behind the item, else FLIGHT when it briefed the question, else the
- * hub (an alert).
+ * hub (an alert). With no call sign it is the seat id, which the Needs filters match on.
  */
 export const askerOf = (item: AttentionItem, callSign?: string | null): string =>
   item.alert || needsYouAlert(item)
     ? "the hub"
     : (callSign ?? askerIdOf(item) ?? (item.brief?.for === "operator" ? "FLIGHT" : "the hub"));
+
+/** The call sign the band names: the crew row's, else the seat id written as one. */
+export const bandCallSign = (item: AttentionItem, row: CrewRow | undefined): string | undefined => {
+  if (row) return callSignOf(row);
+  const id = askerIdOf(item);
+  return id === null ? undefined : seatCallSign(id);
+};
 
 /** The recommended option's label, when the brief names one. */
 export function recommendedLabel(item: AttentionItem): string | null {
@@ -79,7 +92,7 @@ export function QuestionBand({
     <section className="needs-band" aria-label="The question">
       <div className="needs-band-meta">
         <Pill tone={item.kind === "decision" ? "warn" : "plain"}>{ATTENTION_LABEL[item.kind]}</Pill>
-        <span className="needs-band-who">{`Asked by ${askerOf(item, row ? callSignOf(row) : undefined)}`}</span>
+        <span className="needs-band-who">{`Asked by ${askerOf(item, bandCallSign(item, row))}`}</span>
         <Raised at={item.at} />
         {actions}
       </div>

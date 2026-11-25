@@ -294,6 +294,14 @@ describe("Telemetry, Throughput tab", () => {
       "Cycle",
       "~Cost",
     ]);
+    // Rows come newest merge first: the table and its subtitle say so.
+    expect(
+      [...table.querySelectorAll("th[aria-sort]")].map((h) => [
+        h.textContent,
+        h.getAttribute("aria-sort"),
+      ]),
+    ).toEqual([["Merged", "descending"]]);
+    expect(panel("tTickets").textContent).toContain("newest first");
     const rows = table.querySelectorAll("tbody tr");
     expect(rows).toHaveLength(3);
     expect(rows[0]?.textContent).toContain("shop#13");

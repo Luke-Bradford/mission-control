@@ -282,7 +282,9 @@ function QueueGroup({
                   ? p.uat?.since == null
                     ? "Age unknown"
                     : elapsed(Math.max(0, now - p.uat.since))
-                  : (p.ci ?? "In review")}
+                  : p.ci
+                    ? `CI ${p.ci}`
+                    : "In review"}
               </span>
               <span className="uat-queue-meta">
                 {p.repoId} · {prLabel(p.number)} ·{" "}
@@ -405,13 +407,7 @@ function Detail({
           </ExternalLink>
         </div>
       </Panel>
-      <CurrentQaReport
-        repo={pr.repoId}
-        pr={pr.number}
-        head={pr.headSha}
-        awaiting={awaiting}
-        ticket={pr.ticket}
-      >
+      <CurrentQaReport repo={pr.repoId} pr={pr.number} head={pr.headSha} awaiting={awaiting}>
         {pageChanges === true && visualEvidenceAvailable && (
           <Pairs
             pr={pr}
@@ -427,7 +423,10 @@ function Detail({
         {pageChanges === true && !visualEvidenceAvailable && (
           <p className="uat-queue-none">Screenshot evidence is unavailable for this repository.</p>
         )}
-        {pageChanges === false && <p className="uat-queue-none">No page changes</p>}
+        {/* With no changed paths captured, "no page changes" is not known: Impact says why. */}
+        {pageChanges === false && Boolean(data?.files?.length) && (
+          <p className="uat-queue-none">No page changes</p>
+        )}
         <div className="uat-grid-two uat-tests-grid">
           <Tests data={data} checks={fullPr?.checks ?? []} />
           <Panel title="Rework timeline">

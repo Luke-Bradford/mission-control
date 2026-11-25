@@ -7,7 +7,7 @@ import { dateTime } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { PlanParts } from "../plans/PlanView.tsx";
-import { followLink, useSearch } from "../router.ts";
+import { followLink, PAGE_PATHS, useSearch } from "../router.ts";
 import { useStore } from "../shell/store.ts";
 import { toast } from "../shell/Toast.tsx";
 import "../qa/qa-history.css";
@@ -15,7 +15,6 @@ import "../plans/plans.css";
 import "./qa-readiness.css";
 
 const NO_PLANS: TicketPlan[] = [];
-const PLANNER_PATH = "/planner";
 export const SEND_BACK_NOTE_REQUIRED = "Say what to change before sending the plan back.";
 
 /** Preserve the operator's repo scope while switching Planner views or plans. */
@@ -25,7 +24,7 @@ const plannerPath = (repo: string, history: boolean, plan?: string): string => {
   if (history) q.set("view", "history");
   if (plan) q.set("plan", plan);
   const qs = q.toString();
-  return PLANNER_PATH + (qs ? `?${qs}` : "");
+  return PAGE_PATHS.planner + (qs ? `?${qs}` : "");
 };
 
 function PlannerNavigation({ history, repo }: { history: boolean; repo: string }) {
@@ -52,7 +51,7 @@ function PlannerNavigation({ history, repo }: { history: boolean; repo: string }
 }
 
 /** The decision on a plan: approve it, or send it back with a note. */
-function Decide({ plan, repo, disabled }: { plan: TicketPlan; repo: string; disabled: boolean }) {
+function Decide({ plan, disabled }: { plan: TicketPlan; disabled: boolean }) {
   const [sending, setSending] = useState(false);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -65,7 +64,7 @@ function Decide({ plan, repo, disabled }: { plan: TicketPlan; repo: string; disa
       toast(result.moveError ? `Signed off, but the card did not move: ${result.moveError}` : said);
       hub.refetchTopic("boards");
       hub.refetchTopic("plans");
-      hub.refetch(RESOURCES.plans(repo).path);
+      hub.refetch(RESOURCES.plans().path);
     } catch (error) {
       setProblem(errorText(error));
     } finally {
@@ -184,7 +183,7 @@ function PlanRow({
   );
 }
 
-function Detail({ plan, repo, enabled }: { plan: TicketPlan; repo: string; enabled: boolean }) {
+function Detail({ plan, enabled }: { plan: TicketPlan; enabled: boolean }) {
   const tz = useTz();
   const locale = useLocale();
   const history = plan.state === "signed-off";
@@ -206,9 +205,7 @@ function Detail({ plan, repo, enabled }: { plan: TicketPlan; repo: string; enabl
             </p>
           )}
           <PlanParts plan={plan} />
-          {plan.state === "awaiting-signoff" && (
-            <Decide plan={plan} repo={repo} disabled={!enabled} />
-          )}
+          {plan.state === "awaiting-signoff" && <Decide plan={plan} disabled={!enabled} />}
         </div>
       </Panel>
     </div>
@@ -239,7 +236,7 @@ export function Planner() {
           <h1>Planner</h1>
           <p>
             {history
-              ? "Plans you approved or sent back, newest first."
+              ? "Plans you signed off, newest first."
               : "Each plan to approve, or send back with a note, before its ticket goes to Ready."}
           </p>
         </header>
@@ -252,7 +249,7 @@ export function Planner() {
           <p className="uat-banner crit-t" role="alert">
             {res.data ? "Showing the last plans. " : "The plans did not load. "}
             {res.error.message}{" "}
-            <button type="button" onClick={() => hub.refetch(RESOURCES.plans(repo).path)}>
+            <button type="button" onClick={() => hub.refetch(RESOURCES.plans().path)}>
               Try again
             </button>
           </p>
@@ -260,7 +257,7 @@ export function Planner() {
         <div className="uat-layout">
           <Panel
             title={title}
-            sub={`${list.length} ${history ? "decided" : "waiting"}`}
+            sub={`${list.length} ${history ? "signed off" : "waiting"}`}
             className="uat-queue"
           >
             {res.loading && !res.data && (
@@ -271,10 +268,12 @@ export function Planner() {
             {res.error && !res.data && <p className="pb">No plans to show until they load.</p>}
             {res.data && list.length === 0 && (
               <div className="pb uat-empty">
-                <h3>{history ? "No plan has been decided yet" : "No plan is waiting for you"}</h3>
+                <h3>
+                  {history ? "No plan has been signed off yet" : "No plan is waiting for you"}
+                </h3>
                 <p>
                   {history
-                    ? "Plans you approve or send back will be listed here."
+                    ? "Plans you sign off will be listed here."
                     : "The next plan to need your sign-off will appear here."}
                 </p>
               </div>
@@ -299,7 +298,6 @@ export function Planner() {
             <Detail
               key={`${selected.repoId}-${selected.issue}`}
               plan={selected}
-              repo={repo}
               enabled={connected && !res.error}
             />
           ) : null}

@@ -116,7 +116,7 @@ export function StatusStrip({ onOpen }: { onOpen: (tab: FlightTab) => void }) {
   const decided =
     decidedN !== null && decidedN >= FLIGHT_VIEW_LIMIT ? `${FLIGHT_VIEW_LIMIT}+` : decidedN;
   const age = summary?.headlineAgeMin ?? null;
-  const stale = age !== null && age >= HEADLINE_STALE_MIN;
+  const stale = age !== null && age > HEADLINE_STALE_MIN;
   return (
     <section className="flight-strip" aria-label="FLIGHT status" data-testid="flight-strip">
       <span className="flight-strip-run">

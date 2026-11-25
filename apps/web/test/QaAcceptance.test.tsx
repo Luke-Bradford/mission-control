@@ -128,9 +128,10 @@ describe("QA acceptance", () => {
       "/qa?repo=mc&pr=1",
     ]);
     expect(links[0]?.textContent).toMatch(/2h/);
-    expect(screen.getByRole("list", { name: "Pull requests in review" }).textContent).toContain(
-      "Change 3",
-    );
+    const review = screen.getByRole("list", { name: "Pull requests in review" });
+    expect(review.textContent).toContain("Change 3");
+    // The chip names CI as CI, not a bare state word.
+    expect(review.querySelector(".uat-age")?.textContent).toBe("CI passing");
     expect(fetcher.mock.calls.filter(([path]) => path.startsWith("/api/qa/uat/"))).toHaveLength(1);
   });
   it("accepts only the displayed immutable head, once", async () => {

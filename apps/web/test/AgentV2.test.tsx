@@ -1,5 +1,5 @@
 import type { AgentDetailView } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { hub, RESOURCES, RUNS_LIMIT } from "../src/data.ts";
 import { kTokens, percent } from "../src/fmt.ts";
@@ -100,6 +100,37 @@ it("says a seat with no ticket is free to take the next one", async () => {
     await screen.findByText("No ticket. Free to take the next Ready ticket in its area."),
   ).toBeTruthy();
   expect(screen.getByText("No run in progress. Recent runs lists the earlier ones.")).toBeTruthy();
+});
+
+it("labels a free seat's ticket as its last run, and FLIGHT's line says it watches", async () => {
+  setup(
+    agentView(
+      crewRow({
+        id: "guido-1",
+        kind: "crew",
+        run: null,
+        ticket: "shop-app#3349",
+        ticketTitle: "Fix checkout",
+        hudState: "idle",
+      }),
+    ),
+  );
+  const band = await screen.findByRole("region", { name: "guido-1 details" });
+  expect(within(band).getByText("Last run:")).toBeTruthy();
+  cleanup();
+  setup(agentView(crewRow({ id: "flight", role: "FLIGHT", run: null, ticket: null })));
+  expect(await screen.findByText("Watching the crew.")).toBeTruthy();
+  expect(screen.queryByText(/Free to take the next Ready ticket/)).toBeNull();
+});
+
+it("names the effort and CLI version once in the identity strip", async () => {
+  const view = populatedAgentView();
+  view.row.cli = { ...view.row.cli, effort: "high", version: "2.1.0" };
+  setup(view);
+  const band = await screen.findByRole("region", { name: `${view.row.id} details` });
+  const strip = band.querySelector(".idb-strip")?.textContent ?? "";
+  expect(strip.match(/high/g)).toHaveLength(1);
+  expect(strip.match(/2\.1\.0/g)).toHaveLength(1);
 });
 
 it("Interrupt shows sent, then confirmed; a refusal shows its reason", async () => {

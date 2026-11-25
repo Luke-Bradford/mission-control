@@ -5,7 +5,7 @@ import { useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { hhmm, percent } from "../fmt.ts";
 import { Sparkline } from "../hud/Sparkline.tsx";
-import { followLink, PAGE_PATHS } from "../router.ts";
+import { followLink, telemetryPath } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
 const GIB = 2 ** 30;
@@ -44,7 +44,8 @@ export function MacRow() {
   const lock = useTestLock();
   const nameOf = useSeatName();
   const latest = source.data?.latest ?? null;
-  const cpu = latest?.cpuPct ?? null;
+  // CPU needs two samples; until the reading has one, the sparkline's last point stands in.
+  const cpu = latest?.cpuPct ?? summary?.machine?.cpu?.findLast((v) => v !== null) ?? null;
   const total = latest && latest.memTotalBytes > 0 ? latest.memTotalBytes : null;
   const mem =
     total !== null && latest?.memUsedBytes != null ? (100 * latest.memUsedBytes) / total : null;
@@ -53,7 +54,7 @@ export function MacRow() {
   return (
     <section id="macP" className="panel mac-row" aria-label="This machine">
       <h2>
-        <a href={PAGE_PATHS.telemetry} onClick={(e) => followLink(e, PAGE_PATHS.telemetry)}>
+        <a href={telemetryPath("machine")} onClick={(e) => followLink(e, telemetryPath("machine"))}>
           Mac
         </a>
       </h2>

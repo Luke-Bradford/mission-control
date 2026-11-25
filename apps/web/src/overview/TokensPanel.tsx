@@ -12,7 +12,7 @@ import { hhmm, kTokens, percent } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { metricTitle, useMetrics } from "../metrics.ts";
 import { resetWhen } from "../quota.ts";
-import { followLink, PAGE_PATHS, setupPath } from "../router.ts";
+import { followLink, setupPath, telemetryPath } from "../router.ts";
 import { LANE_MINUTES, laneTokens } from "./CrewLane.tsx";
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -219,7 +219,7 @@ export function TokensPanel() {
     <Panel
       id="tokensP"
       title={
-        <a href={PAGE_PATHS.telemetry} onClick={(e) => followLink(e, PAGE_PATHS.telemetry)}>
+        <a href={telemetryPath("cost")} onClick={(e) => followLink(e, telemetryPath("cost"))}>
           Tokens
         </a>
       }
