@@ -98,6 +98,7 @@ import {
   type QaFlowView,
   type QaReviewRoundView,
   type QuestionClosure,
+  REVIEW_STATUS_CONTEXT,
   type ReplyDraft,
   type RepoGoal,
   type RepoId,
@@ -5589,12 +5590,14 @@ export class Store {
    * on the live hub, 30 ms a read) while the heads first seen that day are a few hundred rows.
    */
   ciRunsOfNewHeads(since: number): CiRunView[] {
+    // the hub's own review status is not CI (the rate skips it), so an older one keeps no head out
     const rows = this.statement(
       `SELECT * FROM ci_runs c INDEXED BY ci_runs_first_seen WHERE c.first_seen_at >= ?1 AND c.at >= ?1
          AND NOT EXISTS (SELECT 1 FROM ci_runs o INDEXED BY ci_runs_head
-           WHERE o.repo_id = c.repo_id AND o.sha = c.sha AND o.first_seen_at < ?1 AND o.at >= ?1)
+           WHERE o.repo_id = c.repo_id AND o.sha = c.sha AND o.first_seen_at < ?1 AND o.at >= ?1
+             AND o.name != ?2)
        ORDER BY c.at DESC, c.name, c.attempt DESC`,
-    ).all(since) as Row[];
+    ).all(since, REVIEW_STATUS_CONTEXT) as Row[];
     return rows.map(toCiRun);
   }
 

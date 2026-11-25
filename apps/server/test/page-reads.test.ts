@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { PullRequestView, Run } from "@mc/core";
-import { COMMS_CAPCOM, NEW_LOOP } from "@mc/core";
+import { COMMS_CAPCOM, NEW_LOOP, REVIEW_STATUS_CONTEXT } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { attentionChatter } from "../src/comms/index.ts";
 import { overviewSummary } from "../src/hud/overview.ts";
@@ -95,6 +95,38 @@ describe("the kept pull requests", () => {
     expect(closing.map((p) => p.number)).toEqual([2, 1]);
     expect(closing[0]).toBe(kept[1]);
     expect(store.pullRequestsClosingTicket("other", 5)).toEqual([]);
+  });
+
+  it("survive a poll that only moves when each row was read, or marks them stale", () => {
+    store.upsertPullRequests("repo", [pr(1), pr(2)], 1);
+    const kept = store.pullRequests("repo")[0];
+    // every poll writes every row back with a new read_at, and a failed poll marks them stale
+    store.upsertPullRequests("repo", [pr(1), pr(2)], 2);
+    store.markPullRequestsStale("repo");
+    store.sweepPullRequests("repo", [pr(1), pr(2)], 3);
+    expect(store.pullRequests("repo")[0]).toBe(kept);
+    store.upsertPullRequests("repo", [pr(2, { ci: "failing" })], 4);
+    expect(store.pullRequests("repo").map((p) => p.ci)).toEqual(["failing", "passing"]);
+  });
+
+  it("replace the trigger that fired on any update when the database is opened", () => {
+    const triggerSql = () =>
+      db()
+        .prepare("SELECT sql FROM sqlite_master WHERE name = 'pull_requests_written_update'")
+        .get() as { sql: string };
+    const made = triggerSql().sql;
+    db().exec(`DROP TRIGGER pull_requests_written_update;
+      CREATE TRIGGER pull_requests_written_update AFTER UPDATE ON pull_requests BEGIN
+        INSERT INTO table_writes (name, n) VALUES ('pull_requests', 1)
+        ON CONFLICT(name) DO UPDATE SET n = n + 1;
+      END;`);
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    expect(triggerSql().sql).toBe(made);
+    store.upsertPullRequests("repo", [pr(1)], 1);
+    const kept = store.pullRequests("repo")[0];
+    store.upsertPullRequests("repo", [pr(1)], 2);
+    expect(store.pullRequests("repo")[0]).toBe(kept);
   });
 });
 
@@ -203,6 +235,26 @@ describe("the Overview's CI rate", () => {
       attention: [],
     }).kpis.ciPassRate24h;
     expect(all).not.toHaveBeenCalled();
+    expect(ci).toMatchObject({ runs: 1, pct: 100 });
+  });
+
+  it("counts a new head whose only older row is the hub's own review status", () => {
+    const review = {
+      ...check("SUCCESS", "passing", REVIEW_STATUS_CONTEXT),
+      kind: "status" as const,
+    };
+    // the hub posted its review status on the head two days ago; its CI first ran today
+    store.upsertPullRequests("repo", [pr(1, { headSha: "h", checks: [review] })], NOW - 2 * DAY);
+    store.upsertPullRequests(
+      "repo",
+      [pr(1, { headSha: "h", checks: [review, check("SUCCESS", "passing")] })],
+      NOW - HOUR,
+    );
+    const ci = overviewSummary(store, NOW, {
+      repoIds: ["repo"],
+      timezone: "UTC",
+      attention: [],
+    }).kpis.ciPassRate24h;
     expect(ci).toMatchObject({ runs: 1, pct: 100 });
   });
 });
