@@ -327,7 +327,8 @@ export function createCmux(
       const r = await cmux(["select-workspace", "--workspace", ws]);
       if (r.code !== 0) throw failed("select-workspace", r);
       const [activateFile, ...activateArgs] = options.activate ?? openCommand(true);
-      await run(activateFile as string, activateArgs);
+      const shown = await run(activateFile as string, activateArgs);
+      if (shown.code !== 0) throw failed("bring to front", shown);
     },
     async statuses(ws) {
       const r = await cmux(["list-status", "--workspace", ws]);

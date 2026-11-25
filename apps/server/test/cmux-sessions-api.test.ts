@@ -108,6 +108,16 @@ describe("the sessions routes", () => {
     expect(fake.state().selected).toEqual([PRICING]);
   });
 
+  it("focus fails when cmux cannot be brought to the front", async () => {
+    await app.close();
+    fake = fakeCmux(dir, structuredClone(STATE), ["/usr/bin/false"]);
+    start();
+    const r = await operator().post(`/api/sessions/${PRICING}/focus`);
+    expect(r.statusCode).toBe(503);
+    expect(r.json().error).toMatch(/bring to front failed/);
+    expect(fake.state().selected).toEqual([PRICING]);
+  });
+
   it("send pastes the text then Enter", async () => {
     const r = await operator().post(`/api/sessions/${PRICING}/send`, { text: "hello" });
     expect(r.statusCode).toBe(200);

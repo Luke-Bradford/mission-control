@@ -37,15 +37,17 @@ export interface FakeCmux {
   log(): string[][];
 }
 
-export function fakeCmux(dir: string, initial: FakeState): FakeCmux {
+export function fakeCmux(
+  dir: string,
+  initial: FakeState,
+  /** What brings cmux to the front; `true` by default, `false` for a failed activation. */
+  activate: readonly string[] = ["/usr/bin/true"],
+): FakeCmux {
   const file = join(dir, "cmux-state.json");
   writeFileSync(file, JSON.stringify(initial));
   const state = (): FakeState => JSON.parse(readFileSync(file, "utf8"));
   return {
-    // `true` stands in for bringing cmux to the front
-    cmux: createCmux([process.execPath, FAKE, "--state", file], () => {}, {
-      activate: ["/usr/bin/true"],
-    }),
+    cmux: createCmux([process.execPath, FAKE, "--state", file], () => {}, { activate }),
     state,
     patch(fn) {
       const s = state();
