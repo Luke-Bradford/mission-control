@@ -80,7 +80,7 @@ describe("evidenceSideStarter", () => {
     expect(t.commands[0]).toBe(`git -C /checkout fetch origin ${SHA}`);
     expect(t.commands[1]).toMatch(/^git -C \/checkout worktree add -f --detach .+ a{40}$/);
     expect(t.commands.slice(2)).toEqual([
-      "pnpm install --offline --frozen-lockfile (in worktree)",
+      "pnpm install --offline --frozen-lockfile --ignore-scripts (in worktree)",
       "pnpm --filter @mc/web build (in worktree)",
     ]);
     expect(t.events).toEqual(["launch 7555 head.sqlite"]);

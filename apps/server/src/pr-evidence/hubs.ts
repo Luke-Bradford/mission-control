@@ -95,7 +95,13 @@ export function evidenceSideStarter(
         signal,
       );
       added = true;
-      await o.run("pnpm", ["install", "--offline", "--frozen-lockfile"], worktree, signal);
+      // the head's own build and hub run next; its install scripts are not needed for them
+      await o.run(
+        "pnpm",
+        ["install", "--offline", "--frozen-lockfile", "--ignore-scripts"],
+        worktree,
+        signal,
+      );
       await o.run("pnpm", ["--filter", "@mc/web", "build"], worktree, signal);
       const port = await o.freePort();
       hub = await o.launch({ worktree, port, db, ...(signal ? { signal } : {}) });

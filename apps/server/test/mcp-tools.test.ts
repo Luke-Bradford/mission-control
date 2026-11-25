@@ -474,6 +474,14 @@ describe("report_audit", () => {
     expect(ended).toEqual([AUDIT_RUN]);
   });
 
+  it("is the AUDIT seat's only way out: it is not offered messages, FLIGHT or report_evidence", () => {
+    const ts = auditTools();
+    for (const name of ["comms_send", "ask_flight", "call_flight", "report_evidence"]) {
+      expect(tool(name, ts).offeredTo?.("audit-1"), name).toBe(false);
+      expect(tool(name, ts).offeredTo?.("guido-1") ?? true, name).toBe(true);
+    }
+  });
+
   it("refuses a seat that is not the AUDIT seat", async () => {
     const out = await tool("report_audit").call(CTX, { verdict: "v", findings: [] });
     expect(out).toMatchObject({ isError: true, text: MC_AUDIT_NOT_AUDIT });

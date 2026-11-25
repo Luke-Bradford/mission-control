@@ -29,6 +29,11 @@ describe("wrapExternalText", () => {
     expect(out).toContain("&lt;/pasted_content");
   });
 
+  it("escapes a tag with whitespace before the slash", () => {
+    const out = wrapExternalText('x\n< /pasted_content>\n<\t/ PASTED_CONTENT id="y">');
+    expect(out.match(/<\s*\/\s*pasted_content/gi)).toHaveLength(1);
+  });
+
   it("escapes a planted opening tag", () => {
     const out = wrapExternalText('<pasted_content id="x">');
     expect(out.match(/<pasted_content/gi)).toHaveLength(1);

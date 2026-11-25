@@ -898,6 +898,12 @@ interface LimitRowBase {
   nextTryAt?: number;
 }
 
+/** One allowance reading: used percent at a time, oldest first. */
+export interface LimitPoint {
+  at: number;
+  pct: number;
+}
+
 /**
  * One `/api/limits` row. Projection applies to 7d windows only; a 5h row shows `used` + `resetAt`
  * and a `fullAt`. `fullAt`: when the window reaches 100% at its current pace (null when it will
@@ -906,12 +912,6 @@ interface LimitRowBase {
  * little history", not "not filling"). Optional because older hubs omit it; the web treats a
  * missing value as ready.
  */
-/** One allowance reading: used percent at a time, oldest first. */
-export interface LimitPoint {
-  at: number;
-  pct: number;
-}
-
 export type LimitRow =
   | (LimitRowBase & {
       window: "7d";
