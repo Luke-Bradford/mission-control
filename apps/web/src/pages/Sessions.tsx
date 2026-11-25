@@ -17,6 +17,8 @@ import { Pill } from "../hud/Pill.tsx";
 import { toast } from "../shell/Toast.tsx";
 import "./sessions.css";
 
+// The rows come from GET /api/sessions, which the hub reads from cmux itself, with no agent.
+
 const STATE_TONE: Record<CmuxSessionState, PillTone> = {
   waiting: "warn",
   working: "ok",
