@@ -206,9 +206,11 @@ export interface RunLoop {
   /** One extra author rework round FLIGHT may grant after the review-round cap, per head. */
   flightReworks?: Record<string, number>;
   /**
-   * The epoch a FLIGHT rework at the review-round cap granted a review in: the seat's fix is a new
-   * head, so the grant is by epoch. It holds from that epoch on, whatever starts a new epoch, until
-   * FLIGHT settles with rereview, accept or second_review; its review is limited to one blocking outcome.
+   * The epoch FLIGHT's rework of a review or review-ruling park granted a review in: the seat's fix
+   * is a new head, so the grant is by epoch. It holds from that epoch on, whatever starts a new
+   * epoch, until a review or review-ruling park is lifted again by anything but another FLIGHT
+   * rework (which sets it afresh); a review-failed park's lift keeps it. Its review is limited to one
+   * blocking outcome.
    */
   flightReworkGrantEpoch?: number;
   phase: LoopPhase;
@@ -274,7 +276,7 @@ export interface RunLoop {
     containsMain: boolean;
     hubOnly: boolean;
     strays: string[];
-    /** The PR changes the HUD, so a passing RETRO design check is required before readiness. */
+    /** The head's diff against main changes the repo's web area. */
     webChanged?: boolean;
   } | null;
   /** The merged PR was only part of the ticket: the ticket was left open and its card is not Done's. */

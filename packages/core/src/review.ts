@@ -321,8 +321,6 @@ export interface ReviewFact {
   failure: string | null;
   /** Set when the review ran without an install: the status says so. */
   installNote?: string;
-  /** The design pass and screenshot-pair evidence RETRO recorded for this review. */
-  design?: Pick<ReviewCheck, "result" | "note"> | null;
 }
 
 export interface LoopReviewFacts {
