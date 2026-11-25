@@ -534,7 +534,8 @@ it("attention selects only unread stored bodies and retains a read prompt's repl
       snapshot.map((m) => m.id),
     );
     f.store.addComms({ from: "guido-1", to: "CAPCOM", text: "Reply", at: 12, ticket: null });
-    const query = vi.spyOn(f.store, "threadComms");
+    // attention reads only the seat's lines that can raise an item (#2219)
+    const query = vi.spyOn(f.store, "attentionComms");
     const messages = threadMessages(f.store, "guido-1", true, "attention");
     expect(messages).toHaveLength(1);
     expect(messages[0]).toMatchObject({ text: "Reply", seen: false, direct: true });

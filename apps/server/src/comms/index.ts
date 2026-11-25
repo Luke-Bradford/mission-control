@@ -388,7 +388,10 @@ export function threadMessages(
 ): CommsThreadMessage[] {
   const cursors = store.threadReadCursors(id);
   const after = scope === "attention" ? (cursors.get("comms")?.offset ?? 0) : 0;
-  const rows = store.threadComms(id, after).sort((a, b) => a.at - b.at);
+  // Needs you keeps only the seat's own lines that tag or answer CAPCOM, so it reads only those
+  const rows = (
+    scope === "attention" ? store.attentionComms(id, after) : store.threadComms(id, after)
+  ).sort((a, b) => a.at - b.at);
   const prompt =
     scope === "attention"
       ? store.threadPrompt(id)

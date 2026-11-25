@@ -166,21 +166,27 @@ it("includes FLIGHT-triaged operator items and drops acknowledgements", () => {
   ]);
 });
 
-it("loads only unended runs or runs with merge state for the digest", () => {
-  store.upsertRun(run("active"));
+it("reads the outstanding runs' holds and every ready PR head for the digest (#2219)", () => {
+  const hold = { kind: "ci", reason: "waits", since: NOW } as unknown as NonNullable<
+    NonNullable<Run["loop"]>["hold"]
+  >;
+  store.upsertRun(run("active", { loop: { ...NEW_LOOP, hold } }));
   store.upsertRun(run("ended-no-loop", { endedAt: NOW }));
   store.upsertRun(run("ended-null-merge", { endedAt: NOW, loop: { ...NEW_LOOP, merging: null } }));
   store.upsertRun(run("ended-missing-merge", { endedAt: NOW, loop: { ...NEW_LOOP } }));
   store.upsertRun(
-    run("ended-ready", {
+    run("ended-merged-only", {
       endedAt: NOW,
-      loop: { ...NEW_LOOP, merging: { sha: "head", done: ["ready"] } },
+      loop: { ...NEW_LOOP, prNumber: 8, merging: { sha: "old", done: ["merge"] } },
     }),
   );
-  expect(
-    store
-      .runsForAwayDigest()
-      .map((r) => r.id)
-      .sort(),
-  ).toEqual(["active", "ended-ready"]);
+  store.upsertRun(
+    run("ended-ready", {
+      endedAt: NOW,
+      loop: { ...NEW_LOOP, prNumber: 7, merging: { sha: "head", done: ["ready"] } },
+    }),
+  );
+  const read = store.awayDigestRuns();
+  expect(read.outstanding).toEqual([{ id: "active", ticket: run("active").ticket, hold }]);
+  expect(read.ready).toEqual([{ repoId: run("x").repoId, prNumber: 7, sha: "head" }]);
 });

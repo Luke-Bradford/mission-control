@@ -78,7 +78,7 @@ export function awayDigest(
 ): AwayDigest {
   const started = Number(store.getSetting(AWAY_STARTED_SETTING));
   const after = since ?? (started > 0 ? started : at - AWAY_DIGEST_LOOKBACK_MS);
-  const runs = store.runsForAwayDigest();
+  const runs = store.awayDigestRuns();
   const prs = repos
     .flatMap((repo) => store.pullRequests(repo))
     .filter((p) => p.state === "open")
@@ -103,21 +103,17 @@ export function awayDigest(
           (p) =>
             !p.isDraft &&
             p.ci === "passing" &&
-            runs.some(
-              (r) =>
-                r.repoId === p.repoId &&
-                r.loop?.prNumber === p.number &&
-                r.loop.merging?.done.includes("ready") &&
-                r.loop.merging.sha === p.headSha,
+            runs.ready.some(
+              (r) => r.repoId === p.repoId && r.prNumber === p.number && r.sha === p.headSha,
             ),
         ),
       },
       { kind: "draftsToWalkThrough", items: prs.filter((p) => p.isDraft) },
       {
         kind: "failures",
-        items: runs.flatMap((r) =>
-          r.endedAt === null && r.loop?.hold?.kind && !r.loop.hold.ended
-            ? [{ runId: r.id, ticket: r.ticket, reason: r.loop.hold.reason ?? "" }]
+        items: runs.outstanding.flatMap((r) =>
+          r.hold?.kind && !r.hold.ended
+            ? [{ runId: r.id, ticket: r.ticket, reason: r.hold.reason ?? "" }]
             : [],
         ),
       },

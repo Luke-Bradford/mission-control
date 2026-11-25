@@ -5,6 +5,19 @@ load; no single response is over 300 KB. `apps/server/test/response-budget.test.
 page's first-load responses from a large fixture and fails above those numbers. It runs with the
 server suite in CI.
 
+The hub answers one request at a time, so a slow one makes every other request wait behind it. To
+time each request a page makes on opening against a copy of a real database, run
+`node --experimental-strip-types apps/server/scripts/first-load-timings.ts --db <db>` from the
+repo root. It copies the database, builds the app in-process with nothing running, and prints
+each GET's time right after a write (as on the live hub, where something is written every second
+or so) and repeated. A request that answers an error or times out is listed as failed, and the run
+exits 1, as it does when a request takes 300 ms or more. Routes with a path parameter (a ticket's
+history, the selected QA item's PR and UAT, a run's loop) are filled with the database's newest
+ids, from the script's `PARAM_ROUTES`; a test holds every such route to an entry there. A route
+the database cannot fill, or that reads GitHub, git or a CLI rather than the database, is listed as
+not timed with why. Without `--config` it lists the routes that read config.yaml itself as not
+timed too.
+
 A page fetches what it shows, not whole histories. Each list answers with a bounded, summary shape
 and the full row is one request away.
 
