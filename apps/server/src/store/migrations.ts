@@ -7,6 +7,34 @@ type Row = Record<string, SQLInputValue>;
 
 /** `PRAGMA user_version` once the usage_samples dedupe and its unique index are in place. */
 const USAGE_DEDUPE_VERSION = 1;
+/** The pull_requests columns `Store.pullRequests` reads: a write to any other leaves its kept list. */
+const PULL_REQUEST_LIST_COLUMNS = [
+  "repo_id",
+  "number",
+  "title",
+  "url",
+  "branch",
+  "ticket",
+  "state",
+  "is_draft",
+  "review",
+  "ci",
+  "created_at",
+  "updated_at",
+  "merged_at",
+  "head_sha",
+  "merge_commit_sha",
+  "mergeable",
+  "author",
+  "assignees",
+  "checks",
+  "closing_issues",
+  "is_cross_repository",
+  "additions",
+  "deletions",
+  "changed_files",
+  "base",
+] as const;
 export const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
@@ -316,6 +344,19 @@ class Migrations {
       CREATE INDEX IF NOT EXISTS flight_decisions_target_kind ON flight_decisions(target_run_id, kind);
       CREATE INDEX IF NOT EXISTS flight_decisions_ref ON flight_decisions(ref, at);
       CREATE INDEX IF NOT EXISTS ci_runs_pr ON ci_runs(repo_id, pr_number);
+      CREATE INDEX IF NOT EXISTS ci_runs_first_seen ON ci_runs(first_seen_at);
+      CREATE INDEX IF NOT EXISTS ci_runs_head ON ci_runs(repo_id, sha, first_seen_at);
+      CREATE INDEX IF NOT EXISTS comms_from_to_at ON comms(from_id, to_id, at, id);
+      -- A count of writes to pull_requests, by any connection: the parsed list is kept until it moves.
+      CREATE TABLE IF NOT EXISTS table_writes (name TEXT PRIMARY KEY, n INTEGER NOT NULL);
+      CREATE TRIGGER IF NOT EXISTS pull_requests_written_insert AFTER INSERT ON pull_requests BEGIN
+        INSERT INTO table_writes (name, n) VALUES ('pull_requests', 1)
+        ON CONFLICT(name) DO UPDATE SET n = n + 1;
+      END;
+      CREATE TRIGGER IF NOT EXISTS pull_requests_written_delete AFTER DELETE ON pull_requests BEGIN
+        INSERT INTO table_writes (name, n) VALUES ('pull_requests', 1)
+        ON CONFLICT(name) DO UPDATE SET n = n + 1;
+      END;
       CREATE INDEX IF NOT EXISTS runs_review ON runs(review_id);
       CREATE INDEX IF NOT EXISTS runs_repo_branch ON runs(repo_id, branch);
       CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
@@ -434,6 +475,27 @@ class Migrations {
     this.addColumn("pull_requests", "read_at", "INTEGER NOT NULL DEFAULT 0");
     // 1 while the latest poll failed to read the repo's PRs: the row is the last good read.
     this.addColumn("pull_requests", "stale", "INTEGER NOT NULL DEFAULT 0");
+    // Every poll writes each row back with a new read_at (and a failed one sets stale): neither is
+    // in the PR list, so only a change to a column it reads moves the count. Made after the columns
+    // it names, and remade when it differs (the first one fired on any update).
+    const prUpdateTrigger = `CREATE TRIGGER pull_requests_written_update
+      AFTER UPDATE OF ${PULL_REQUEST_LIST_COLUMNS.join(", ")} ON pull_requests
+      WHEN ${PULL_REQUEST_LIST_COLUMNS.map((c) => `OLD.${c} IS NOT NEW.${c}`).join(" OR ")} BEGIN
+        INSERT INTO table_writes (name, n) VALUES ('pull_requests', 1)
+        ON CONFLICT(name) DO UPDATE SET n = n + 1;
+      END`;
+    const triggerSql = () =>
+      (
+        this.db
+          .prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+          .get("pull_requests_written_update") as { sql: string } | undefined
+      )?.sql;
+    if (triggerSql() !== prUpdateTrigger)
+      this.transaction(() => {
+        if (triggerSql() === prUpdateTrigger) return;
+        this.db.exec("DROP TRIGGER IF EXISTS pull_requests_written_update");
+        this.db.exec(prUpdateTrigger);
+      }, true);
     // Machine samples' CPU and memory shares, extracted once so the telemetry ranges average
     // columns rather than parsing every sample's JSON.
     this.whenColumnMissing("machine_samples", "cpu_pct", () => {

@@ -1387,6 +1387,28 @@ export class CommsQueries {
     return this.commsRows(rows.reverse());
   }
 
+  /**
+   * The lines of `threadComms(id, after)` that can raise a Needs-you item for the seat: those it
+   * wrote to CAPCOM or that name `@CAPCOM` (`raisesAttention`; the caller still tests the tag
+   * exactly). Needs you reads every seat's thread on each build after a write, and reading the
+   * whole 500-line window of each cost most of that build.
+   */
+  attentionComms(id: string, after = 0): (CommsRow & { id: string })[] {
+    // the oldest line of the thread's window: index-only reads of the two halves
+    const floor = this.host
+      .statement(`SELECT id FROM (
+          SELECT id FROM (SELECT id FROM comms WHERE from_id = ?1 AND id > ?2 ORDER BY id DESC LIMIT ?3)
+          UNION
+          SELECT id FROM (SELECT id FROM comms WHERE to_id = ?1 AND id > ?2 ORDER BY id DESC LIMIT ?3)
+        ) ORDER BY id DESC LIMIT 1 OFFSET ?3 - 1`)
+      .get(id, after, THREAD_COMMS_LIMIT) as { id: number } | undefined;
+    const rows = this.host
+      .statement(`SELECT * FROM comms WHERE from_id = ? AND id >= ? AND id > ?
+          AND (to_id = ? OR text LIKE '%@capcom%') ORDER BY id`)
+      .all(id, floor?.id ?? 0, after, COMMS_CAPCOM) as Row[];
+    return this.commsRows(rows);
+  }
+
   /** Prompt metadata remains available even after its body has been read. */
   threadPrompt(id: string): { id: string; at: number } | undefined {
     const row = this.db
