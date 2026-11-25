@@ -2535,6 +2535,12 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return place !== null && seatDef(place.seat).loop === "watch";
   };
 
+  /** The seat runs as AUDIT: it changes nothing and messages nobody, so `report_audit` is its one way out. */
+  const isAudit = (seatId: string): boolean => {
+    const place = seatPlace(config, seatId);
+    return place !== null && seatDef(place.seat).loop === "audit";
+  };
+
   /**
    * A seat's question to FLIGHT: stored as a seat question that is FLIGHT's from the start, and
    * mirrored to Comms as a line to FLIGHT. It reaches the operator only if FLIGHT briefs it for
@@ -3367,6 +3373,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         additionalProperties: false,
       },
       modes: ["writer", "read-only", "scratch"],
+      offeredTo: (seatId) => !isAudit(seatId),
       call: commsSend,
     },
     {
@@ -3458,7 +3465,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       },
       modes: ["writer", "read-only"],
       // FLIGHT is a read-only seat too: it takes decisions to the operator with brief_item
-      offeredTo: (seatId) => !isFlight(seatId),
+      offeredTo: (seatId) => !isFlight(seatId) && !isAudit(seatId),
       call: askFlight,
     },
     {
@@ -3486,7 +3493,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         additionalProperties: false,
       },
       modes: ["writer", "read-only", "scratch"],
-      offeredTo: (seatId) => !isFlight(seatId),
+      offeredTo: (seatId) => !isFlight(seatId) && !isAudit(seatId),
       call: callFlight,
     },
     {
@@ -3518,6 +3525,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         additionalProperties: false,
       },
       modes: ["writer", "read-only"],
+      offeredTo: (seatId) => !isAudit(seatId),
       call: reportEvidence,
     },
     {

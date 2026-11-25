@@ -57,6 +57,12 @@ describe("ticketPathGrants", () => {
       "apps/web/package.json",
     ]);
   });
+
+  it("keeps a plain entry with a . or .. segment, as it keeps such a glob", () => {
+    const climbs = ["apps/server/../../README.md", "apps/server/./x.ts"];
+    expect(pathsNeedingGrant(["apps/server/**"], climbs)).toEqual(climbs);
+    for (const p of climbs) expect(pathGrantProblem(p)).not.toBeNull();
+  });
 });
 
 describe("pathGrantProblem", () => {

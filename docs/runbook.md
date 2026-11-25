@@ -2631,7 +2631,7 @@ as changed on an exact pixel comparison, not the diff's colour tolerance, so a s
 keeps its pictures. Both sides are
 hubs started as `MC_NO_LOOP_WRITES=1` previews on a free loopback port, each from its own copy of
 one `VACUUM INTO` snapshot of the live database. Each side is a
-detached worktree with `pnpm install --offline --frozen-lockfile` and a web build, torn down when
+detached worktree with `pnpm install --offline --frozen-lockfile --ignore-scripts` and a web build, torn down when
 its pages are done. Captures run one at a time; a failed capture is tried again after ten minutes.
 
 **What is stored.** Under `pr-evidence/<repo>/<pr>/<head sha>/` in the data dir (directories
