@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -104,27 +105,31 @@ describe("launcherScript", () => {
     expect(text).not.toContain("export PATH='/x'");
   });
 
-  it("keeps cmux's claude shim ahead of a node folder that has its own claude", () => {
-    const shims = join(root, "cmux-cli-shims", "s1");
-    const nodeDir = join(root, "node", "bin");
-    const tool = (folder: string, says: string) => {
-      mkdirSync(folder, { recursive: true });
-      writeFileSync(join(folder, "claude"), `#!/bin/sh\necho ${says}\n`, { mode: 0o755 });
-    };
-    tool(shims, "shim");
-    tool(nodeDir, "node");
-    const script = join(root, "launch.zsh");
-    writeFileSync(
-      script,
-      launcherScript({ command: "claude", args: [], env: {}, nodeDir, envFile: null }),
-      { mode: 0o700 },
-    );
-    const out = execFileSync("/bin/zsh", ["-f", script], {
-      env: { PATH: `${shims}:/usr/bin:/bin`, CMUX_CLAUDE_WRAPPER_SHIM_ROOT: shims },
-      encoding: "utf8",
-    });
-    expect(out.trim()).toBe("shim");
-  });
+  // the launcher is a zsh script and cmux runs on macOS only: CI's Linux runners have no zsh
+  it.skipIf(!existsSync("/bin/zsh"))(
+    "keeps cmux's claude shim ahead of a node folder that has its own claude",
+    () => {
+      const shims = join(root, "cmux-cli-shims", "s1");
+      const nodeDir = join(root, "node", "bin");
+      const tool = (folder: string, says: string) => {
+        mkdirSync(folder, { recursive: true });
+        writeFileSync(join(folder, "claude"), `#!/bin/sh\necho ${says}\n`, { mode: 0o755 });
+      };
+      tool(shims, "shim");
+      tool(nodeDir, "node");
+      const script = join(root, "launch.zsh");
+      writeFileSync(
+        script,
+        launcherScript({ command: "claude", args: [], env: {}, nodeDir, envFile: null }),
+        { mode: 0o700 },
+      );
+      const out = execFileSync("/bin/zsh", ["-f", script], {
+        env: { PATH: `${shims}:/usr/bin:/bin`, CMUX_CLAUDE_WRAPPER_SHIM_ROOT: shims },
+        encoding: "utf8",
+      });
+      expect(out.trim()).toBe("shim");
+    },
+  );
 
   it("sources an env file and removes it before the exec", () => {
     const text = launcherScript({
