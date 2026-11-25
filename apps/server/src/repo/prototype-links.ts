@@ -69,7 +69,9 @@ export function prototypeLinkProblem(body: string, github?: string): string | nu
     const marker = FENCE.exec(line)?.[1];
     if (marker !== undefined) {
       if (fence === null) fence = marker;
-      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+      // a closing fence is the opening's character, at least as long, with only spaces after it
+      else if (marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker)
+        fence = null;
     }
     const heading = marker === undefined && fence === null ? HEADING.exec(line) : null;
     if (heading) {

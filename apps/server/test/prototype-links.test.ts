@@ -71,4 +71,9 @@ describe("repository prototype links", () => {
       "## Prototype\n\n[copy](docs/prototype/hud.html)\n\n## Notes\n\n```\n## Mockup\n```\n\nhttps://example.com/x";
     expect(prototypeLinkProblem(closed, "o/mc")).toBeNull();
   });
+
+  it("does not close a fence on a line with text after the marker", () => {
+    const body = "## Notes\n\n```md\n```js\n## Prototype\n```\n\nhttps://example.com/x";
+    expect(prototypeLinkProblem(body, "o/mc")).toBeNull();
+  });
 });
