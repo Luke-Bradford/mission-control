@@ -213,6 +213,68 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
       BROWSER_TEST_TIMEOUT_MS,
     );
 
+  const LONG_NAME = `basket-${"and-receipts-".repeat(25)}`.slice(0, 300);
+  for (const scheme of ["light", "dark"] as const)
+    it(
+      `reads a 300-character session name in full from the keyboard at 1280×800 in ${scheme}`,
+      async () => {
+        const base = view(6);
+        const sessions: CmuxSessionsView = base.ok
+          ? {
+              ...base,
+              sessions: base.sessions.map((s, i) => (i === 0 ? { ...s, name: LONG_NAME } : s)),
+            }
+          : base;
+        const page = await open(1280, 800, scheme, sessions);
+        try {
+          const before = await page.evaluate(() => {
+            const name = document.querySelector<HTMLElement>("tr.sess-row .sess-name");
+            return name ? name.scrollWidth > name.clientWidth : false;
+          }, undefined);
+          // Truncated until the row has focus.
+          expect(before).toBe(true);
+          let onRow = false;
+          for (let i = 0; i < 80 && !onRow; i++) {
+            await page.press("Tab");
+            onRow = await page.evaluate(
+              () => document.activeElement === document.querySelector("tr.sess-row"),
+              undefined,
+            );
+          }
+          expect(onRow).toBe(true);
+          await capture(page, `sessions-1280x800-${scheme}-long-name-focused`);
+          const m = await page.evaluate(() => {
+            const row = document.querySelector<HTMLElement>("tr.sess-row") as HTMLElement;
+            const name = row.querySelector<HTMLElement>(".sess-name") as HTMLElement;
+            const scroll = document.querySelector<HTMLElement>(".sess-scroll") as HTMLElement;
+            const cell = name.closest("td") as HTMLElement;
+            const c = cell.getBoundingClientRect();
+            const labels = [...row.querySelectorAll<HTMLElement>(".sess-tag, .sess-inbox")];
+            return {
+              text: name.textContent,
+              clipped:
+                name.scrollWidth > name.clientWidth || name.scrollHeight > name.clientHeight + 1,
+              inCell: name.getBoundingClientRect().bottom <= c.bottom + 0.5,
+              inScroller:
+                name.getBoundingClientRect().bottom <= scroll.getBoundingClientRect().bottom,
+              labelsClipped: labels.filter(
+                (l) =>
+                  l.scrollWidth > l.clientWidth || l.getBoundingClientRect().right > c.right + 0.5,
+              ).length,
+            };
+          }, undefined);
+          expect(m.text).toBe(LONG_NAME);
+          expect(m.clipped).toBe(false);
+          expect(m.inCell).toBe(true);
+          expect(m.inScroller).toBe(true);
+          expect(m.labelsClipped).toBe(0);
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+
   for (const n of [0, 1, 50])
     it(
       `shows ${n} sessions at 1920×940 without page scroll`,

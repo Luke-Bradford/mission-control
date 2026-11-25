@@ -347,8 +347,14 @@ button.sess-inbox[aria-expanded="true"] {
   outline-offset: -2px;
 }
 
-/* Keyboard reaches the full last line and status: a focused row unwraps them. */
+/* Keyboard reaches the full name, last line and status: a focused row unwraps them. The name
+   wraps beside or over its tags, which never shrink. */
 .sess-row:focus-within .sess-last,
 .sess-row:focus-within .sess-status {
   white-space: normal;
+}
+
+.sess-row:focus-within .sess-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
