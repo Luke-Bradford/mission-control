@@ -2280,7 +2280,7 @@ describe("a seat keeps running through a restart", () => {
     try {
       await hub.sup.endRunByEngine(runId);
       expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });
-      expect(store.notes().filter((n) => n.key === `cleanup:${runId}`)).toMatchObject([
+      expect(store.notes().filter((n) => n.key === `keeper-cleanup:${runId}`)).toMatchObject([
         {
           kind: "blocked",
           seatId: "flight-1",
