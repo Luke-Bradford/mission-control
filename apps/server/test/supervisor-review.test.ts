@@ -1155,6 +1155,25 @@ describe("startReview", () => {
     expect(store.run(runId)?.endedAt).toBeNull();
   });
 
+  it("a review still starts when its preview cannot open", async () => {
+    const r = reviewOfPush();
+    const reviewPreviews = {
+      origin: () => null,
+      identity: () => null,
+      ready: async () => ({ origin: null, note: null, identity: null }),
+      open: async (): Promise<boolean> => {
+        throw new Error("no web globs");
+      },
+      close: async () => {},
+    };
+    const { sup } = make({ scratchRetro: true, reviewPreviews });
+    sup.start();
+    const { runId } = await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).not.toContain("- Preview:");
+    expect(store.run(runId)?.endedAt).toBeNull();
+  });
+
   it("a PR that changes no web files gets no preview line", async () => {
     const r = reviewOfPush();
     const reviewPreviews = {
@@ -1626,12 +1645,12 @@ describe("startReview", () => {
       area: [],
     };
     /** Starts the review, ends it with a clean report, and says what the hub did about installing. */
-    async function reviewAndReport(r: ReturnType<typeof reviewOfPush>) {
+    async function reviewAndReport(r: ReturnType<typeof reviewOfPush>, flight = FLIGHT_SEAT) {
       const installs: string[] = [];
       prep.installRunner = async (command) => {
         installs.push(command);
       };
-      const { sup } = make({ scratchRetro: true, extraSeat: FLIGHT_SEAT });
+      const { sup } = make({ scratchRetro: true, extraSeat: flight });
       sup.start();
       const { runId } = await sup.startReview("retro", r.reviewId);
       // the engine marks it running; the reviewer then reports
@@ -1665,6 +1684,16 @@ describe("startReview", () => {
       expect(flightNotes()).toHaveLength(1);
       expect(store.review(r.reviewId)?.state).toBe("reported");
       expect(store.run(runId)?.status).not.toBe("failed");
+    });
+
+    it("does not tell a retiring FLIGHT seat about a read-only review", async () => {
+      const r = reviewOfPush({
+        base: { "package.json": pkg({ scripts: { check: "old" } }), "pnpm-lock.yaml": LOCK },
+        files: { "package.json": pkg({ scripts: { check: "new" } }) },
+      });
+      await reviewAndReport(r, { ...FLIGHT_SEAT, retiring: true });
+      expect(flightNotes()).toEqual([]);
+      expect(store.review(r.reviewId)?.state).toBe("reported");
     });
 
     it("reviews an added dependency read-only, says so, tells FLIGHT, and still reports", async () => {

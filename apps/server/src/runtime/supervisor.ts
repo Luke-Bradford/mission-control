@@ -695,7 +695,7 @@ export interface Supervisor {
     opts?: {
       first?: string;
       firstPieces?: readonly PromptPiece[];
-      /** The operator's explicit start (the dock): a restart-storm hold does not stop it. */
+      /** The operator's explicit start (the dock). */
       operator?: boolean;
     },
   ): Promise<{ runId: string }>;
@@ -1002,6 +1002,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const flightProfileKey = (runId: string) => `flight-runtime-profile:${runId}`;
   // Change it when FLIGHT's launch arguments change: a surviving keeper keeps the ones it started with.
   const FLIGHT_RUNTIME_PROFILE = "controller-v3";
+  // The same for crew seats. A keeper started before seats had this key counts as this profile.
+  const SEAT_RUNTIME_PROFILE = "seat-v1";
   const credentialRevision = (env: Record<string, string> | undefined): string =>
     createHash("sha256")
       .update(JSON.stringify(Object.entries(env ?? {}).sort()))
@@ -1015,7 +1017,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
-  /** Runs already taken back once: a second such exit ends them as a crash. */
+  /** Runs already taken back once: a second such exit ends them as a crash. In memory only, so a hub restart allows one more. */
   const retakenRuns = new Set<string>();
   /** Writer tickets reserved between their eligibility check and the run row being stored. */
   const startingTickets = new Set<string>();
@@ -1278,7 +1280,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const seatId = l.info.seat.id;
     if (transferState(l.run.id)?.pending) return;
     if (live.get(seatId) === l) live.delete(seatId);
-    // a fresh fix session that died at start is the wake's to answer (it resumes the old one)
     if (stopping && l.ending === null) {
       // The hub is going down: the run stays active and is resumed on the next start.
       fold(l);
@@ -1932,7 +1933,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   /**
    * The dollars one CLI session may spend: the run's budget less what its other sessions spent. The
-   * CLI counts only its own session, so a fresh fix session (#1643), or a resume of one, would
+   * CLI counts only its own session, so a run's later session, or a resume of one, would
    * otherwise get the whole budget again. A run with one session gets its whole budget. The spend
    * is the larger of the run's cost and the sum of the transcript's latest `total_cost_usd` per
    * session; this session's own figure is left out. Undefined when the run has no dollar cap.
@@ -2359,7 +2360,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     store.setSetting(profilePolicyKey(run.id), JSON.stringify(profileDenies()));
     if (privateEnv !== undefined)
       store.setSetting(credentialPolicyKey(run.id), credentialRevision(privateEnv));
-    store.setSetting(runtimeProfileKey(run.id), fullAccess ? FLIGHT_RUNTIME_PROFILE : "seat-v1");
+    store.setSetting(
+      runtimeProfileKey(run.id),
+      fullAccess ? FLIGHT_RUNTIME_PROFILE : SEAT_RUNTIME_PROFILE,
+    );
     if (fullAccess) store.setSetting(flightProfileKey(run.id), FLIGHT_RUNTIME_PROFILE);
     const l = track(info, run, session, release, {
       spawn: keeperSpawn,
@@ -2855,6 +2859,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           !abandonedStart
         )
           continue;
+        // its keeper may have outlived the start: one still running keeps the run for the next start
+        if (!(await endAndRemoveKeeper(run.agentId, run.id))) continue;
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         recordEnded(run.id, at, "failed", "exit");
@@ -2922,7 +2928,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           credentialsChanged ||
           (flight
             ? store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE
-            : store.getSetting(runtimeProfileKey(run.id)) !== "seat-v1") ||
+            : (store.getSetting(runtimeProfileKey(run.id)) ?? SEAT_RUNTIME_PROFILE) !==
+              SEAT_RUNTIME_PROFILE) ||
           profileDenies().some((profile) => !denied.includes(profile))
         ) {
           if (!(await endKeeper(dir, keeperEndWait(), log))) return;
@@ -4774,12 +4781,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         loopKind: def.loop,
         ...(advice === null ? {} : { advice }),
       };
+      // Read before the run is stored: a throw between here and the launch would leave it active.
+      const reviewCommands = (await commandsOf(info.repo)).review;
       store.upsertRun(run);
       if (scratch.installNote !== undefined) {
         store.setReviewInstallNote(reviewId, scratch.installNote);
         const flight = config.crew?.sessions
           .flatMap((session) => session.seats)
-          .find((seat) => seatDef(seat).loop === "watch");
+          .find((seat) => !seat.retiring && seatDef(seat).loop === "watch");
         if (flight !== undefined)
           store.addComms({
             at: now(),
@@ -4798,13 +4807,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const previewStarting =
         deps.reviewPreviews === undefined || scratch.installNote !== undefined
           ? false
-          : await deps.reviewPreviews.open({
-              runId,
-              repoId: info.repo.id,
-              pr: review.prNumber,
-              branch: author?.branch ?? subject?.branch ?? "",
-              sha: review.sha,
-            });
+          : await deps.reviewPreviews
+              .open({
+                runId,
+                repoId: info.repo.id,
+                pr: review.prNumber,
+                branch: author?.branch ?? subject?.branch ?? "",
+                sha: review.sha,
+              })
+              .catch((e) => {
+                log(`${seatId}: no review preview: ${errText(e)}`);
+                return false;
+              });
       const evidence = author ? store.evidenceNotes(author.id) : [];
       const prevReply =
         prev === null
@@ -4843,7 +4857,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         touches: touches?.sha === review.sha ? touches.paths : [],
         ...(screenshots === undefined ? {} : { evidence: screenshots }),
         ...(scratch.installNote === undefined ? {} : { installNote: scratch.installNote }),
-        commands: (await commandsOf(info.repo)).review,
+        commands: reviewCommands,
         fullSuite: info.repo.fullSuite ?? [],
         ...(previewStarting ? { preview: true } : {}),
         ...(second === null

@@ -974,7 +974,8 @@ describe("prepareCheckout", () => {
     symlinkSync(outside, join(root, CODEX_PNPM_STORES_DIR));
     const e = await fail(prepareCheckout(input()));
     expect(e.code).toBe("install");
-    expect(e.message).toContain("shared store unavailable");
+    expect(e.message).toContain("shared pnpm store unavailable");
+    expect(e.message).not.toContain("install failed");
     expect(existsSync(wtPath())).toBe(false);
   });
 

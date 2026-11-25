@@ -293,13 +293,9 @@ export async function prepareSharedPnpmStore(worktreesRoot: string, name: string
     await privateDirectory(store, store);
     return store;
   } catch (e) {
-    throw new CheckoutError(
-      "install",
-      `pnpm install failed for ${name} (shared store unavailable)`,
-      {
-        cause: e,
-      },
-    );
+    throw new CheckoutError("install", `shared pnpm store unavailable for ${name}`, {
+      cause: e,
+    });
   }
 }
 

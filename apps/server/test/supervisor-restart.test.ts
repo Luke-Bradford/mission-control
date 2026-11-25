@@ -754,6 +754,56 @@ describe("reattach after a restart", () => {
     );
   });
 
+  it.each([true, false])(
+    "ends an unheld running row's keeper first when the hub starts (ended: %s)",
+    async (stopped) => {
+      const id = `orphan-keeper-${stopped}:20261020T000000Z`;
+      const run = {
+        id,
+        agentId: "guido-1",
+        repoId: "mc",
+        seq: 1,
+        startedAt: 1,
+        endedAt: null,
+        status: "running" as const,
+        sessionId: "11111111-2222-4333-8444-555555555555",
+        model: "haiku",
+        branch: BRANCH,
+        ticket: "mc#42",
+        costUsd: null,
+        tokens: null,
+        transcriptPath: crewTranscriptPath(dbPath, id),
+        prs: [],
+        summary: null,
+      };
+      writeFileSync(run.transcriptPath, "{}\n");
+      store.upsertRun(run);
+      const folder = crewKeeperDir(dbPath, id);
+      mkdirSync(folder, { recursive: true });
+      const alive = vi
+        .spyOn(keeper, "keeperAlive")
+        .mockImplementation((d) => d === folder && existsSync(folder));
+      const end = vi.spyOn(keeper, "endKeeper").mockImplementation(async (d) => {
+        if (d === folder && stopped) rmSync(folder, { recursive: true, force: true });
+        return d !== folder || stopped;
+      });
+      try {
+        const { sup } = make();
+        sup.start();
+        await until(() =>
+          expect(end).toHaveBeenCalledWith(folder, expect.anything(), expect.anything()),
+        );
+        await sup.stopAll();
+        expect(store.run(id)).toMatchObject(
+          stopped ? { status: "failed" } : { status: "running", endedAt: null },
+        );
+      } finally {
+        alive.mockRestore();
+        end.mockRestore();
+      }
+    },
+  );
+
   it("leaves a run set aside alone when the hub starts, though no seat row holds it", async () => {
     const id = "aside:20261020T000000Z";
     const run = {
