@@ -3,6 +3,7 @@ import {
   type ConfigView,
   LIVE_MINUTES,
   type LimitRow,
+  type SpendCell,
   TELEMETRY_RANGES,
   type Telemetry,
 } from "@mc/core";
@@ -11,7 +12,7 @@ import { createPortal } from "react-dom";
 import { ticketRef } from "../board/cards.ts";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource, useResources } from "../data.ts";
-import { cost, kTokens, minutesAgo, percent, plural } from "../fmt.ts";
+import { cost, dayLabel, hhmm, kTokens, minutesAgo, percent, plural } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { Legend } from "../hud/charts/Hover.tsx";
@@ -656,6 +657,90 @@ function Totals({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   );
 }
 
+/** One owner's share of a day and repo: ~USD, its tokens on hover; `—` when it used none. */
+function SpendTd({ c, strong = false }: { c: SpendCell; strong?: boolean }) {
+  if (c.tokens === 0 && c.costUsd === 0) return <td className="r num muted">{DASH}</td>;
+  return (
+    <td className={`r num${strong ? "" : " fg2"}`} title={`${kTokens(c.tokens)} tok`}>
+      {cost(c.costUsd)}
+    </td>
+  );
+}
+
+/** Every Claude session on this Mac by day and repo: the operator's, the crew's and FLIGHT's. */
+function SpendByOwner({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
+  const tz = useTz();
+  const split = t?.sessionSpend;
+  const readAt =
+    split?.readAt == null || tz === null ? "Not read yet" : `Read ${hhmm(split.readAt, tz)}`;
+  return (
+    <Panel
+      id="tSpendOwner"
+      title="Spend by owner"
+      sub="~USD · last 7 days · whole Mac, not filtered"
+      actions={<span className="s muted">{split ? readAt : ""}</span>}
+    >
+      {!t ? (
+        <Wait scope={scope} />
+      ) : split === undefined ? (
+        <p className="pb s muted">Not tracked yet.</p>
+      ) : split.rows.length === 0 ? (
+        <p className="pb s muted">No Claude sessions in the last 7 days.</p>
+      ) : (
+        <>
+          <div className="pb tw" style={{ maxHeight: 440, overflowY: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Day</th>
+                  <th>Repo</th>
+                  <th className="r">Yours</th>
+                  <th className="r">Crew</th>
+                  <th className="r">FLIGHT</th>
+                  <th className="r">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {split.rows.map((r) => (
+                  <tr key={`${r.day}\n${r.repo ?? ""}`}>
+                    <td className="muted">{dayLabel(r.day)}</td>
+                    <td
+                      title={r.repo ?? undefined}
+                      style={{
+                        maxWidth: 240,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {r.repo ?? DASH}
+                    </td>
+                    <SpendTd c={r.operator} />
+                    <SpendTd c={r.crew} />
+                    <SpendTd c={r.flight} />
+                    <SpendTd c={r.total} strong />
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <th colSpan={5}>Account total</th>
+                  <SpendTd c={split.total} strong />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="pnote">
+            Priced from each transcript's token counts at API list rates. Crew figures can differ a
+            little from the runs' reported cost.
+            {split.unpricedTokens > 0 &&
+              ` ${kTokens(split.unpricedTokens)} tokens from models without a price are counted in tokens, not cost.`}
+          </p>
+        </>
+      )}
+    </Panel>
+  );
+}
+
 /** The table view's ticket list: every ticket with its cost and tokens, costliest first. */
 function CostTable({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const rows = [...(t?.tokensByTicket ?? [])].sort(
@@ -761,6 +846,7 @@ export function CostPanels({
     return (
       <div className={`grid cost-tables${dim ? " dim" : ""}`} data-view="table" data-cost="tables">
         <Totals t={t} scope={scope} />
+        <SpendByOwner t={t} scope={scope} />
         <CostTable t={t} scope={scope} />
         <StepTable t={t} scope={scope} />
         <VisiblePanels.Provider value={QUOTA_HISTORY}>

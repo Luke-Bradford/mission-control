@@ -1676,6 +1676,86 @@ describe("Cost and tokens tab", () => {
     expect(tip).toContain("model-a");
   });
 
+  it("Spend by owner shows the split and the account total", async () => {
+    const c = (tokens: number, costUsd: number) => ({ tokens, costUsd });
+    await loaded(
+      tel({
+        sessionSpend: {
+          rows: [
+            {
+              day: "2026-11-25",
+              repo: "shop-app",
+              operator: c(1000, 1.5),
+              crew: c(2000, 2.25),
+              flight: c(500, 0.5),
+              total: c(3500, 4.25),
+            },
+            {
+              day: "2026-11-24",
+              repo: null,
+              operator: c(100, 0.1),
+              crew: c(0, 0),
+              flight: c(0, 0),
+              total: c(100, 0.1),
+            },
+          ],
+          total: c(3600, 4.35),
+          unpricedTokens: 1234,
+          readAt: NOW,
+        },
+      }),
+      undefined,
+      undefined,
+      "cost",
+      "table",
+    );
+    const p = panel("tSpendOwner");
+    expect(within(p).getByRole("heading").textContent).toBe("Spend by owner");
+    expect(p.querySelector(".sub")?.textContent).toBe(
+      "~USD · last 7 days · whole Mac, not filtered",
+    );
+    expect([...p.querySelectorAll("thead th")].map((th) => th.textContent)).toEqual([
+      "Day",
+      "Repo",
+      "Yours",
+      "Crew",
+      "FLIGHT",
+      "Total",
+    ]);
+    const body = [...p.querySelectorAll("tbody tr")];
+    expect(body).toHaveLength(2);
+    expect(body[0]?.textContent).toContain("shop-app");
+    expect(body[0]?.textContent).toContain("~$4.25");
+    expect(body[1]?.textContent).toContain("—");
+    const foot = p.querySelector("tfoot tr")?.textContent ?? "";
+    expect(foot).toContain("Account total");
+    expect(foot).toContain("~$4.35");
+    expect(p.textContent).toContain(
+      "1.2k tokens from models without a price are counted in tokens, not cost.",
+    );
+    expect(p.textContent).toMatch(/Read \d\d:\d\d/);
+  });
+
+  it("Spend by owner says so when there are no sessions", async () => {
+    await loaded(
+      tel({
+        sessionSpend: {
+          rows: [],
+          total: { tokens: 0, costUsd: 0 },
+          unpricedTokens: 0,
+          readAt: null,
+        },
+      }),
+      undefined,
+      undefined,
+      "cost",
+      "table",
+    );
+    const p = panel("tSpendOwner");
+    expect(p.textContent).toContain("No Claude sessions in the last 7 days.");
+    expect(p.textContent).toContain("Not read yet");
+  });
+
   it("scales spend bars by reported cost, not token volume", async () => {
     await loaded(
       tel({

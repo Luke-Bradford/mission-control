@@ -1659,9 +1659,19 @@ started before the set was recorded rotates on its wake count as before.
 | `flow:<repo>` | Flow history: cycle time and first-push CI over the last 14 days (read-only GraphQL) | hourly, first 7 min after start (after the first PR sweep) |
 | `machine` | This Mac: CPU, memory, disk, Claude/Codex processes (`os`, `vm_stat`, `statfs`, `ps`); a sample is kept each minute; the spawned commands run only with a browser or crew work open (see `runbooks/machine-capacity.md`) | 2 s (status rewritten at most once a minute while unchanged) |
 | `maintenance` | No source and no status row: deletes run digests of runs started over 30 days ago | hourly |
+| `sessionSpend` | Every Claude transcript on this Mac (`~/.claude/projects/**/*.jsonl`, subagents included), read on from where the last pass stopped; the first read of a file starts at the local day 6 days ago. Keeps token counts and ~cost per session, local day and model (`session_spend`), never transcript text; rows are kept 90 days. No process, model call or wake. | 30 s, first 18 s after start |
 
 Pages are described under "The HUD" below. Run cost is shown as `~$2.47`: it is the
 API-equivalent price of the run's tokens, not a bill.
+
+Telemetry › Cost and tokens › Table has a "Spend by owner" panel: every Claude session on this Mac
+over the last 7 local days, by day and repo, split into the operator's own sessions, the crew and
+FLIGHT, with the account total underneath. A session is FLIGHT's or the crew's when a run or seat
+recorded its session id (a `watch` seat is FLIGHT), or the crew's when it ran under
+`crew.worktrees` or a session checkout; every other session is the operator's. The repo is the run's,
+or the folder name of the git checkout the session ran in. Cost is priced from the transcripts'
+token counts at the API list prices in `packages/core/src/session-spend.ts` (`MODEL_PRICES`, dated);
+update that table when prices change. A model with no price there counts in tokens but not cost.
 
 ### Agent state rules
 

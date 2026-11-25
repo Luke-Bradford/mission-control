@@ -23,6 +23,7 @@ import {
   prYouAction,
   type RepoId,
   type Run,
+  SESSION_SPEND_INTERVAL_MS,
   seatTurnText,
   stateChangeText,
   type TestLockState,
@@ -132,6 +133,7 @@ import { parseJson, rethrowJson } from "./json.ts";
 import { loopPause } from "./loop/pause.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/backfill.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
+import { readSessionSpend } from "./spend/sessions.ts";
 import type { Store } from "./store.ts";
 import type { FileServiceRestart } from "./telemetry/file-service-restart.ts";
 import {
@@ -177,7 +179,8 @@ export type Job =
   | "engine"
   | "update"
   | "cli"
-  | "cliAuto";
+  | "cliAuto"
+  | "sessionSpend";
 const SIGNAL_LOOPS: readonly Job[] = ["engine", "ta", "studio", "sessions"];
 
 /** start() order: sessions first, so the first studio tick reuses that read of the registry. */
@@ -198,6 +201,7 @@ export const JOBS: readonly Job[] = [
   "update",
   "cli",
   "cliAuto",
+  "sessionSpend",
 ];
 /**
  * start() runs the sessions read at once (the studio's first tick reuses it) and starts every
@@ -216,6 +220,7 @@ export const STAGGERED_FIRST_DELAY_MS: Partial<Record<Job, number>> = {
   update: 12_000,
   cli: 14_000,
   cliAuto: 16_000,
+  sessionSpend: 18_000,
 };
 /** start() delays the first engine tick: the first GitHub poll has read the boards and PRs by then. */
 export const ENGINE_FIRST_DELAY_MS = 30_000;
@@ -335,6 +340,8 @@ export interface Collectors {
     spawn: boolean,
   ) => Promise<MachineResult>;
   transcripts?: typeof maintainTranscripts;
+  /** One pass over the Claude transcripts on this Mac for per-session token counts. */
+  sessionSpend?: (now: number) => { files: number; added: number };
 }
 
 export interface SchedulerDeps {
@@ -411,6 +418,8 @@ export interface Scheduler {
 }
 
 const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
+/** Where Claude Code keeps every session's transcript on this Mac. */
+const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
 export function realCollectors(config: CcConfig): Collectors {
   return {
@@ -1565,6 +1574,22 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           `transcripts: ${r.gzipped} gzipped, ${r.deleted} deleted, ${r.failed.length} failed`,
         );
     },
+    // Reads files and writes numbers only: no process, model call or wake.
+    sessionSpend: () =>
+      guarded("sessionSpend", async () => {
+        const r = (
+          c.sessionSpend ??
+          ((at: number) =>
+            readSessionSpend({
+              store,
+              root: CLAUDE_PROJECTS_DIR,
+              tz: config.operator.timezone,
+              now: at,
+            }))
+        )(now());
+        if (r.added > 0) emit("agents");
+        recordStatus("sessionSpend", true, null);
+      }),
     machine: async () => {
       if (deps.hasViewClients?.() === false && !config.crew?.sessions.length) return;
       const at = now();
@@ -1700,6 +1725,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     update: AUTO_UPDATE_INTERVAL_MS,
     cli: CLI_UPDATE_INTERVAL_MS,
     cliAuto: CLI_UPDATE_INTERVAL_MS,
+    sessionSpend: SESSION_SPEND_INTERVAL_MS,
   };
 
   const FIRST_DELAY_MS: Partial<Record<Job, number>> = {

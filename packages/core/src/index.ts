@@ -45,6 +45,7 @@ export * from "./review.ts";
 export * from "./roles.ts";
 export * from "./runs.ts";
 export * from "./runtime.ts";
+export * from "./session-spend.ts";
 export * from "./spec-bounce.ts";
 export * from "./standing-instructions.ts";
 export * from "./summary.ts";

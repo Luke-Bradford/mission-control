@@ -410,4 +410,17 @@ CREATE TABLE IF NOT EXISTS attention_materials (
   id TEXT PRIMARY KEY, item_key TEXT NOT NULL, packet TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS attention_materials_item ON attention_materials(item_key, id DESC);
+-- Token counts per Claude session, local day and model, read from the transcripts on this Mac;
+-- numbers only, never transcript text. session_spend_files: where each transcript was read to.
+CREATE TABLE IF NOT EXISTS session_spend (
+  session_id TEXT NOT NULL, day TEXT NOT NULL, model TEXT NOT NULL, cwd TEXT,
+  input INTEGER NOT NULL, output INTEGER NOT NULL, cache_write_5m INTEGER NOT NULL,
+  cache_write_1h INTEGER NOT NULL, cache_read INTEGER NOT NULL, cost_usd REAL,
+  messages INTEGER NOT NULL, last_at INTEGER NOT NULL, PRIMARY KEY (session_id, day, model)
+);
+CREATE INDEX IF NOT EXISTS session_spend_day ON session_spend(day);
+CREATE TABLE IF NOT EXISTS session_spend_files (
+  path TEXT PRIMARY KEY, offset INTEGER NOT NULL, size INTEGER NOT NULL, mtime REAL NOT NULL,
+  last_message TEXT
+);
 `;

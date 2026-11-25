@@ -4,6 +4,7 @@ import type { ProfileStep, ReviewDepth } from "./profiles-model.ts";
 import type { ReportedTest, ReviewVerdict } from "./review.ts";
 import type { ConfigSeatMode, CrewEffort } from "./runtime.ts";
 import type { CrewMode, CrewRole, LoopKind } from "./runtime-model.ts";
+import type { SessionSpendSplit } from "./session-spend.ts";
 import type { TicketPlan } from "./ticket-plan.ts";
 import type {
   AccountId,
@@ -374,6 +375,8 @@ export interface Telemetry {
       cause: string;
     }[];
   };
+  /** Every Claude session on this Mac over the last 7 local days, by owner, repo and day (not scoped). */
+  sessionSpend?: SessionSpendSplit;
   /** The range's crew runs by loop step, pro rata like `tokensByTicket`; all three steps are sent. */
   tokensByStep?: {
     step: "plan" | "build" | "review";

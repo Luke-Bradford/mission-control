@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type {
   AttentionMaterials,
@@ -117,6 +118,7 @@ import {
   type RunStatus,
   reviewTimings,
   reworkRatios,
+  SESSION_SPEND_RETENTION_DAYS,
   type SeatSessionRow,
   SILENCE_WATCHED_EVENTS,
   type SilenceWatchedEventKind,
@@ -160,6 +162,11 @@ import {
 import { runQueries } from "./store/runs.ts";
 import { SCHEMA } from "./store/schema.ts";
 import { seatQueries } from "./store/seats.ts";
+import {
+  type SessionSpendFile,
+  type SessionSpendRecord,
+  sessionSpendQueries,
+} from "./store/session-spend.ts";
 import { ticketPlanQueries } from "./store/ticket-plans.ts";
 import {
   ACK_ABSENT_MS,
@@ -532,6 +539,36 @@ export class Store {
   private get usageQ(): ReturnType<typeof usageQueries> {
     this.usageQueriesCache ??= usageQueries(this.db);
     return this.usageQueriesCache;
+  }
+
+  private sessionSpendCache: ReturnType<typeof sessionSpendQueries> | undefined;
+
+  /** The per-session token counts read from the Claude transcripts (store/session-spend.ts). */
+  private get sessionSpendQ(): ReturnType<typeof sessionSpendQueries> {
+    this.sessionSpendCache ??= sessionSpendQueries(this.db, (fn) => this.transaction(fn));
+    return this.sessionSpendCache;
+  }
+
+  sessionSpendFile(path: string): SessionSpendFile | null {
+    return this.sessionSpendQ.sessionSpendFile(path);
+  }
+
+  addSessionSpend(file: SessionSpendFile, records: readonly SessionSpendRecord[]): void {
+    this.sessionSpendQ.addSessionSpend(file, records);
+  }
+
+  sessionSpendSince(sinceDay: string): SessionSpendRecord[] {
+    return this.sessionSpendQ.sessionSpendSince(sinceDay);
+  }
+
+  sessionSpendOf(sessionIds: readonly string[], sinceDay: string): SessionSpendRecord[] {
+    return this.sessionSpendQ.sessionSpendOf(sessionIds, sinceDay);
+  }
+
+  sessionSpendOwners(
+    sessionIds: readonly string[],
+  ): Map<string, { agentId: string; repoId: string | null }> {
+    return this.sessionSpendQ.sessionSpendOwners(sessionIds);
   }
 
   private runQueriesCache: ReturnType<typeof runQueries> | undefined;
@@ -1333,6 +1370,7 @@ export class Store {
   async pruneHistory(now: number): Promise<void> {
     const day = 24 * 60 * 60_000;
     this.pruneRunAttempts(now);
+    this.sessionSpendQ.pruneSessionSpend(now - SESSION_SPEND_RETENTION_DAYS * day, existsSync);
     // refreshes the planner's statistics for the tables whose size changed; cheap when none did
     this.db.exec("PRAGMA optimize");
     this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
