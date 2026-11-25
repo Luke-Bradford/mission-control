@@ -231,8 +231,8 @@ not post (a draft PR, a branch still owned, a PR it was never asked to review), 
 saying why, once per review.
 
 A PR that changes `package.json` or the lockfile is still reviewed. The hub never installs a PR
-branch's packages in a seat, so that review runs read-only against the base branch's installed
-packages: the brief records `Reviewed, not installed` with the reason and tells the reviewer to read
+branch's packages in a seat, so that review runs read-only in a checkout with no packages
+installed: the brief records `Reviewed, not installed` with the reason and tells the reviewer to read
 the diff and run nothing that needs the PR's packages. FLIGHT is told at once, with the PR and the
 reason. The review ends as reported, not failed, so no failing `mc/review` status is posted: a clean
 one reads "QA review passed (reviewed, not installed)", and the QA report lists the reason under its
@@ -899,7 +899,7 @@ hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/
 - **GitHub:** no `gh` at all; GitHub goes through Mission Control. A seat rewrites its own open
   PR's body with `mc pr_body { body }` (the same text checks as the opened PR; the engine's
   minor-findings section is kept; refused for a PR that is not the run's).
-- **Full suites:** the repo's `full_suite` commands and the related-tests check (`pnpm -s test:related`, however spelled) take the shared test lock, one seat at a time. A full suite run with `&` or `nohup`, with `run_in_background`, in a multiplexer that starts a session (`tmux new`, `screen -dm`), or handed to a launcher (`launchctl`, `at`, `batch`, `systemd-run`, `daemonize`, `start-stop-daemon`, `osascript`, `open`, `crontab`, `ssh -f`) takes the lock like a foreground one and waits for its turn to start, and then keeps the lock until the seat's turn ends (the hub cannot see a background process end), so a second suite does not start beside it. A call the CLI moves to the background when its Bash timeout runs out is treated the same way and is never counted as a passed check. Seats may use the network and run background commands. The repo's `mc.checks` commands (lint, typecheck) do not take the lock unless `full_suite` lists them: two seats may run them at once. A check that waited is not recorded as failed. The hub keeps, in memory, why it did not count a check call it saw start (a pipe or extra command in the chain, a dirty tree at the start or end, the head moving, the turn ending first, a background call, a call killed at its Bash timeout, an unreadable clone), and `mc push` puts that reason in its refusal; with no reason it says the hub saw no start (it may have restarted). A run of one test file takes no lock. A related-tests run can take most of the suite's time, so a seat runs a check in the foreground with the Bash `timeout` parameter at 2700000 (45 minutes; the seat's `BASH_MAX_TIMEOUT_MS` allows it, and the CLI's own limit without it is 10 minutes): the default is two minutes, and a killed call has no exit code. The wait for the lock is not part of that time. A seat holding the lock is shown as stalled only after 10 minutes of silence since it took the lock; a running Claude check writes a heartbeat every 30 seconds. A seat waiting for the lock is refused after 10 minutes and runs the same check again, unchanged. A passing call that ran longer than two minutes is recorded like any other.
+- **Full suites:** the repo's `full_suite` commands and the related-tests check (`pnpm -s test:related`, however spelled) take the shared test lock, one seat at a time. A full suite run with `&` or `nohup`, with `run_in_background`, in a multiplexer that starts a session (`tmux new`, `screen -dm`), or handed to a launcher (`launchctl`, `at`, `batch`, `systemd-run`, `daemonize`, `start-stop-daemon`, `osascript`, `open`, `crontab`, `ssh -f`) takes the lock like a foreground one and waits for its turn to start, and then keeps the lock until the seat's turn ends (the hub cannot see a background process end), so a second suite does not start beside it. A call the CLI moves to the background when its Bash timeout runs out is treated the same way and is never counted as a passed check. Seats may run background commands (a Claude seat may also use the network; a Codex seat stays offline, as above). The repo's `mc.checks` commands (lint, typecheck) do not take the lock unless `full_suite` lists them: two seats may run them at once. A check that waited is not recorded as failed. The hub keeps, in memory, why it did not count a check call it saw start (a pipe or extra command in the chain, a dirty tree at the start or end, the head moving, the turn ending first, a background call, a call killed at its Bash timeout, an unreadable clone), and `mc push` puts that reason in its refusal; with no reason it says the hub saw no start (it may have restarted). A run of one test file takes no lock. A related-tests run can take most of the suite's time, so a seat runs a check in the foreground with the Bash `timeout` parameter at 2700000 (45 minutes; the seat's `BASH_MAX_TIMEOUT_MS` allows it, and the CLI's own limit without it is 10 minutes): the default is two minutes, and a killed call has no exit code. The wait for the lock is not part of that time. A seat holding the lock is shown as stalled only after 10 minutes of silence since it took the lock; a running Claude check writes a heartbeat every 30 seconds. A seat waiting for the lock is refused after 10 minutes and runs the same check again, unchanged. A passing call that ran longer than two minutes is recorded like any other.
   This covers the commands the guard sees; a process a seat starts some other way is not covered.
 - **Unreadable lines:** a command line the guard cannot read to the end is refused.
 
@@ -935,9 +935,9 @@ hub holding the crew lock) carries a loop. A writer run started without one cann
   does not resume.
 - **Conflict with main.** A PR in CI that conflicts with main sends its seat one line (per pushed
   sha) to call `mc sync_main`, resolve, commit and report; the run goes back to working, not to the
-  operator. Only a seat already told for that sha, or with a merge of main under way, parks on the
-  conflict. A run parked on a conflict accepts the seat's report of a new commit (a merge of main)
-  and goes back to CI by itself once the pushed head shows on a PR that no longer conflicts.
+  operator. A seat already told for that sha, or with a merge of main under way, does not get a
+  second try: the run parks on the conflict and ends, with the reason on its card and timeline, and
+  its seat takes its next ticket.
 - **Silent.** A seat that stops without reporting is nudged once, then parked.
 - **Merged.** The engine ends the run itself and the seat goes idle; in a `merge` repo it then
   takes its next Ready ticket.
@@ -1304,9 +1304,9 @@ parks as `merge-hold` ("merge held by CAPCOM: ..."), and shows in Needs you; it 
 message does not lift this park. A new push keeps the hold.
 
 A hold stops only the merge. To fix a defect in a held PR, FLIGHT sends the run parked as `merge-hold`
-back to its builder with `mc settle_park { runId, action: "rework", note: <fix list> }`: the run
-returns to working, the hold stays in force, and after the fix, CI and review it parks at `merge-hold`
-again until the holder releases it. When a held PR's run has ended, start the ticket again; the new
+back to its builder with `mc settle_park { runId, action: "rework", note: <fix list> }`. The run
+returns to working and the hold stays in force. After the fix, CI and review, it parks at
+`merge-hold` again until the holder releases it. When a held PR's run has ended, start the ticket again; the new
 run carries the same hold. Releasing stays with whoever set it.
 
 FLIGHT has the same power with `mc hold_pr { runId, action, reason, basis }`, logged
@@ -1469,7 +1469,7 @@ named pause or attributes an unknown grant to FLIGHT.
 | `resume_seat` | Resume a seat's unfinished run after a stop, a crew pause, an error or a restart; a build or plan seat in FLIGHT's session and a run in its lane. A stop can be lifted, but a crew-pause exception covers that run only. The original pause keeps its owner and seat coverage. Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), an already live unpaused session, and a machine without headroom. A failed resume removes only its own exception and restores the stop unless the operator changed it |
 | `end_run` | End a working, parked or stalled run (a working run must not be held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
 | `sync_main` | Merge main into a run's branch |
-| `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
+| `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget, guard or account hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
 | `promote` | Reads the live card, and refuses when it cannot be read |
 | `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces and closed cards are refused; status moves only to Blocked, everything else is `promote`; only labels being added are judged, and the area label rule applies when the area labels change; a status move is logged as `status`; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions, and a body is capped at the ticket body limit and sent on stdin. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
 
@@ -1935,7 +1935,8 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   (holds recorded before this was captured). Single-file runs do not take the lock, so they are not
   counted.
 - **CI runs.** Every check run read on a PR's head commit is kept in `ci_runs`, one row per
-  (repo, sha, name, attempt), updated in place as it concludes; `firstSeenAt` and `at` bracket the
+  (repo, run key), updated in place as it concludes. The run key is the check run's GitHub id, or
+  for a commit status its kind, sha, workflow, name and attempt; `firstSeenAt` and `at` bracket the
   polls that saw it. `GET /api/qa/ci-runs?days=` (1..90, default 7), newest first. A re-run is a new
   attempt, so a flaky check shows as a failing attempt followed by a passing one.
 - **Milestones.** Each GitHub read also reads the repo's 50 newest milestones (read-only): title, due
@@ -2744,8 +2745,8 @@ FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKEN
 - **After a hub restart** the handover wake is not sent twice for one run: a repeat is refused as a duplicate and the run rotates.
 - **The guard cools down.** After the handover cap trips (4 handovers in an hour) the hub stops restarting FLIGHT, says so in Needs you, and starts FLIGHT again by itself 30 minutes later (`FLIGHT_GUARD_COOLDOWN_MS`). A trip within an hour of that restart waits 6 hours (`FLIGHT_GUARD_AGAIN_COOLDOWN_MS`) and the hub starts FLIGHT again by itself; starting it by hand brings it back sooner. Messages sent while FLIGHT is down are kept and reach it when it starts.
 - **Owed answers.** An operator message FLIGHT has read and not answered (no FLIGHT message with `replyTo` naming it) is the `owed` wake fact: it wakes FLIGHT and stays in the wake until FLIGHT replies, for up to 7 days (reacting to it or settling it also clears it). An item reply sent while FLIGHT is down is stored and arrives in the wake when FLIGHT starts; 
-- **FLIGHT runs Update.** With `updates.hub: auto`, a range that changes more than the page and docs is held. The hub checks main every two minutes, so an allowed page-only change does not wait for a click. While FLIGHT is seated and live on a `flight_powers: superuser` repo, the held-Update item (`hub-update-held`) is FLIGHT's, not the operator's: it has no triage window, because FLIGHT may hold it on purpose (a seat mid-check, a fix about to merge), so it stays FLIGHT's for as long as FLIGHT is triaging and reaches the operator only when FLIGHT is stopped or not triaging (#1908). FLIGHT runs it in a quiet gap with `POST /api/update` through `mc operator`. If a merge landed since the last held check, the route checks main and runs that Update; if no Update is waiting, it says to run it again after a new version lands. It is logged as "Updated by FLIGHT". On any other repo the call answers 403; the operator's own call is unchanged. The item is the operator's as itself when FLIGHT is stopped, the repo is standard, or FLIGHT's window has passed.
-  - **A busy crew.** FLIGHT's call does not refuse while seats work. It holds new runs (a `CliHold` owner, `hub-update`), waits up to 2 minutes for the other seats' turns to end, then runs Update; a seat that outlasts the wait answers 409 naming it, the hold stays, and FLIGHT calls again. The hold lets go by itself after 15 minutes if FLIGHT does not call back, and when the Update finishes. Running turns are never interrupted.
+- **FLIGHT runs Update.** With `updates.hub: auto`, a range that changes more than the page and docs is held. The hub checks main every two minutes, so an allowed page-only change does not wait for a click. While FLIGHT is seated and live on a `flight_powers: superuser` repo, the held-Update item (`hub-update-held`) is FLIGHT's, not the operator's: it has no triage window, because FLIGHT may hold it on purpose (a seat mid-check, a fix about to merge), so it stays FLIGHT's for as long as FLIGHT is triaging and reaches the operator only when FLIGHT is stopped or not triaging (#1908). FLIGHT runs it in a quiet gap with `POST /api/update` through `mc operator`. If a merge landed since the last held check, the route checks main and runs that Update; if no Update is waiting, it says to run it again after a new version lands. It is logged as "Updated by FLIGHT". On any other repo the call answers 403; the operator's own call is unchanged. The item is the operator's as itself when FLIGHT is stopped, not triaging, or the repo is standard.
+  - **A busy crew.** FLIGHT's call does not refuse while seats work. It holds new runs (a `CliHold` owner, `hub-update`), waits up to 2 minutes for the other seats' turns to end, then runs Update; a seat that outlasts the wait answers 409 naming it, the hold stays, and FLIGHT calls again. The hold lets go by itself after 15 minutes if FLIGHT does not call back, and when the Update finishes. Once FLIGHT has been waiting 10 minutes (`UPDATE_FORCE_AFTER_MS`), its next call runs Update even with seats mid-turn: a mid-turn seat keeps working under its keeper through the restart, and only a seat that is still starting refuses it. Running turns are never interrupted.
   - **Only a person.** These go to the operator at once, under the item `hub-update-person`, with the reason in its words: a change that adds a symlink or gitlink (FLIGHT's call refuses it with `refuseUnsafe`, which also pins the pull to the commit it checked), pnpm needing to purge `node_modules`, and a checkout whose HEAD is off main's history. FLIGHT cannot keep or dismiss it.
 - **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 150K" (null with no turn yet).
 
@@ -2794,8 +2795,8 @@ test diagnostic, which must execute tests. The full CI suite remains required be
 This selection uses the import graph; it cannot discover arbitrary runtime file reads, so authors
 still run targeted fixture/role checks for those changes and reviewers verify the coverage.
 
-If `origin/HEAD` cannot be resolved, the check fails; the controller repairs the clone's default
-branch ref rather than changing the required command. The hub never executes the seat's check
+If `origin/HEAD` cannot be resolved, `pnpm -s test:related` fails; the controller repairs the
+clone's default branch ref. The wrapper is optional here: the required checks are lint and typecheck. The hub never executes the seat's check
 code in the server process. Its existing exception for engine-only clean merges of main is
 unchanged; this check gates seat-authored pushes and does not certify that separate publish path.
 
