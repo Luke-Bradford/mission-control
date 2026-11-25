@@ -1204,6 +1204,21 @@ export function flightState(i: {
         r.loop?.prNumber != null &&
         mine.some((s) => s.id === r.agentId),
     );
+  const flow = prFlow(store, session.repoId, now);
+  // PRs the flow says nobody owns and that are past its deadline for that (`<pr>:unowned:<since>`):
+  // no live run is bound to the PR, its branch or its ticket, and no review of it is under way
+  const unowned = new Set(
+    prFlowFacts(flow)
+      .map((fact) => fact.split(":"))
+      .filter((fact) => fact[1] === "unowned")
+      .map((fact) => Number(fact[0])),
+  );
+  // Crew runs of this session that are live or ended in the last day (a merged run only while
+  // its merge steps are kept). A PR none of them carried was opened outside the crew, or left
+  // alone for a day, and is not placed by this wake.
+  const crewRuns = store
+    .loopRuns(now - FLIGHT_METRICS_DAY_MS)
+    .filter((r) => r.repoId === session.repoId && mine.some((s) => s.id === r.agentId));
   const stale = store.stalePullRequests(session.repoId);
   const shown = shownPrs(store);
   const failedRounds = new Map(
@@ -1228,6 +1243,21 @@ export function flightState(i: {
         p.headSha === null
           ? null
           : carriedFrom(holder?.loop?.carry, holder?.loop?.reviewWaivedSha, p.headSha);
+      const review =
+        reviewed?.verdict == null || (reviewed.sha !== p.headSha && reviewed.sha !== carried)
+          ? null
+          : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha };
+      // Nobody owns it and its CI has settled (`ci` leaves out the hub's own review status): the
+      // result reaches no seat by itself. A read that failed says nothing new, so a stale row is
+      // left out (a PR merged since its last good read would otherwise be told as green).
+      const unheld =
+        p.state === "open" &&
+        !stale.has(p.number) &&
+        unowned.has(p.number) &&
+        (p.ci === "passing" || p.ci === "failing") &&
+        crewRuns.some((r) => r.loop?.prNumber === p.number || r.branch === p.branch)
+          ? p.ci
+          : undefined;
       return {
         ref: p.ticket ?? holder?.ticket ?? "",
         pr: p.number,
@@ -1245,10 +1275,8 @@ export function flightState(i: {
         headSha: p.headSha,
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
         stale: stale.has(p.number),
-        review:
-          reviewed?.verdict == null || (reviewed.sha !== p.headSha && reviewed.sha !== carried)
-            ? null
-            : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha },
+        review,
+        ...(unheld === undefined ? {} : { unheld }),
         failingChecks: (p.checks ?? []).filter((c) => c.state === "failing").map((c) => c.name),
         reviewRounds: failedRounds.get(p.number) ?? 0,
       };
@@ -1259,7 +1287,6 @@ export function flightState(i: {
       .pullRequests(session.repoId)
       .map((pr) => [pr.number, { checks: pr.checks ?? [], mergeable: pr.mergeable }]),
   );
-  const flow = prFlow(store, session.repoId, now);
   const mergeQueue = prs
     .filter((p) => p.state === "open")
     .map((p) => {
@@ -1736,7 +1763,8 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
 /**
  * What a wake is about, as a stable string (no times): an operator message, a seat's question, a
  * failure the hub could not settle, or an idle build seat with open tickets. CI, PR flow and free
- * seats are the hub's own timers and show in the digest, never here.
+ * seats are the hub's own timers and show in the digest, never here. The one exception is a crew PR
+ * nobody owns (`unheld`): the engine has no run to hand its CI or review result to.
  */
 export function wakeFacts(s: FlightState & TeamsDigestState): string {
   // One stable fact per idle spell, once it has lasted 30 minutes. The digest carries the open
@@ -1748,6 +1776,11 @@ export function wakeFacts(s: FlightState & TeamsDigestState): string {
     .filter((seat) => !delivered.has(idleKey(seat)))
     .map(idleKey);
   const idleAgain = s.wake?.idle?.again ?? null;
+  // one fact per head, CI verdict and review result of a PR nobody owns
+  const unheld = s.prs
+    .filter((p) => p.unheld !== undefined)
+    .map((p) => `${p.pr}:${p.headSha}:${p.unheld}:${p.review?.blocking ?? "unreviewed"}`)
+    .sort();
   return JSON.stringify({
     // once a day or less: an instruction change, the daily retrospective, an arrival from another team
     instructions:
@@ -1788,6 +1821,7 @@ export function wakeFacts(s: FlightState & TeamsDigestState): string {
     owed: s.wake?.owed ?? [],
     ...(idle.length === 0 ? {} : { idle }),
     ...(idleAgain === null ? {} : { idleAgain: [idleAgain] }),
+    ...(unheld.length === 0 ? {} : { unheld }),
     // blockers and messages; a PR's own steps are the hub's
     items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
@@ -1821,7 +1855,9 @@ export function pending(s: FlightState & TeamsDigestState): boolean {
     s.signals.some((s) => !s.told) ||
     s.triage.length > 0 ||
     (s.planned?.some((p) => p.minutesFromNow <= 0) ?? false) ||
-    s.prs.some((p) => p.awaitingFlight != null || p.awayBugDecision != null) ||
+    s.prs.some(
+      (p) => p.awaitingFlight != null || p.awayBugDecision != null || p.unheld !== undefined,
+    ) ||
     s.questions.length > 0 ||
     wakeItems(s).length > 0 ||
     stoppedSeats(s).length > 0 ||
@@ -1840,7 +1876,8 @@ const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker"]);
 /**
  * Fact categories a wake does not wait the gap for: an operator message, a seat's question, an
  * instruction change, FLIGHT's own plan falling due, and the daily retrospective. Each is the
- * operator's or FLIGHT's own doing, or at most daily.
+ * operator's or FLIGHT's own doing, or at most daily. `unheld` is the exception: a crew PR nobody
+ * owns stands still until FLIGHT places it, so its settled CI or review is not left for the batch.
  */
 const URGENT_CATEGORIES: readonly string[] = [
   "operator",
@@ -1850,6 +1887,7 @@ const URGENT_CATEGORIES: readonly string[] = [
   "planned",
   "retrospective",
   "audit",
+  "unheld",
 ];
 
 const SEAT_CALL: (typeof FLIGHT_SIGNAL_KINDS)[number] = "seat_call";
