@@ -115,6 +115,21 @@ beforeEach(() => {
 afterEach(() => store.close());
 
 describe("PR flow ownership and clocks", () => {
+  it("keeps the seat's live run as owner when a later session that only touched the PR has ended", () => {
+    store.upsertPullRequests("mc", [pr()], T);
+    store.upsertRun(run("author"));
+    // FLIGHT's session: no branch, no ticket, the PR in the list of those it acted on
+    const touched = { branch: null, ticket: null, prs: [{ repo: "o/mc", number: 7 }] };
+    store.upsertRun(
+      run("flight", { agentId: "flight", startedAt: T + M, endedAt: T + 2 * M, ...touched }),
+    );
+    expect(row(T + 10 * M)).toMatchObject({ ownerKind: "seat", seatId: "guido" });
+    expect(prFlowFacts(flow(T + 10 * M))).toEqual([]);
+    // with no run carrying the PR, the session that touched it is still its last run
+    store.upsertRun(run("author", { branch: "feature/other", ticket: null }));
+    expect(row(T + 10 * M)).toMatchObject({ owner: "nobody", ownerSince: T + 2 * M });
+  });
+
   it("names never-run and ended-run faults from their actual start time", () => {
     store.upsertPullRequests("mc", [pr()], T);
     expect(row()).toMatchObject({ owner: "nobody", ownerSince: T, lastAction: "PR opened" });

@@ -124,14 +124,17 @@ function position(
     : { stage: "building", owner: "seat" };
 }
 
-/** Direct PR/branch bindings outrank ticket fallback. Review runs never author a PR. */
+/**
+ * Direct PR/branch bindings outrank ticket fallback. Review runs never author a PR. A run that only
+ * lists the PR among those it touched (FLIGHT's own session lists every PR it acted on) is its
+ * author only when no run carried the PR or its branch: else FLIGHT's ended session, started after
+ * the seat's run, would be read as the PR's last run and the PR as owned by nobody.
+ */
 function authors(pr: PullRequestView, runs: Run[]): Run[] {
-  const direct = runs.filter(
-    (r) =>
-      r.loop?.prNumber === pr.number ||
-      r.prs.some((p) => p.number === pr.number) ||
-      r.branch === pr.branch,
-  );
+  const carried = runs.filter((r) => r.loop?.prNumber === pr.number || r.branch === pr.branch);
+  const direct = carried.length
+    ? carried
+    : runs.filter((r) => r.prs.some((p) => p.number === pr.number));
   return (
     direct.length
       ? direct

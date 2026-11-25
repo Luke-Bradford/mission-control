@@ -738,6 +738,27 @@ describe("FLIGHT's evidence", () => {
       expect(unheld()).toBeUndefined();
     });
 
+    it("is not marked while a seat's run holds it, though FLIGHT's ended session touched it later", () => {
+      nowMs = T0 + 30 * MIN;
+      store.upsertRun(
+        run("r-guido", "guido-1", {
+          ticket: "mc#7",
+          branch: "feature/7-x",
+          loop: { ...NEW_LOOP, phase: "review", prNumber: 7 },
+        }),
+      );
+      store.upsertRun(
+        run("r-flight-old", "flight-1", {
+          startedAt: T0 + MIN,
+          endedAt: T0 + 10 * MIN,
+          status: "ok",
+          prs: [{ repo: "o/mc", number: 7 }],
+        }),
+      );
+      pr({ ci: "passing" });
+      expect(unheld()).toBeUndefined();
+    });
+
     it("is urgent on each new result and settles when a seat takes the PR", () => {
       endedHolder();
       nowMs = T0 + 10 * MIN;
