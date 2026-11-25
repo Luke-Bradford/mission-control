@@ -158,6 +158,7 @@ it.each(verdictCases)(
         env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
       });
       if (expected === 0) expect(result.stdout).toContain("Affected tests passed.");
+      if (report === undefined) expect(result.stderr).toContain("wrote no JSON report");
       expect(result.status).toBe(expected);
     } finally {
       rmSync(dir, { recursive: true, force: true });

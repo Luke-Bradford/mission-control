@@ -6,17 +6,17 @@ Query: `?tab=crew|cost|throughput|quality|machine`, `&state=normal|loading|empty
 
 The shell follows the real one: page links on top, FLIGHT's 48 px rail on the right, key hints below. The layout reacts to the width of the work area, not the window, so opening the dock recomposes it.
 
-Approval: waiting for the operator.
+Approval: approved by the operator. The five tabs are built (#1977 to #1981).
 
-Checkpoint 3 of #1178. The operator approves this before any build ticket is filed. FLIGHT records the approval and files the tickets.
+Checkpoint 3 of #1178.
 
 ## Page question
 
 Is the crew healthy right now? Overview says what is running. Telemetry says whether levels look normal, and why. The health band answers the first half at a glance; the five tabs answer the second.
 
-## Audit of the current page
+## Audit of the page before the build
 
-Source: `apps/web/src/pages/Telemetry.tsx`, `apps/web/src/telemetry/`, `telemetry()` in `apps/server/src/telemetry.ts`. Fit says whether the form answers the question. Windows differ across the page (now, today, Range, 14 days, latest run), and the Agent, Account and Ticket filters reach only some panels.
+Source: `apps/web/src/pages/Telemetry.tsx`, `apps/web/src/telemetry/`, `telemetry()` in `apps/server/src/telemetry/telemetry.ts`. Fit says whether the form answers the question. Windows differ across the page (now, today, Range, 14 days, latest run), and the Agent, Account and Ticket filters reach only some panels.
 
 | Panel | Question | Data | Form | Fit | Proposal |
 | --- | --- | --- | --- | --- | --- |
@@ -145,10 +145,10 @@ CI green first push, First-pass review, Rounds per PR, and Guard blocks by rule.
 
 ### Machine
 
-CPU and memory with lock bands, Memory pressure and swap, Agent and test-run memory, and the Test lock table. Needs swap and per-run memory series.
+CPU and memory with lock bands, Memory pressure and swap, Agent and test-run memory, and the Test lock table.
 
 Shared by all five: the health band, its verdict rule, the tab query string, the Charts and Table control, and the runs dialog route.
 
 ## Evidence
 
-The controller has now rendered the proposal and the current production page with fictional fixtures. [The retained review account](../../../../docs/reviews/2026-11-09/telemetry-mockup-1397/README.md) links the actual manifests and source-bound checks. It includes matched proposal iterations, all five tabs at the required sizes/themes, drawer, stress, short and 4K cases, and six current-page comparisons. Operator design approval remains outstanding; no build tickets are started.
+The controller has now rendered the proposal and the current production page with fictional fixtures. [The retained review account](../../../../docs/reviews/2026-11-09/telemetry-mockup-1397/README.md) links the actual manifests and source-bound checks. It includes matched proposal iterations, all five tabs at the required sizes/themes, drawer, stress, short and 4K cases, and six current-page comparisons. The operator has approved the design, and the build tickets are done.

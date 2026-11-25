@@ -74,6 +74,7 @@ export async function checkRelated(cwd: string): Promise<number> {
     await pipeline(createReadStream(join(dir, "output")), process.stdout, { end: false });
     if (result.error) console.error(`Affected tests could not start: ${result.error.message}`);
     if (result.signal) console.error(`Affected tests ended on signal ${result.signal}.`);
+    if (!totals) console.error("Affected tests wrote no JSON report, so their result is unknown.");
     return result.status || 1;
   } finally {
     closeSync(fd);

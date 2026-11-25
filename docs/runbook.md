@@ -1935,8 +1935,8 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   (holds recorded before this was captured). Single-file runs do not take the lock, so they are not
   counted.
 - **CI runs.** Every check run read on a PR's head commit is kept in `ci_runs`, one row per
-  (repo, run key), updated in place as it concludes. The run key is the check run's GitHub id, or
-  for a commit status its kind, sha, workflow, name and attempt; `firstSeenAt` and `at` bracket the
+  (repo, run key), updated in place as it concludes. The run key is `run:` and the check run's GitHub id,
+  or for a commit status its kind, sha, workflow, name and attempt joined by `:`; `firstSeenAt` and `at` bracket the
   polls that saw it. `GET /api/qa/ci-runs?days=` (1..90, default 7), newest first. A re-run is a new
   attempt, so a flaky check shows as a failing attempt followed by a passing one.
 - **Milestones.** Each GitHub read also reads the repo's 50 newest milestones (read-only): title, due

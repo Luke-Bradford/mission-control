@@ -130,6 +130,11 @@ crew:
   # working folders. Absolute paths (~ allowed); none may be, hold or lie inside `worktrees`, a
   # `checkout` or a temp dir (the hub's, or /tmp).
   # deny_read: [~/code/work, ~/Documents]
+  # Absolute paths inside your home folder (~ allowed) that code the seats run may still read, such
+  # as a tool's config. None may be or hold home, or be, hold or lie inside a credential folder.
+  # allow_read: [~/.config/pip]
+  # Seat transcripts: gzipped this many hours after their run ends, deleted after this many days.
+  # transcripts: { gzip_after_hours: 24, delete_after_days: 14 }
   # Input + output tokens one build-loop run may use (the engine will park a run that goes over).
   # Default 400000.
   # run_token_budget: 400000
