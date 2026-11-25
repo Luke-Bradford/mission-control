@@ -353,8 +353,8 @@ export function crewHudState(
   /**
    * When the seat's run took the test lock; null when it holds none. Silence counts from then: the
    * wait for the lock was not the seat's. A running Claude check writes a heartbeat every 30 s, so
-   * a holder that goes quiet after that is wedged. A Codex check writes nothing until it ends, so
-   * one past 10 minutes reads as stalled, as it did before.
+   * a holder that goes quiet after that is wedged. A Codex check leaves a line at most once a minute,
+   * and only while it prints output, so one silent past 10 minutes reads as stalled.
    */
   lockHeldSince: number | null = null,
 ): HudState {

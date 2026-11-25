@@ -150,7 +150,7 @@ export async function chooseOption(
       : store.commsStamp(messageId).runId;
     asker = { agentId: open.agentId, runId };
   }
-  // any other item (a crew error, a stall, a lock, a note) is FLIGHT's to decide, not a seat's question
+  // any other item (a stall, a lock, a note) is FLIGHT's to decide, not a seat's question
 
   // where the answer goes: the run that asked while it lives, FLIGHT otherwise, never another run
   let to: string;

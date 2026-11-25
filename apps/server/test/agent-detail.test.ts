@@ -69,7 +69,13 @@ it("labels an observed loop held for the operator Waiting on you, not Free", () 
   const row = crewRow({ hudState: "blocked", note: null, loop: null });
   const r = save(row);
   store.upsertRun({ ...r, endedAt: NOW - 1000, status: "blocked" });
-  expect(view(row).awaiting.label).toBe("Waiting on you");
+  expect(view(row).awaiting).toMatchObject({ label: "Waiting on you", reason: null });
+  // the loop's own note is the reason, ended run or not
+  const noted = crewRow({ hudState: "blocked", note: "Escalated: pick a lane", loop: null });
+  expect(view(noted).awaiting).toMatchObject({
+    label: "Waiting on you",
+    reason: "Escalated: pick a lane",
+  });
 });
 it("keeps a stopped operator reason and an acknowledged but still open decision", () => {
   const row = seatRow({ hudState: "stopped", note: null });

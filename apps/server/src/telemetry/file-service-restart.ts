@@ -114,6 +114,14 @@ async function saveDiagnostics(dir: string, at: number, exec: Exec): Promise<str
   }
 }
 
+/** The live hub's file-service restart, saving diagnostics under `dir`; a preview has none. */
+export function hubFileServiceRestart(
+  preview: boolean,
+  dir: string,
+): ((at: number, opts: { diagnose: boolean }) => Promise<FileServiceRestart>) | undefined {
+  return preview ? undefined : (at, opts) => restartFileService(dir, at, opts);
+}
+
 /** Saves diagnostics into `dir` when asked, then restarts `fseventsd` through sudo; never throws. */
 export async function restartFileService(
   dir: string,

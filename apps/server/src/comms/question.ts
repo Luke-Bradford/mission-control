@@ -1,4 +1,4 @@
-import { COMMS_OPEN_PREFIX } from "@mc/core";
+import { COMMS_CAPCOM, COMMS_OPEN_PREFIX } from "@mc/core";
 import type { Store } from "../store.ts";
 
 /** The tag is legacy only; both keys name one stored labelled FLIGHT question. */
@@ -55,5 +55,5 @@ export function isFlightOperatorQuestion(
 ): boolean {
   if (flightId === null) return false;
   const message = store.commsMessage(messageId);
-  return message?.from === flightId && message.to === "CAPCOM" && message.label === "question";
+  return message?.from === flightId && message.to === COMMS_CAPCOM && message.label === "question";
 }

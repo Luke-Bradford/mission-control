@@ -27,7 +27,7 @@ describe("FLIGHT's wake carries the AUDIT report", () => {
     const s = state();
     expect(AUDIT_FLIGHT_TOP).toBe(3);
     expect(s.audit?.top.map((f) => f.rank)).toEqual([1, 2, 3]);
-    expect(s.audit?.verdict).toBe("One of four build seats is working.");
+    expect(s.audit?.verdict).toContain("\nOne of four build seats is working.\n");
     expect(urgentChange(before, wakeFacts(s))).toBe(true);
     expect(pending(s)).toBe(true);
     markAuditShown(store, s);
@@ -42,6 +42,6 @@ describe("FLIGHT's wake carries the AUDIT report", () => {
       verdict: "v2",
       findings: [],
     });
-    expect(state().audit?.verdict).toBe("v2");
+    expect(state().audit?.verdict).toContain("\nv2\n");
   });
 });

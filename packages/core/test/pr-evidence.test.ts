@@ -45,6 +45,9 @@ describe("prEvidenceAffectedPages", () => {
     ];
     expect(prEvidenceAffectedPages(["apps/web/src/telemetry/MachineTab.tsx"])).toEqual(tabs);
     expect(prEvidenceAffectedPages(["apps/web/src/pages/Telemetry.tsx"])).toEqual(tabs);
+    // the hub passes the import graph: a file only the Telemetry page reaches still gets every tab
+    const graph = { "apps/web/src/telemetry/MachineTab.tsx": ["telemetry"] } as const;
+    expect(prEvidenceAffectedPages(["apps/web/src/telemetry/MachineTab.tsx"], graph)).toEqual(tabs);
     expect(EVIDENCE_PAGE_PATHS.telemetry_throughput).toBe("/telemetry?tab=throughput");
     expect(EVIDENCE_PAGE_PATHS.telemetry_machine).toBe("/telemetry?tab=machine");
   });

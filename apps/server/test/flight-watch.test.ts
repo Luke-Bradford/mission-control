@@ -73,6 +73,7 @@ import { ChangeBus } from "../src/bus.ts";
 import { flightQuestion } from "../src/comms/index.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
+import { collaborator } from "../src/flight/collaborators.ts";
 import * as retrospective from "../src/flight/retrospective.ts";
 import {
   flightLoopHeartbeat,
@@ -1752,6 +1753,24 @@ describe("the FLIGHT watcher", () => {
     });
   });
 
+  it("a pending crew change holds the hub's retry, which runs once the change settles", async () => {
+    let held = false;
+    watch.stop();
+    makeWatch({ blocked: () => held });
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    expect(startCalls).toHaveLength(3);
+    startFails = null;
+    held = true;
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(3);
+    expect(notesOpen()).toHaveLength(1);
+    held = false;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+  });
+
   it("the operator's Stop holds against the retry", async () => {
     startFails = "boom";
     for (let i = 0; i < 4; i++) await watch.check();
@@ -2799,8 +2818,10 @@ describe("the FLIGHT watcher", () => {
     });
 
     describe("the handover guard's cooldown", () => {
+      // FLIGHT's live run, from its seat row: a start that threw makes no run
+      const liveRun = (fallback: string) => store.seatSession("flight-1")?.runId ?? fallback;
       const tripGuard = async (): Promise<void> => {
-        let runId = startCalls.length === 0 ? "r-flight" : `r-flight-${startCalls.length}`;
+        let runId = liveRun("r-flight");
         for (let i = 1; i <= FLIGHT_ROTATIONS_MAX + 1; i++) {
           facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
           context(FLIGHT_CONTEXT_ROTATE_TOKENS - FLIGHT_CONTEXT_GROWTH_TOKENS, runId);
@@ -2816,7 +2837,7 @@ describe("the FLIGHT watcher", () => {
           await watch.check(); // rotates
           await watch.check(); // starts the fresh session, unless the cap holds it
           nowMs += MIN;
-          runId = `r-flight-${startCalls.length}`;
+          runId = liveRun(runId);
           if (notesOpen().length > 0) break;
         }
       };
@@ -2842,6 +2863,29 @@ describe("the FLIGHT watcher", () => {
         const started = startCalls.length;
         nowMs += FLIGHT_GUARD_COOLDOWN_MS;
         await vi.advanceTimersByTimeAsync(FLIGHT_GUARD_COOLDOWN_MS);
+        expect(startCalls).toHaveLength(started + 1);
+        expect(notesOpen()).toEqual([]);
+      });
+
+      it("a handover trip after a retried failed start waits the trip's own cooldown", async () => {
+        liveCrew();
+        noFlight();
+        startFails = "boom";
+        for (let i = 0; i < 4; i++) await watch.check();
+        expect(startCalls).toHaveLength(3);
+        startFails = null;
+        nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+        await watch.check(); // the hub's retry starts FLIGHT
+        expect(startCalls).toHaveLength(4);
+        await tripGuard();
+        expect(notesOpen().map((n) => n.text)).toEqual([
+          expect.stringContaining(`FLIGHT handed over ${FLIGHT_ROTATIONS_MAX} times in an hour`),
+        ]);
+        expect(notesOpen()[0]?.text).not.toContain("twice in a row");
+        const started = startCalls.length;
+        // the trip's 30 minutes, not the 6 hours a failed start's retry would wait
+        nowMs += FLIGHT_GUARD_COOLDOWN_MS + MIN;
+        await watch.check();
         expect(startCalls).toHaveLength(started + 1);
         expect(notesOpen()).toEqual([]);
       });
@@ -5654,15 +5698,20 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
     expect(wakeSummary(read(T0 + GAP))).toContain("40 open tickets (9 with no board status");
   });
 
-  it("puts every open idle ticket in the wake beyond the normal digest cap", () => {
+  it("puts every open idle ticket in the wake beyond the normal digest cap", async () => {
+    // one card by a collaborator, the rest by no known author
+    const writer = async () => ({ code: 0, stdout: '{"permission":"write"}', stderr: "" });
+    expect(await collaborator(store, writer, "/", "o/mc", "friend", T0)).toBe(true);
     store.replaceBoard(
       "mc",
-      Array.from({ length: 40 }, (_, n) => card(n + 1, "Backlog")),
+      Array.from({ length: 40 }, (_, n) =>
+        n === 39 ? { ...card(n + 1, "Backlog"), author: "friend" } : card(n + 1, "Backlog"),
+      ),
     );
     tick(T0);
     const digest = flightWake(read(T0 + FLIGHT_IDLE_SEAT_WAKE_MS)).digest;
     expect(digest.idleTickets).toEqual(
-      expect.arrayContaining(["mc#1 [untrusted] Ticket 1", "mc#40 [untrusted] Ticket 40"]),
+      expect.arrayContaining(["mc#1 [untrusted] Ticket 1", "mc#40 Ticket 40"]),
     );
     expect(digest.idleTickets).toHaveLength(40);
   });

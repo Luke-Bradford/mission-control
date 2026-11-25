@@ -216,6 +216,16 @@ const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
 
 type Row = Record<string, SQLInputValue>;
 
+/** One `prompt_sections` row. */
+interface PromptSectionRow {
+  run_id: string;
+  wake: number;
+  section: PromptSection;
+  bytes: number;
+  tokens: number;
+  at: number;
+}
+
 /** Set once the audit-history backfill has run: merges are recorded as they happen, so it never repeats. */
 const AUDIT_BACKFILL_SETTING = "audit_history_backfilled";
 const DAY_MS = 86_400_000;
@@ -689,16 +699,7 @@ export class Store {
       .run(runId, wake, section, bytes, estimateTokens(bytes), last.at ?? at);
   }
 
-  private wakesOf(
-    rows: {
-      run_id: string;
-      wake: number;
-      section: PromptSection;
-      bytes: number;
-      tokens: number;
-      at: number;
-    }[],
-  ): PromptWakeCost[] {
+  private wakesOf(rows: PromptSectionRow[]): PromptWakeCost[] {
     const wakes = new Map<string, PromptWakeCost>();
     for (const r of rows) {
       const key = `${r.run_id}\0${r.wake}`;
@@ -723,7 +724,7 @@ export class Store {
     return this.wakesOf(
       this.db
         .prepare("SELECT * FROM prompt_sections WHERE run_id = ? ORDER BY wake")
-        .all(runId) as never,
+        .all(runId) as unknown as PromptSectionRow[],
     );
   }
 
@@ -733,7 +734,7 @@ export class Store {
       .prepare(`SELECT * FROM prompt_sections WHERE run_id = ?
       AND wake = (SELECT MAX(wake) FROM prompt_sections WHERE run_id = ?)`)
       .all(runId, runId);
-    return this.wakesOf(rows as never)[0] ?? null;
+    return this.wakesOf(rows as unknown as PromptSectionRow[])[0] ?? null;
   }
 
   /** An agent's prompts since `since`, newest first, at most `limit` wakes. */
@@ -743,7 +744,7 @@ export class Store {
         `SELECT p.* FROM prompt_sections p JOIN runs r ON r.id = p.run_id
          WHERE r.agent_id = ? AND p.at >= ?`,
       )
-      .all(agentId, since) as never;
+      .all(agentId, since) as unknown as PromptSectionRow[];
     return this.wakesOf(rows)
       .sort((a, b) => b.at - a.at || b.wake - a.wake)
       .slice(0, limit);
@@ -1437,7 +1438,13 @@ export class Store {
             const values = runIds.map(({ id }) => id);
             if (values.length > 0) {
               const runMarks = values.map(() => "?").join(",");
-              for (const child of ["run_commits", "run_pushes", "run_attempts", "run_digests"])
+              for (const child of [
+                "run_commits",
+                "run_pushes",
+                "run_attempts",
+                "run_digests",
+                "prompt_sections",
+              ])
                 this.db
                   .prepare(`DELETE FROM ${child} WHERE run_id IN (${runMarks})`)
                   .run(...values);
@@ -2094,7 +2101,8 @@ export class Store {
     superseded: number;
     failed: number;
   } {
-    const n = (sql: string): number => (this.db.prepare(sql).get(repoId, since) as { n: number }).n;
+    const n = (sql: string): number =>
+      (this.db.prepare(sql).get(repoId, since, until) as { n: number }).n;
     return {
       rounds: this.db
         .prepare(
@@ -2122,17 +2130,17 @@ export class Store {
       }[],
       scopeFindings: n(
         `SELECT COUNT(*) AS n FROM review_findings f JOIN reviews r ON r.id = f.review_id
-         WHERE f.category = 'scope' AND r.repo_id = ? AND r.created_at >= ?`,
+         WHERE f.category = 'scope' AND r.repo_id = ? AND r.created_at >= ? AND r.created_at <= ?`,
       ),
       specFailed: n(
         `SELECT COUNT(*) AS n FROM reviews WHERE repo_id = ? AND state = 'reported'
-           AND json_extract(verdict, '$.spec') = 'fail' AND created_at >= ?`,
+           AND json_extract(verdict, '$.spec') = 'fail' AND created_at >= ? AND created_at <= ?`,
       ),
       superseded: n(
-        "SELECT COUNT(*) AS n FROM reviews WHERE repo_id = ? AND state = 'superseded' AND created_at >= ?",
+        "SELECT COUNT(*) AS n FROM reviews WHERE repo_id = ? AND state = 'superseded' AND created_at >= ? AND created_at <= ?",
       ),
       failed: n(
-        "SELECT COUNT(*) AS n FROM reviews WHERE repo_id = ? AND state = 'failed' AND created_at >= ?",
+        "SELECT COUNT(*) AS n FROM reviews WHERE repo_id = ? AND state = 'failed' AND created_at >= ? AND created_at <= ?",
       ),
     };
   }
