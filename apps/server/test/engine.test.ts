@@ -5029,6 +5029,17 @@ describe("the engine runs reviews", () => {
     expect(h.starts).toHaveLength(2);
   });
 
+  it("names the seat that reviewed in the minor list, not the review seat chosen now", async () => {
+    draftWorkspace();
+    await toReview();
+    const id = first().id;
+    seats().push({ ...retroSeat(), id: "retro-2" });
+    need(seats().find((s) => s.id === first().seatId)).retiring = true;
+    reported(id, [finding("Minor")]);
+    await vi.waitFor(() => expect(h.minorCalls).toHaveLength(1));
+    expect(h.minorCalls[0]).toEqual({ id, sha: SHA, retro: CALL });
+  });
+
   it("a clean review raises the ready note and lists the minor findings once", async () => {
     draftWorkspace();
     await toReview();
@@ -6920,6 +6931,41 @@ describe("the engine runs reviews", () => {
           note: "again",
         });
         expect(again).toEqual({ lifted: false, reason: "second-review-done" });
+      });
+
+      it("a rereview after the second review failed keeps it on another account", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        expect(await second()).toBe(true);
+        await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
+        await h.engine.reconcileRun(RUN);
+        setLoop({
+          phase: "parked",
+          hold: { kind: "review-failed", reason: "x", ended: false, worktree: null, wake: false },
+        });
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: ["review-failed"],
+            action: "rereview",
+          }),
+        ).toEqual({ lifted: true });
+        expect(loopOf().flightSecondReview?.[SHA]?.epoch).toBe(loopOf().epoch);
+      });
+
+      it("refuses when the first review's seat is gone from the config", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        const gone = first().seatId;
+        seats().splice(
+          seats().findIndex((s) => s.id === gone),
+          1,
+        );
+        const r = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "second_review",
+          note: "x",
+        });
+        expect(r).toEqual({ lifted: false, reason: "no-second-reviewer" });
       });
 
       it("refuses when no reviewer on another account is left", async () => {

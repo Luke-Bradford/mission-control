@@ -1788,6 +1788,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           : START_FAILED,
       );
     }
+    // a FLIGHT or planner start is a seat start for the silence alarm, as the queue's is
+    store.recordSilenceEvent("seat-run-started", now());
     store.addComms({
       at: now(),
       from: ctx.seatId,

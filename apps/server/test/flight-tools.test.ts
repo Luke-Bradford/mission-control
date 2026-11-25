@@ -2288,6 +2288,12 @@ describe("start_seat", () => {
     ]);
   });
 
+  it("records the start for the silence alarm", async () => {
+    expect(store.silenceEventLastSeen("seat-run-started")).toBeNull();
+    await start();
+    expect(store.silenceEventLastSeen("seat-run-started")).toBe(NOW);
+  });
+
   it("starts with no options when the engine is off", async () => {
     await start();
     expect(startCalls).toEqual([["guido-1", 7, undefined]]);

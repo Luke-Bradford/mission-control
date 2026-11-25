@@ -794,6 +794,67 @@ describe("ciExcerpt", () => {
     expect(ghCalls.some((c) => c.includes("--log-failed"))).toBe(false);
   });
 
+  it("reads the failed attempt before a cancelled re-run", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          {
+            databaseId: 11,
+            name: "test",
+            conclusion: "cancelled",
+            status: "completed",
+            attempt: 2,
+          },
+        ]),
+      }),
+      () => ({ code: 0, stdout: JSON.stringify({ conclusion: "failure" }) }),
+      () => ({ code: 0, stdout: "boom\n" }),
+    ];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(
+      "test (attempt 1, which failed; its re-run was cancelled):\nboom",
+    );
+    expect(ghCalls[2]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=1", "--log-failed"]);
+  });
+
+  it("does not read the jobs of a run that is only queued", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "test", conclusion: "", status: "queued", attempt: 1 },
+        ]),
+      }),
+    ];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(NO_FAILED_RUN);
+    expect(ghCalls).toHaveLength(1);
+  });
+
+  it("puts a job name's line breaks on one line, and says when a job's log could not be read", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "CI", conclusion: "", status: "in_progress", attempt: 1 },
+        ]),
+      }),
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          jobs: [
+            { databaseId: 501, name: "server\n(1)", status: "completed", conclusion: "failure" },
+            { databaseId: 502, name: "web", status: "completed", conclusion: "failure" },
+          ],
+        }),
+      }),
+      () => ({ code: 0, stdout: " FAIL  s.test.ts > t\nAssertionError: expected 1 to be 2\n" }),
+      () => ({ code: 1, stdout: "" }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(out).toContain("[server (1)");
+    expect(out).toContain("the log of job web could not be read");
+  });
+
   it("names the attempt of a completed failed run and reads that attempt", async () => {
     ghAnswers = [
       () => ({
@@ -1178,6 +1239,41 @@ describe("ciExcerpt", () => {
         expect(out).not.toContain("\x1b");
         expect(out).not.toContain("2026-11-10T");
         expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+      });
+
+      it("keeps a source line that names the test's function", async () => {
+        const out = await excerpt([
+          ...passing(10, "a"),
+          LJ(" FAIL  |server-process| apps/server/test/s.test.ts > t"),
+          LJ("AssertionError: expected 1 to be 2"),
+          LJ(" ❯ startReview apps/server/test/s.test.ts:20:7"),
+          ...passing(100, "b"),
+        ]);
+        expect(out).toContain(
+          "AssertionError: expected 1 to be 2\n❯ startReview apps/server/test/s.test.ts:20:7",
+        );
+      });
+
+      it("does not give a failure a source line from a later Unhandled Errors block", async () => {
+        const out = await excerpt([
+          LJ(" FAIL  |server-process| apps/server/test/s.test.ts > t"),
+          LJ("AssertionError: expected 1 to be 2"),
+          LJ("⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯"),
+          LJ("Error: boom"),
+          LJ(" ❯ apps/server/src/other.ts:5:1"),
+          ...passing(100, "b"),
+        ]);
+        expect(out).toContain("FAIL  |server-process| apps/server/test/s.test.ts > t");
+        expect(out).not.toContain("other.ts");
+      });
+
+      it("leaves the runner's exit line out of a log with no failure", async () => {
+        const out = await excerpt([
+          ...passing(5, "a"),
+          LJ("##[error]Process completed with exit code 1."),
+        ]);
+        expect(out).toContain("a4.test.ts > ok");
+        expect(out).not.toContain("Process completed");
       });
 
       it("is the log's last lines when the log has no failure summary", async () => {
@@ -2036,6 +2132,21 @@ describe("postMinorFindings", () => {
     expect(posted?.match(/Closes #7\./g)).toHaveLength(1);
     expect(posted?.match(/Opened by/g)).toHaveLength(1);
     expect(posted?.indexOf("Seat rewrite.")).toBeLessThan(posted?.indexOf(MINOR_HEADING) ?? 0);
+  });
+
+  it("gives a seat's body Part of, not Closes, once a later note says Part of", async () => {
+    store.addEvidence(R.id, "Part of #7: stage 2.", START + 1000);
+    answer(
+      JSON.stringify({
+        headRefName: BRANCH,
+        state: "OPEN",
+        body: `Seat rewrite.\n\nCloses #7.\n\nOpened by GUIDO-1 (Mission Control).\n`,
+      }),
+    );
+    await createPublisher(deps()).postMinorFindings(R, review([minor("first")]));
+    expect(posted).toContain("Seat rewrite.");
+    expect(posted).not.toContain("Closes #7.");
+    expect(posted?.match(/Part of #7\./g)).toHaveLength(1);
   });
 
   it("drops the hub's section from a seat's body when there are no minors", async () => {

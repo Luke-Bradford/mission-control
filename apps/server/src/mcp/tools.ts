@@ -1536,11 +1536,17 @@ export function seatWroteBody(body: string, issue: number): boolean {
 /**
  * `body` without the parts the hub adds around a seat's text: its minor-findings section, the
  * closing line and its own line. `section`, when given, goes at the end; a "Part of #n." line is
- * put back after it, so it stays last.
+ * put back after it, so it stays last. `partOf`: the run's latest note says the PR is part of the
+ * ticket, so the body gets that line even when it had none.
  */
-export function withEngineSection(body: string, issue: number, section: string | null): string {
+export function withEngineSection(
+  body: string,
+  issue: number,
+  section: string | null,
+  partOf = false,
+): string {
   const own = minorSection(body);
-  const staged = body.split("\n").some((l) => l.trim() === prPartOfLine(issue));
+  const staged = partOf || body.split("\n").some((l) => l.trim() === prPartOfLine(issue));
   const rest = (own === null ? body : body.replace(own, ""))
     .split("\n")
     .filter(
