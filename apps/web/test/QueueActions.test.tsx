@@ -210,6 +210,21 @@ it("an invalid focus selector explains itself and keeps the draft", async () => 
   expect(writes(fn)).toHaveLength(1);
 });
 
+it("a refusal that is not about the draft leaves the Focus field unmarked", async () => {
+  setup({
+    [`POST ${focusPath}`]: () => ({ status: 409, body: { error: "Config writes are off." } }),
+  });
+  await screen.findByText("label:catalog");
+  fireEvent.click(screen.getByRole("button", { name: "Change" }));
+  const input = screen.getByRole("textbox", { name: "Focus" }) as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "label:bugs" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  const box = await screen.findByRole("region", { name: "Focus not saved" });
+  expect(box.textContent).toContain("Config writes are off.");
+  expect(input.getAttribute("aria-invalid")).toBeNull();
+  expect(input.value).toBe("label:bugs");
+});
+
 it("keeps the Focus draft and says the result is unknown after a network loss", async () => {
   const fn = setup({
     [`POST ${focusPath}`]: () => {

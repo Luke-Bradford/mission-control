@@ -10,7 +10,7 @@ import type {
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ApiError } from "../api.ts";
 import { useTz } from "../clock.ts";
-import { Markdown, OpenLinks } from "../components/Markdown.tsx";
+import { type LinkRenderer, Markdown, OpenLinks } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { raisedAt, shortSha } from "../fmt.ts";
 import { followLink, ticketPath } from "../router.ts";
@@ -264,6 +264,14 @@ function Thumb({
 
 const asView = (i: StoryImage): ViewImage => ({ url: i.image.url, label: i.caption });
 
+/** A link relative to the packet's repo cannot open from here, so it says so; others render as usual. */
+const unattached: LinkRenderer = (url, label) =>
+  isRelativeReference(url) ? (
+    <span title={url}>
+      {label} <span className="note">(not attached to this question)</span>
+    </span>
+  ) : undefined;
+
 function Section({
   packet,
   section,
@@ -283,7 +291,7 @@ function Section({
       <Heading className="mat-heading">{section.heading}</Heading>
       {section.text.trim() !== "" && (
         <OpenLinks>
-          <Markdown text={section.text} />
+          <Markdown text={section.text} renderLink={unattached} />
         </OpenLinks>
       )}
       {images.length > 0 && (
@@ -424,13 +432,7 @@ function Packet({
                       </button>
                     );
                   }
-                  if (isRelativeReference(url))
-                    return (
-                      <span title={url}>
-                        {label} <span className="note">(not attached to this question)</span>
-                      </span>
-                    );
-                  return undefined;
+                  return unattached(url, label);
                 }}
               />
             </OpenLinks>
@@ -547,7 +549,7 @@ function MainPlan({ item }: { item: AttentionItem }) {
       ) : (
         <PlanScroll label={`Plan of ${label}`}>
           <OpenLinks>
-            <Markdown text={plan} />
+            <Markdown text={plan} renderLink={unattached} />
           </OpenLinks>
         </PlanScroll>
       )}
