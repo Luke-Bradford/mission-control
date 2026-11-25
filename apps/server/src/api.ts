@@ -460,15 +460,19 @@ import { lockView, telemetry, usualLockMs } from "./telemetry/telemetry.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import {
+  CREW_STATE_UNREADABLE,
   createHeldUpdateNote,
   crewRefusal,
   HUB_HEAD_OFF_MAIN,
   HUB_INSTALL_NEEDS_PERSON,
   HUB_UNSAFE_NEEDS_PERSON,
   HUB_UPDATE_HELD_KEY,
+  NOT_ON_MAIN,
   type QuietGate,
   raiseUpdatePersonNote,
+  UNCOMMITTED_CHANGES,
   UPDATE_FAILED,
+  UPDATE_RUNNING,
   UpdateError,
   type Updater,
 } from "./update.ts";
@@ -506,6 +510,27 @@ export const CONFIG_FILE_UNAVAILABLE = "this server has no config.yaml to read";
 export const CONFIG_WRITE_FAILED = "could not write config.yaml";
 /** The check route's answer to a failure outside the updater's own (502) errors. */
 export const CHECK_FAILED = "could not check for updates";
+
+/** A fresh Update check tells FLIGHT who acts next, without promising a retry that is already running. */
+function flightCheckRefusal(version: VersionInfo): string {
+  const reason = version.reason;
+  if (reason === UPDATE_RUNNING)
+    return "The hub is running this Update now; FLIGHT has nothing to run.";
+  if (reason === NOT_ON_MAIN || reason === UNCOMMITTED_CHANGES)
+    return `${reason}: a person must fix the hub's checkout; the operator runs this Update.`;
+  if (reason === CREW_STATE_UNREADABLE)
+    return "The hub could not read the crew's state. FLIGHT runs Update again in a few minutes.";
+  if (reason?.endsWith(" is starting")) return `${reason}: run Update again in a minute.`;
+  if (version.behind === 0)
+    return "No Update is waiting for FLIGHT. Run Update again after a new version lands.";
+  return `The hub cannot start this Update: ${reason ?? "the hub cannot check main"}. The hub checks main again in a few minutes; FLIGHT runs Update again then.`;
+}
+
+const flightCheckRetry = (error: string) =>
+  /[.!?]$/.test(error)
+    ? `${error} The hub checks main again in a few minutes; FLIGHT runs Update again then.`
+    : `${error}; the hub checks main again in a few minutes. FLIGHT runs Update again then.`;
+
 export { AWAY_SETTING } from "@mc/core";
 
 const DEFAULT_RUNS_LIMIT = 50;
@@ -6090,14 +6115,36 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (actor !== null) {
           const repoId = configuredAgents(config).find((a) => a.id === actor.seatId)?.repoId;
           if (repoId === undefined || flightPowersOf(config, repoId) !== "superuser")
-            return reply
-              .code(403)
-              .send({ error: "Only FLIGHT on a superuser repo runs Update.", logged: false });
-          // FLIGHT runs the Update the hub held for a person, not any Update
-          if (!store.notes().some((n) => n.key === HUB_UPDATE_HELD_KEY))
+            return reply.code(403).send({
+              error: "Only FLIGHT on a superuser repo runs Update; the operator runs Update.",
+              logged: false,
+            });
+          if (config.updates?.hub !== "auto")
             return reply
               .code(409)
-              .send({ error: "No Update is held for a person.", logged: false });
+              .send({ error: "Hub updates are off: the operator runs Update.", logged: false });
+          // A merge can land after the scheduler's last check. Check origin before refusing FLIGHT
+          // for a missing held item, so its first call after that merge can run the Update.
+          if (!store.notes().some((n) => n.key === HUB_UPDATE_HELD_KEY)) {
+            try {
+              const version = await updater.check();
+              if (!version.canUpdate) {
+                return reply.code(409).send({ error: flightCheckRefusal(version), logged: false });
+              }
+            } catch (e) {
+              captureError(reply, e);
+              if (e instanceof UpdateError)
+                return reply.code(e.status).send({
+                  error: e.status === 502 ? flightCheckRetry(e.message) : e.message,
+                  logged: false,
+                });
+              reply.log.warn(
+                { err: e instanceof Error ? e.name : typeof e },
+                "update check failed",
+              );
+              return reply.code(500).send({ error: flightCheckRetry(CHECK_FAILED), logged: false });
+            }
+          }
           // a busy crew: hold new runs and wait for the running turns to end (a quiet gap)
           const busy = () => supervisor?.busy() ?? [];
           if (deps.updateGate === undefined) {

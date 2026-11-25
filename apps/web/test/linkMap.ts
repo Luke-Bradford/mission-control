@@ -116,6 +116,7 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
     routes: ["/flight"],
     rules: [
       rule(/^Records$/, /^\/flight#handlingP$/, "Jumps to the records on the same page."),
+      rule(/^All measures$/, /^\/flight#roomP$/, "Focus now jumps to every measure, worst first."),
       rule(/^FLIGHT chat$/, /^\/comms$/, "FLIGHT's conversation in Comms."),
     ],
   },
@@ -360,6 +361,8 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/flight/Situation.tsx": "tab or page: the situation line",
   "src/flight/WorkInFlight.tsx": "page: seat",
   "src/flight/page/FlightPage.tsx": "page: Board, records",
+  "src/flight/page/StatusBand.tsx": "page: the measures on the same page",
+  "src/flight/page/Tabs.tsx": "page: a pointer's ticket, seat, repo or Telemetry; external: GitHub",
   "src/hud/PrChip.tsx": "external: GitHub; page: QA report",
   "src/hud/RepoRef.tsx": "page: ticket or QA",
   "src/instructions/Instructions.tsx": "page: seat queue",

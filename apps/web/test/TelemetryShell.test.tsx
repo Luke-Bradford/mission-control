@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { streamStatus } from "../src/data.ts";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
 import { TELEMETRY_TABS } from "../src/router.ts";
+import { WEEK_READ_DELAY_MS } from "../src/telemetry/HealthBand.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, crewRow, HOUR, item, METRICS_VIEW, MIN, NOW } from "./fixtures.ts";
 import { readStyle } from "./styles.ts";
@@ -187,7 +188,17 @@ describe("the health band", () => {
   });
 
   it("explains the verdict, the cost and merged comparisons and the quota's reset", async () => {
-    await open();
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(NOW);
+    window.history.replaceState(null, "", "/telemetry");
+    const fetch = stub();
+    render(<Telemetry />);
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    // The week's spend is not asked for while the page opens.
+    expect(fetch).not.toHaveBeenCalledWith("/api/telemetry?range=7d", expect.anything());
+    expect(stat("~Cost").querySelector(".stat-sub")?.textContent).toBe("today");
+    await act(() => vi.advanceTimersByTimeAsync(WEEK_READ_DELAY_MS));
     expect(stat("Crew health").querySelector(".stat-sub")?.textContent).toBe(
       "now · 1 of 2 running · 1 question waiting",
     );
