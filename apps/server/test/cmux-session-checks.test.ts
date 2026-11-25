@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -397,4 +406,63 @@ it("a check whose program cannot start fails with the shell's not-found code", a
   expect(await t.checks.run(WS_A)).toBe("queued");
   await vi.waitFor(() => expect(stateOf(t.checks, WS_A)).toBe("failed"), { timeout: 5000 });
   expect(t.state.messages[0]?.text).toContain("failed with exit code 127. Its last line:\n\nspawn");
+});
+
+it("a repo switched off while its check waits or runs never runs it by itself", async () => {
+  const main = repo();
+  let load = 9;
+  const t = setup([{ id: WS_A, name: "pricing", cwd: main }], [agent(WS_A, main)], {
+    load: () => load,
+  });
+  await turnOn(t.checks, main, [PRINT_AND_FAIL]);
+  await t.checks.tick();
+  writeFileSync(join(main, "a.ts"), "1\n");
+  t.lifecycle(WS_A, "idle");
+  await t.checks.tick();
+  expect(stateOf(t.checks, WS_A)).toBe("queued");
+  t.checks.setRepo(main, { on: false }, "operator");
+  load = 2;
+  await ticks(t.checks, 3);
+  await new Promise((r) => setTimeout(r, 1500));
+  expect(t.state.messages).toEqual([]);
+  expect(stateOf(t.checks, WS_A)).not.toBe("failed");
+
+  // and a running one is stopped
+  t.checks.setRepo(main, { on: true, commands: [LONG] }, "operator");
+  t.lifecycle(WS_A, "running");
+  await t.checks.tick();
+  writeFileSync(join(main, "b.ts"), "2\n");
+  t.lifecycle(WS_A, "idle");
+  await t.checks.tick();
+  await vi.waitFor(() => expect(stateOf(t.checks, WS_A)).toBe("running"), { timeout: 5000 });
+  t.checks.setRepo(main, { on: false }, "operator");
+  await vi.waitFor(() => expect(stateOf(t.checks, WS_A)).toBe("stopped"), { timeout: 5000 });
+  expect(t.state.messages).toEqual([]);
+});
+
+it("an operator's run on a session already working is not stopped when the watcher first sees it", async () => {
+  const main = repo();
+  const t = setup([{ id: WS_A, name: "pricing", cwd: main }], [agent(WS_A, main, "running")]);
+  await turnOn(t.checks, main, [LONG], false);
+  expect(await t.checks.run(WS_A)).toBe("queued");
+  await vi.waitFor(() => expect(stateOf(t.checks, WS_A)).toBe("running"), { timeout: 5000 });
+  await t.checks.tick();
+  await new Promise((r) => setTimeout(r, 300));
+  expect(stateOf(t.checks, WS_A)).toBe("running");
+});
+
+it("reads the checkout's state without writing its index", async () => {
+  const main = repo();
+  const index = join(main, ".git", "index");
+  utimesSync(index, 1000, 1000);
+  const later = Date.now() / 1000 + 60;
+  utimesSync(join(main, "README.md"), later, later);
+  const t = setup([{ id: WS_A, name: "pricing", cwd: main }], [agent(WS_A, main)]);
+  await turnOn(t.checks, main, [SHORT]);
+  await t.checks.tick();
+  writeFileSync(join(main, "a.ts"), "1\n");
+  t.lifecycle(WS_A, "idle");
+  t.checks.start();
+  await vi.waitFor(() => expect(stateOf(t.checks, WS_A)).toBe("passed"), { timeout: 10_000 });
+  expect(statSync(index).mtimeMs).toBe(1_000_000);
 });

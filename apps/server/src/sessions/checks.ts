@@ -201,10 +201,15 @@ function statusPaths(status: string): string[] {
 /** A checkout's state: its HEAD, its status and each changed file's size and time. */
 async function fingerprintOf(top: string, main: string): Promise<Fingerprint> {
   const common = join(main, ".git");
-  const head = await crewGit(top, ["rev-parse", "--verify", "-q", "HEAD"], common).catch(() => "");
+  const head = await crewGit(
+    top,
+    ["--no-optional-locks", "rev-parse", "--verify", "-q", "HEAD"],
+    common,
+  ).catch(() => "");
   const status = await crewGit(
     top,
-    ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    // no index refresh: the session's own `git add` or `commit` must never meet our index.lock
+    ["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
     common,
   );
   const hash = createHash("sha256").update(head).update("\0").update(status).update("\0");
@@ -434,6 +439,11 @@ export function createSessionChecks(deps: SessionChecksDeps): SessionChecks {
     ending: { why: Ending | null },
     held: { child: ChildProcess | null },
   ) {
+    if (job.why === "idle" && !isOn(job.main)) {
+      log(`session checks: "${job.name}"'s repo was turned off; dropped`);
+      states.delete(job.ws);
+      return;
+    }
     const { commands } = await checksFor(job.main);
     if (commands.length === 0) {
       log(`session checks: "${job.name}" has no checks now; dropped`);
@@ -553,7 +563,9 @@ export function createSessionChecks(deps: SessionChecksDeps): SessionChecks {
       lifecycles.set(ws.id, life);
       const folder = agent?.cwd ?? ws.cwd;
       if (life === "running" && (first || prev !== "running")) {
-        stopOf(ws.id);
+        // first sight is not starting work: a check already running for it (an operator's run, or
+        // one queued before the watcher last saw this session) keeps going
+        if (!first) stopOf(ws.id);
         if (folder !== null && !crewName(ws.name)) {
           const co = await checkoutOf(folder);
           if (co !== null) await baseline(co.top, co.main);
@@ -631,6 +643,16 @@ export function createSessionChecks(deps: SessionChecksDeps): SessionChecks {
       };
       all[repo] = next;
       store.setSetting(SESSION_CHECKS_SETTING, JSON.stringify(all));
+      if (was.on && !next.on) {
+        // a repo turned off runs nothing by itself, waiting or started; the operator's own runs stay
+        for (let i = queue.length - 1; i >= 0; i--) {
+          const job = queue[i] as Job;
+          if (job.main !== repo || job.why !== "idle") continue;
+          queue.splice(i, 1);
+          states.delete(job.ws);
+        }
+        if (current?.job.main === repo && current.job.why === "idle") current.end("stopped");
+      }
       if (next.on !== was.on)
         store.addHubEvent(
           `Checks turned ${next.on ? "on" : "off"} for repo "${basename(repo)}" by ${by}`,
