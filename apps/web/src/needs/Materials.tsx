@@ -432,7 +432,7 @@ function Packet({
                       </button>
                     );
                   }
-                  return unattached(url, label);
+                  return unattached(url, label, image);
                 }}
               />
             </OpenLinks>

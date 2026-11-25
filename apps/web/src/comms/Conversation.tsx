@@ -721,8 +721,7 @@ function StoredContacts({
           key={contact.id}
           onClick={() => navigate(commsContactPath(agentId, contact.id))}
         >
-          {commsName(contact.id, seatName)} ·{" "}
-          {plural(contact.count, "message", undefined, locale)}
+          {commsName(contact.id, seatName)} · {plural(contact.count, "message", undefined, locale)}
           <small>
             {/* only what is addressed to the operator is "unread"; other counts are messages */}
             {contact.id === COMMS_CAPCOM && contact.unread > 0 ? `${contact.unread} unread · ` : ""}

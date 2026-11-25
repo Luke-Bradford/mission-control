@@ -4,10 +4,10 @@ import {
   contextShown,
   hourMarks,
   rosterGroups,
+  SEAT_STOPPED_WORK,
   seatClass,
   shortAge,
   stepRoster,
-  SEAT_STOPPED_WORK,
   workLine,
 } from "../src/agent/roster.ts";
 import { crewRow, HOUR, MIN, NOW, seatRow } from "./fixtures.ts";

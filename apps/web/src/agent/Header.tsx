@@ -352,11 +352,8 @@ function SwitchAccount({ row }: { row: CrewRow }) {
         setFocusKey((key) => key + 1);
       }
     } catch (e) {
-      const status = e instanceof ApiError ? e.status : undefined;
-      // A refused call sign is about the field; anything else is about the form.
-      if (refusesEntry(status)) setIssue(seatError(e));
-      else setError(seatError(e));
-      setUncertain(isUncertain(status));
+      setError(seatError(e));
+      setUncertain(isUncertain(e instanceof ApiError ? e.status : undefined));
       setFocusKey((key) => key + 1);
     } finally {
       hub.refetch(RESOURCES.accountStatus.path);

@@ -155,7 +155,7 @@ describe("FlightThread", () => {
       "/api/config": CONFIG,
     });
     render(<FlightThread />);
-    expect(await screen.findByText("FLIGHT is working… since 09:05")).toBeTruthy();
+    expect(await screen.findByText("FLIGHT's session is running · started 09:05")).toBeTruthy();
   });
 
   it("shows times in the operator's configured zone, not London's", async () => {
