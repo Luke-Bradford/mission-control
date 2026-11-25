@@ -249,9 +249,10 @@ interface CiHead {
 }
 
 /**
- * One outcome per PR head from its check runs: the latest attempt of each check, skipping checks
- * still running. Any failure fails the head; else any pass passes it; a head whose finished checks
- * were all cancelled is `cancelled` (left out of the rate); a head with nothing finished has none.
+ * One outcome per PR head from its check runs: the latest attempt of each check, leaving out
+ * skipped and neutral ones. A failure fails the head at once. Otherwise a head with a check still
+ * running, or none finished, has no outcome yet; any pass passes it; a head whose finished checks
+ * were all cancelled is `cancelled` (left out of the rate).
  * `at` is when the hub first read the head's checks, which a later poll does not move.
  */
 function ciHeads(rows: readonly CiRunView[], repos: ReadonlySet<string>): CiHead[] {

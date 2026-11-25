@@ -454,6 +454,17 @@ describe("durable QA report archive", () => {
     expect(qaReportMarkdown(report)).toContain("source reviewer-reported");
   });
 
+  it("takes a test duration with a decimal, as the review tool does", async () => {
+    const { report } = await service().importController(
+      input({
+        tests: [
+          { command: "pnpm test", origin: "reviewer-reported", outcome: "passed", duration: 12.4 },
+        ],
+      }),
+    );
+    expect(report.tests[0]?.duration).toBe(12.4);
+  });
+
   it.each(["head", "source", "native-proof", "secret", "scan"])(
     "fails closed for invalid provenance or sensitive data: %s",
     async (failure) => {

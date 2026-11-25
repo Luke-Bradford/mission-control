@@ -4638,6 +4638,7 @@ describe("hub retention", () => {
         INSERT INTO run_commits (run_id,repo_id,branch,sha,at) VALUES ('old-run','repo','b','sha',0);
         INSERT INTO run_pushes VALUES ('old-run','sha',0);
         INSERT INTO run_attempts (run_id,kind,at,data) VALUES ('old-run','ci',0,'{}');
+        INSERT INTO prompt_sections (run_id,wake,section,bytes,tokens,at) VALUES ('old-run',1,'tool_results',1,1,0);
         INSERT INTO pr_history VALUES ('repo',1,0,'{}');`);
       for (let i = 0; i < 20; i++) await store.pruneHistory(366 * 86_400_000);
       for (const table of [
@@ -4650,6 +4651,7 @@ describe("hub retention", () => {
         "run_commits",
         "run_pushes",
         "run_attempts",
+        "prompt_sections",
         "pr_history",
       ])
         expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
@@ -5417,4 +5419,19 @@ it("tolerates a legacy loop without a PR number when checking saved approval hol
   const r = run({ loop: { ...NEW_LOOP } });
   if (r.loop) delete (r.loop as Partial<typeof r.loop>).prNumber;
   expect(pendingRunApproval(store, r)).toBe(false);
+});
+
+it("counts a review pack's thrown-away and spec-failed reviews only inside its window", () => {
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  try {
+    db.exec(`INSERT INTO reviews (id,author_run_id,repo_id,seat_id,pr_number,sha,epoch,attempt,round,state,created_at,ended_at,verdict)
+      VALUES (1,'r','repo','seat',1,'a',1,1,1,'superseded',50,NULL,NULL),
+             (2,'r','repo','seat',1,'b',1,1,1,'superseded',500,NULL,NULL),
+             (3,'r','repo','seat',1,'c',1,1,1,'failed',500,NULL,NULL),
+             (4,'r','repo','seat',1,'d',1,1,1,'reported',500,510,'{"spec":"fail","quality":"pass"}');`);
+  } finally {
+    db.close();
+  }
+  const pack = store.reviewPackFor("repo", 0, 100);
+  expect([pack.superseded, pack.failed, pack.specFailed]).toEqual([1, 0, 0]);
 });

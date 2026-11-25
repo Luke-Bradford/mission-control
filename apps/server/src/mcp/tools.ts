@@ -2049,7 +2049,9 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     // the PR title carries the heading, and a body that opened with it would read as the hub's own
     const issue = issueOf(run);
     const own = (
-      issue === null ? parsed.data.body : parsed.data.body.replace(hubHeading(issue), "")
+      issue === null
+        ? parsed.data.body
+        : parsed.data.body.trimStart().replace(hubHeading(issue), "")
     ).trim();
     if (own === "") return { text: MC_PR_BODY_EMPTY, isError: true };
     // the engine's own section outlives the seat's rewrite

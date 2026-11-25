@@ -56,17 +56,27 @@ function inRepository(link: string, github: string | undefined): boolean {
 }
 
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*)$/;
+const FENCE = /^\s{0,3}(`{3,}|~{3,})/;
 const PROTOTYPE_HEADING = /\b(?:prototype|mockup)s?\b/i;
 
 /** The first inaccessible prototype link in a ticket body, or null when all are in the repo. */
 export function prototypeLinkProblem(body: string, github?: string): string | null {
   // Level of the open heading that names a prototype; links under it are prototype links.
   let prototypeHeading: number | null = null;
+  // The open fence's marker: a `#` line inside a code block is no heading.
+  let fence: string | null = null;
   for (const line of body.split("\n")) {
-    const heading = HEADING.exec(line);
+    const marker = FENCE.exec(line)?.[1];
+    if (marker !== undefined) {
+      if (fence === null) fence = marker;
+      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+    }
+    const heading = marker === undefined && fence === null ? HEADING.exec(line) : null;
     if (heading) {
       const level = heading[1]?.length ?? 1;
-      if (PROTOTYPE_HEADING.test(heading[2] ?? "")) prototypeHeading = level;
+      // a prototype subheading keeps its parent's level open
+      if (PROTOTYPE_HEADING.test(heading[2] ?? ""))
+        prototypeHeading = Math.min(prototypeHeading ?? level, level);
       else if (prototypeHeading !== null && level <= prototypeHeading) prototypeHeading = null;
     }
     const links = [...line.matchAll(MARKDOWN_LINK)].map((match) => ({

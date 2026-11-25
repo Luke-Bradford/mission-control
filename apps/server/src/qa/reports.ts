@@ -113,7 +113,7 @@ const receipt = z.strictObject({
   passed: z.int().nonnegative().max(10_000_000).optional(),
   failed: z.int().nonnegative().max(10_000_000).optional(),
   skipped: z.int().nonnegative().max(10_000_000).optional(),
-  duration: z.int().nonnegative().optional(),
+  duration: z.number().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   evidence: text(12000).optional(),
   file: text(400).optional(),
 });

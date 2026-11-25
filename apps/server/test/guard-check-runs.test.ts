@@ -523,6 +523,15 @@ describe("why the recorder dropped a check call", () => {
     ]);
   });
 
+  it("notes every check in a chained call that was not counted", async () => {
+    const r = recorder();
+    await r.begin(KEY, `${LINT} && ${TYPES} | tail`);
+    expect(reasons(r)).toEqual([
+      ["not-plain", LINT, HEAD],
+      ["not-plain", TYPES, HEAD],
+    ]);
+  });
+
   it("says nothing for a call that runs no configured check", async () => {
     const r = recorder();
     await r.begin(KEY, "ls | tail");
