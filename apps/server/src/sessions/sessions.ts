@@ -8,6 +8,7 @@ import { lstat, open, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import {
+  branchIssue,
   CMUX_WORKSPACE_ID,
   type CmuxSessionRow,
   type CmuxSessionState,
@@ -29,6 +30,7 @@ import {
   type CmuxWorkspace,
 } from "../runtime/cmux.ts";
 import type { Store } from "../store.ts";
+import { gitPlace } from "./branch.ts";
 
 /** cmux is not running; the hub never starts it for a read. */
 export const CMUX_NOT_RUNNING_TEXT = "cmux is not running.";
@@ -104,6 +106,7 @@ export interface SessionsDeps {
   viewDeadlineMs?: number;
   now?: () => number;
   log?: (m: string) => void;
+  repos?: () => { id: string; github: string }[];
 }
 
 /** Any HTTP answer is an answer; refused or timed out is not. Redirects are not followed. */
@@ -499,7 +502,37 @@ export function createSessions(deps: SessionsDeps): SessionsService {
       );
       for (const id of seen.keys()) if (!rows.some((r) => r.id === id)) seen.delete(id);
       if (deps.tellApps !== false) await tellAppsInTurn(rows, at);
-      return { ok: true, at, sessions: sortSessions(rows) };
+      const enriched = await Promise.all(
+        rows.map(async (row) => {
+          if (row.folder === null) return row;
+          const place = await gitPlace(row.folder);
+          const branch = place?.branch ?? null;
+          const repo = deps
+            .repos?.()
+            .find((candidate) => candidate.github.toLowerCase() === place?.github);
+          const stored =
+            branch === null || repo === undefined
+              ? null
+              : (store.openPullRequests(repo.id).find((pr) => pr.branch === branch) ?? null);
+          const issue = branch === null ? null : branchIssue(branch);
+          return {
+            ...row,
+            branch,
+            ticket: issue === null ? null : { number: issue, repoId: repo?.id ?? null },
+            pr:
+              stored === null
+                ? null
+                : {
+                    number: stored.number,
+                    url: stored.url,
+                    isDraft: stored.isDraft,
+                    ci: stored.ci,
+                    review: stored.review,
+                  },
+          };
+        }),
+      );
+      return { ok: true, at, sessions: sortSessions(enriched) };
     } catch (e) {
       return { ok: false, at, error: e instanceof Error ? e.message : String(e) };
     } finally {

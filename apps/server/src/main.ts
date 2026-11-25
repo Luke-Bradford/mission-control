@@ -1035,6 +1035,7 @@ export async function main(): Promise<void> {
     cmux,
     store,
     seatIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
+    repos: () => config.repos.map((repo) => ({ id: repo.id, github: repo.github })),
     tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
     log: (m) => log(m),
   });
