@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CMUX_REFUSED_TEXT } from "../src/runtime/cmux.ts";
 import {
   CMUX_NOT_RUNNING_TEXT,
+  CMUX_SLOW_TEXT,
   createSessions,
   lastAssistantText,
   lastScreenLine,
@@ -131,6 +132,29 @@ describe("sessions view", () => {
     expect(by["dev server"]).toMatchObject({ state: "no-agent", lastLine: null, status: null });
     expect(by["GUIDO-1 · PR 12"]).toMatchObject({ lastLine: "Allow this edit?" });
   });
+
+  for (const key of ["ping", "workspaces", "agents", "inbox"] as const)
+    it(`a stalled ${key} call still settles the view by its deadline`, async () => {
+      const fake = fakeCmux(dir, threeSessions());
+      const stalled = new Proxy(fake.cmux, {
+        get(target, k, receiver) {
+          if (k === key) return () => new Promise(() => {});
+          return Reflect.get(target, k, receiver);
+        },
+      });
+      const { sessions } = setup(threeSessions(), {
+        cmux: stalled,
+        fieldDeadlineMs: 200,
+        viewDeadlineMs: 400,
+      });
+      const t0 = Date.now();
+      const view = await sessions.view();
+      expect(Date.now() - t0).toBeLessThan(2000);
+      if (key === "inbox") {
+        // the inbox is a field like any other: the list still comes back
+        expect(view.ok).toBe(true);
+      } else expect(view).toMatchObject({ ok: false, error: CMUX_SLOW_TEXT });
+    });
 
   it("an operator's workspace is listed as theirs and never closed", async () => {
     const { fake, sessions } = setup(threeSessions());

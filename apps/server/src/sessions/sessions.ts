@@ -41,6 +41,9 @@ const PROBE_CACHE_MS = 5000;
 const PROBE_TIMEOUT_MS = 2000;
 /** A workspace's status or screen read still out this long after a view starts is dropped, so one stalled cmux call never holds the list past the 5 s first view. */
 const FIELD_DEADLINE_MS = 3000;
+/** The whole view settles within this, so the first view holds the ticket's 5 s even when cmux stalls. */
+const VIEW_DEADLINE_MS = 4500;
+export const CMUX_SLOW_TEXT = "cmux did not answer in time. Mission Control tries again shortly.";
 /** The tail of a transcript searched for the agent's last words. */
 const TRANSCRIPT_TAIL_BYTES = 64 * 1024;
 /** The screen lines a shell's last line is looked for in. */
@@ -91,6 +94,8 @@ export interface SessionsDeps {
   tellApps?: boolean;
   /** How long a view waits for each workspace's status and screen reads; default 3 s. */
   fieldDeadlineMs?: number;
+  /** How long a whole view waits, cmux's ping and lists included; default 4.5 s. */
+  viewDeadlineMs?: number;
   now?: () => number;
   log?: (m: string) => void;
 }
@@ -390,20 +395,41 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     for (const id of apps.keys()) if (!rows.some((r) => r.id === id)) apps.delete(id);
   }
 
+  /** The view, or a cmux-is-slow error once the view deadline passes; a late answer is dropped. */
   async function read(): Promise<CmuxSessionsView> {
     const at = now();
-    const up = await cmux.ping();
-    if (up === "denied") return { ok: false, at, error: CMUX_REFUSED_TEXT };
-    if (up === "down") return { ok: false, at, error: CMUX_NOT_RUNNING_TEXT };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const slow = new Promise<CmuxSessionsView>((done) => {
+      timer = setTimeout(
+        () => done({ ok: false, at, error: CMUX_SLOW_TEXT }),
+        deps.viewDeadlineMs ?? VIEW_DEADLINE_MS,
+      );
+    });
+    const view = readAll(at);
+    view.catch(() => {});
+    try {
+      return await Promise.race([view, slow]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function readAll(at: number): Promise<CmuxSessionsView> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<void>((done) => {
       timer = setTimeout(done, deps.fieldDeadlineMs ?? FIELD_DEADLINE_MS);
     });
     try {
+      const up = await cmux.ping();
+      if (up === "denied") return { ok: false, at, error: CMUX_REFUSED_TEXT };
+      if (up === "down") return { ok: false, at, error: CMUX_NOT_RUNNING_TEXT };
       const [workspaces, agents, inbox] = await Promise.all([
         cmux.workspaces(),
         cmux.agents(),
-        cmux.inbox().catch(() => [] as CmuxInboxMessage[]),
+        Promise.race([
+          cmux.inbox().catch(() => [] as CmuxInboxMessage[]),
+          late.then(() => [] as CmuxInboxMessage[]),
+        ]),
       ]);
       const seats = deps.seatIds();
       const rows = await inTurns(workspaces, READS_AT_ONCE, (ws) =>
