@@ -282,7 +282,7 @@ export function Telemetry() {
             <Seg label="View" options={VIEWS} value={view} onChange={setView} />
           )}
         </div>
-        <HealthBand t={bandRes.data} onNeedsRoute={setRuns} />
+        <HealthBand t={bandRes.data} range={range} onNeedsRoute={setRuns} />
         <div className="tabsrow">
           <TabBar value={tab} onChange={setTab} />
           {chip && (

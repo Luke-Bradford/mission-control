@@ -16,8 +16,10 @@ import "../src/pages/QaReadiness.tsx";
 import "../src/pages/Setup.tsx";
 import "../src/pages/Telemetry.tsx";
 import { navigate, PAGE_PATHS } from "../src/router.ts";
+import { WEEK_READ_DELAY_MS } from "../src/telemetry/HealthBand.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, REPOS } from "./fixtures.ts";
+import { costTelemetry } from "./telemetryCostFixture.ts";
 
 /** The hub's stream, driven by the test: `emit` sends a `changed` event for a topic. */
 class Stream {
@@ -136,6 +138,25 @@ describe("load-time fetches", () => {
       expect(repeated(counts)).toEqual([]);
     },
   );
+
+  it("Telemetry asks for /api/telemetry once as it opens; the band's week follows later", async () => {
+    const t0 = Date.now();
+    const page = open(PAGE_PATHS.telemetry, {
+      [RESOURCES.telemetry("24h").path]: costTelemetry(),
+      [RESOURCES.telemetry("7d").path]: costTelemetry(),
+    });
+    await busyStream(OPENING_MS);
+    const telemetry = (since: number, until: number) =>
+      [...gets(page.fetch, page.at, since, until).keys()].filter((url) =>
+        url.startsWith("/api/telemetry?"),
+      );
+    const opening = telemetry(t0, t0 + OPENING_MS);
+    await tick(WEEK_READ_DELAY_MS);
+    const later = telemetry(t0 + OPENING_MS, Date.now() + 1);
+    page.close();
+    expect(opening).toEqual([RESOURCES.telemetry("24h").path]);
+    expect(later).toContain(RESOURCES.telemetry("7d").path);
+  });
 
   it("Telemetry asks for the 7-day range only once the range on screen has answered", async () => {
     const shown = RESOURCES.telemetry("24h").path;
