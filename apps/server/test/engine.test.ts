@@ -108,7 +108,6 @@ import {
   UAT_PARK,
   uatParkText,
   uatSendBackText,
-  type WasteCheck,
   wakeFailedText,
   wakeStuckKey,
   wakeStuckText,
@@ -915,8 +914,6 @@ afterEach(() => {
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
-
-const _REVIEW_ROUNDS: WasteCheck = "review-rounds";
 
 describe("controller PR scratch reviews", () => {
   it("starts a review without an author run and supersedes it when the head changes", async () => {
@@ -7047,7 +7044,7 @@ describe("the engine runs reviews", () => {
         expect(loopOf().hold?.kind).toBeTruthy();
       });
 
-      it("refuses off the floor paths, and when the review is not blocking", async () => {
+      it("refuses off the floor paths", async () => {
         addSecondReviewer();
         await parkOnBlocking();
         h.touches = ["apps/web/x.ts"];
@@ -7057,6 +7054,28 @@ describe("the engine runs reviews", () => {
           note: "x",
         });
         expect(off).toEqual({ lifted: false, reason: "wrong-action" });
+      });
+
+      it("refuses on the floor paths when the review is not blocking", async () => {
+        addSecondReviewer();
+        need(config.repos[0]).flightPowers = "superuser";
+        h.touches = [FLOOR];
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Minor")]);
+        await h.engine.reconcileRun(RUN);
+        setLoop({
+          phase: "parked",
+          hold: { kind: "review", reason: "Blocked", ended: false, worktree: null, wake: false },
+        });
+        const before = reviewRows().length;
+        const r = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "second_review",
+          note: "x",
+        });
+        expect(r).toEqual({ lifted: false, reason: "wrong-action" });
+        expect(reviewRows()).toHaveLength(before);
       });
     });
 

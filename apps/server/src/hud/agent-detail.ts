@@ -14,6 +14,8 @@ import {
 import { cleanText } from "../repo/clean.ts";
 import type { Store } from "../store.ts";
 
+/** The label for an agent held for the operator. */
+const WAITING_ON_YOU = "Waiting on you";
 const safe = (text: string | null | undefined) => (text ? cleanText(text).trim() || null : null);
 /** Presentation only. A saved report is not a test verdict, and no control or hold is changed here. */
 export function agentDetail({
@@ -111,7 +113,7 @@ export function agentDetail({
     // free with no open run, otherwise waiting.
     const open = run !== null && run.endedAt === null;
     if (row.kind !== "crew") {
-      label = "Waiting on you";
+      label = WAITING_ON_YOU;
       reason = safe(row.note);
     } else {
       label = open ? "Waiting" : "Free";
@@ -136,7 +138,7 @@ export function agentDetail({
       ci: "Waiting on CI",
       retro: "Waiting on RETRO",
       main: "Waiting for main",
-      operator: "Waiting on you",
+      operator: WAITING_ON_YOU,
       lock: "Waiting for the test lock",
       seat: "Waiting for a seat",
     };

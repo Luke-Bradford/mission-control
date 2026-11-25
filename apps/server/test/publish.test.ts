@@ -1490,6 +1490,22 @@ describe("ciExcerpt", () => {
       expect(out).toContain("FAIL  a.test.ts > t");
     });
 
+    it("keeps a source line up to 60 lines under its FAIL line, and not past that", () => {
+      const body = (gap: number) =>
+        ciLogBody(
+          [
+            L(" FAIL  a.test.ts > t"),
+            ...Array.from({ length: gap }, (_, i) => L(`- diff line ${i}`)),
+            L("❯ test/a.test.ts:12:5"),
+            // more than the job's last lines, so a line left out of the failure is not shown
+            ...Array.from({ length: 20 }, (_, i) => L(`after ${i}`)),
+          ].join("\n"),
+          CI_EXCERPT_MAX,
+        );
+      expect(body(59)).toContain("❯ test/a.test.ts:12:5");
+      expect(body(61)).not.toContain("❯ test/a.test.ts:12:5");
+    });
+
     it("prints a FAIL name once and does not attach a later error to it", async () => {
       const out = await excerpt([
         L(" FAIL  a.test.ts > t"),
@@ -3652,6 +3668,23 @@ describe("pushesFrom", () => {
     expect(await from(gh)).toBe(true);
     expect(seen[0]).toContain("activity_type=push");
     expect(seen[0]).toContain(encodeURIComponent(`refs/heads/${BRANCH}`));
+  });
+
+  it("asks for plain pushes only, one page of 100, so a chain past that page is not proven", async () => {
+    const seen: string[] = [];
+    // a force push or a branch creation is never asked for: only activity_type=push
+    expect(await from(answering([push(A, B, "op")], seen))).toBe(true);
+    const query = seen.find((a) => a.includes("activity")) ?? "";
+    expect(query).toContain("activity_type=push&per_page=100");
+    expect(query).not.toMatch(/force_push|branch_creation|page=2/);
+    // 101 pushes from the run's own to the head: the page holds the latest 100, which stop short
+    const shas = Array.from({ length: 102 }, (_, i) =>
+      i === 0 ? A : i === 101 ? B : i.toString(16).padStart(40, "0"),
+    );
+    const chain = shas.slice(1).map((after, i) => push(shas[i] as string, after, "op"));
+    expect(await from(answering([...chain].reverse().slice(0, 100)))).toBe(false);
+    // the same chain all on the page is proven: only the page limit stopped it
+    expect(await from(answering(chain))).toBe(true);
   });
 
   it("is false when the committer login is the right one but the pusher is a foreign account", async () => {

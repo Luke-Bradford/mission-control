@@ -22,7 +22,7 @@ import {
   wakeLine,
 } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { deliveredFacts, flightWake, nextWakeAt, wakeFacts } from "../src/flight/state.ts";
+import { deliveredFacts, flightWake, nextWakeAt, pending, wakeFacts } from "../src/flight/state.ts";
 import { changedWakeFacts } from "../src/flight/watch.ts";
 import { Store } from "../src/store.ts";
 
@@ -849,5 +849,9 @@ describe("operator messages FLIGHT owes an answer", () => {
     const s = { ...busyBoard(), wake: { fit: {}, fresh: [], owed: ["7"] } };
     expect((JSON.parse(wakeFacts(s)) as Record<string, unknown[]>).owed).toEqual(["7"]);
     expect(wakeFacts({ ...busyBoard(), wake: { fit: {}, fresh: [] } })).not.toBe(wakeFacts(s));
+    // an idle board: nothing waits on FLIGHT but the owed message
+    const idle = { ...busyBoard(), questions: [], prs: [] };
+    expect(pending({ ...idle, wake: { fit: {}, fresh: [] } })).toBe(false);
+    expect(pending({ ...idle, wake: { fit: {}, fresh: [], owed: ["7"] } })).toBe(true);
   });
 });

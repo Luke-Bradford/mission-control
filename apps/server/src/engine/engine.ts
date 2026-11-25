@@ -202,6 +202,11 @@ import {
 import { hardRulesBy, type RepoRulesError } from "./rules.ts";
 import { overrunText, tickLogOf } from "./ticks.ts";
 
+/** The suffix of a run's note that its minor findings could not be filed. */
+export const FILE_MINOR_SUFFIX = ":file-minor";
+/** The note a run raises when its minor findings could not be filed. */
+export const fileMinorKey = (runId: string): string => `${runId}${FILE_MINOR_SUFFIX}`;
+
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
 export const TIP_MOVED = "the branch's tip is not the pushed commit, or could not be read";
 
@@ -1737,7 +1742,7 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       case "clear-note":
         // Collection failures wait for explicit resolution, including after loop reconciliation.
-        if (a.key === `${run.id}:file-minor`) return;
+        if (a.key === fileMinorKey(run.id)) return;
         store.clearNote(a.key, at);
         bus.emit("attention");
         return;
@@ -2079,7 +2084,7 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         if (failure !== null) {
           store.raiseNote({
-            key: `${run.id}:file-minor`,
+            key: fileMinorKey(run.id),
             kind: "flag",
             runId: run.id,
             seatId: run.agentId,
@@ -2617,7 +2622,7 @@ export function createEngine(deps: EngineDeps): Engine {
       for (const n of notes) {
         const run = n.runId === null ? null : store.run(n.runId);
         if (run === null || run.endedAt === null) continue;
-        if (n.key === `${run.id}:file-minor`) continue;
+        if (n.key === fileMinorKey(run.id)) continue;
         // a merged run's leftover branch waits (its PR is done by design) until the branch is gone
         if (n.runId !== null && n.key === cleanupBranchNoteKey(n.runId)) {
           if (await publisher.localBranchGone(run)) {

@@ -5,12 +5,18 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DIAGNOSTICS_KEPT,
   failureReason,
+  hubFileServiceRestart,
   restartFileService,
 } from "../src/telemetry/file-service-restart.ts";
 
 /** An error shaped as `execFile` rejects: the command line in the message, the reason on stderr. */
 const execError = (file: string, stderr: string) =>
   Object.assign(new Error(`Command failed: ${file} -x\n${stderr}`), { stderr, killed: false });
+
+it("a preview has no file-service restart; the live hub has one", () => {
+  expect(hubFileServiceRestart(true, "/data/diagnostics")).toBeUndefined();
+  expect(hubFileServiceRestart(false, "/data/diagnostics")).toBeTypeOf("function");
+});
 
 describe("restartFileService", () => {
   let dir: string;

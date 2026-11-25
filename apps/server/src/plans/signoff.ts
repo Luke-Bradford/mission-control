@@ -28,9 +28,9 @@ export interface SignoffDeps {
   rules: (repoId: string) => Promise<RepoRules | Error>;
   /** Moves a card on the board; absent: approval signs off and leaves the card. */
   move?: (m: Move) => Promise<MoveResult>;
-  /** Reads the ticket's body, for the checks a card passes before Ready. */
   /** One card read fresh from the board: approval moves a card only on its live state. */
   readCard?: (repoId: string, issue: number) => Promise<BoardItem | null>;
+  /** Reads the ticket's body, for the checks a card passes before Ready. */
   fetchTicket?: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
 }
 

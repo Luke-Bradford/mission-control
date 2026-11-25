@@ -4294,7 +4294,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return { text: `Settled ${a.key}.` };
         }
         if (!a.key.startsWith(NOTE_KEY)) {
-          // any other open item (a PR, a tag, a crew error): FLIGHT acks it unless it is the
+          // any other open item (a PR, a tag): FLIGHT acks it unless it is the
           // operator's approval, a budget or guard hold, or an Update hold
           const rows = crew(config, store, now(), NO_LOCK, NO_CLI_VERSION).rows;
           const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
