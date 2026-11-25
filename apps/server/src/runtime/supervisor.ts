@@ -5102,7 +5102,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       log(`${seatId}: could not remove ${worktree}: ${errText(e)}`);
       try {
         store.raiseNote({
-          key: `worktree-cleanup:${runId}`,
+          key: `cleanup:${runId}`,
           kind: "blocked",
           runId,
           seatId,
