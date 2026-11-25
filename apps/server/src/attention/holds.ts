@@ -238,8 +238,7 @@ export function protectedDecisionItem(
   )
     return true;
   if (item.kind !== "blocked" || commsOpen) return false;
-  // A round note has no run and holds nothing: it is FLIGHT's to dismiss (`flightToolFor` names
-  // dismiss_item for it), so it must not fall into "no run, therefore the operator's hold" below.
+  // a chatter note says two seats talked past their rounds: it holds nobody's work
   if (note !== undefined && isChatterNoteKey(note.key)) return false;
   const parked = run?.loop?.hold?.kind;
   // A blocked row is an operator hold unless it can be proved to be an ordinary, non-parked

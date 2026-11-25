@@ -33,7 +33,7 @@ export const SCREEN_ROUTE_START = /^\s*api\.(?:get|post|put|patch|delete)\b/;
 export const SCREEN_ROUTE_DECLARATION =
   /^(\s*)api\.(?:get|post|put|patch|delete)\b[^"']*["'](\/[^"']*)["']/;
 const PRODUCT_PASS_INSTRUCTION =
-  "Render each page at 1600×1000; compare it with the HUD mockup, direction and repo memory; file or fold gaps, then log pages checked and tickets filed or folded.";
+  "Render each page at 1600×1000; compare it with the HUD mockup, the design system (docs/design/system.md), direction and repo memory; file or fold gaps, then log pages checked and tickets filed or folded.";
 
 /** Every catalogue page, with the generic Agent route expanded to the configured seats. */
 export function hudProductPages(config: CcConfig): string[] {
