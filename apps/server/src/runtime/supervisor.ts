@@ -1088,6 +1088,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const profilePolicyKey = (runId: string) => `account-profile-denies:${runId}`;
   const credentialPolicyKey = (runId: string) => `flight-credential-revision:${runId}`;
   const runtimeProfileKey = (runId: string) => `runtime-profile:${runId}`;
+  const flightProfileKey = (runId: string) => `flight-runtime-profile:${runId}`;
   // Change it when FLIGHT's launch arguments change: a surviving keeper keeps the ones it started with.
   const FLIGHT_RUNTIME_PROFILE = "controller-v3";
   const credentialRevision = (env: Record<string, string> | undefined): string =>
@@ -2073,7 +2074,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       run.reviewId != null && store.review(run.reviewId)?.installNote !== undefined;
     const fullAccess = crewProfileOf(info.seat.role, def.loop) === "flight-full";
     const upgradeFlight =
-      fullAccess && store.getSetting(runtimeProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE;
+      fullAccess && store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE;
     const model =
       resume || keepPrompt
         ? resumeModel(info, run)
@@ -2473,6 +2474,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (privateEnv !== undefined)
       store.setSetting(credentialPolicyKey(run.id), credentialRevision(privateEnv));
     store.setSetting(runtimeProfileKey(run.id), fullAccess ? FLIGHT_RUNTIME_PROFILE : "seat-v1");
+    if (fullAccess) store.setSetting(flightProfileKey(run.id), FLIGHT_RUNTIME_PROFILE);
     const l = track(info, run, session, release, {
       spawn: keeperSpawn,
       resumedAt: resume && !transferState(run.id)?.pending ? Date.now() : null,
@@ -3038,8 +3040,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             credentialRevision(await deps.flightEnvironment());
         if (
           credentialsChanged ||
-          store.getSetting(runtimeProfileKey(run.id)) !==
-            (flight ? FLIGHT_RUNTIME_PROFILE : "seat-v1") ||
+          (flight
+            ? store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE
+            : store.getSetting(runtimeProfileKey(run.id)) !== "seat-v1") ||
           profileDenies().some((profile) => !denied.includes(profile))
         ) {
           if (!(await endProcess(dir, run.id, keeperEndWait()))) return;
