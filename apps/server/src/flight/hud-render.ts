@@ -526,7 +526,11 @@ export function renderHudInHelper(
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
       void stopHelper(child, closeMs).then(() => {
-        rmSync(scratch, { recursive: true, force: true });
+        try {
+          rmSync(scratch, { recursive: true, force: true });
+        } catch {
+          // a scratch folder left behind costs disk, not the answer
+        }
         settle();
       });
     };

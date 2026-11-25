@@ -19,6 +19,7 @@ import {
   FLIGHT_GHOST_MS,
   FLIGHT_GUARD_AGAIN_COOLDOWN_MS,
   FLIGHT_GUARD_COOLDOWN_MS,
+  FLIGHT_GUARD_SETTING,
   FLIGHT_HANDOVER_ASK,
   FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HEADLINE,
@@ -1743,6 +1744,10 @@ describe("the FLIGHT watcher", () => {
     facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
     await watch.check();
     expect(notesOpen()).toEqual([]);
+    // the cleared note takes its retry with it
+    expect(JSON.parse(store.getSetting(FLIGHT_GUARD_SETTING) ?? "{}")).toMatchObject({
+      retryAt: null,
+    });
   });
 
   it("the operator's Stop holds against the retry", async () => {
@@ -2825,6 +2830,16 @@ describe("the FLIGHT watcher", () => {
         expect(notesOpen()).toHaveLength(1);
         nowMs += 3 * MIN;
         await watch.check();
+        expect(startCalls).toHaveLength(started + 1);
+        expect(notesOpen()).toEqual([]);
+      });
+
+      it("restarts FLIGHT when the cooldown ends, not at the next tick", async () => {
+        liveCrew();
+        await tripGuard();
+        const started = startCalls.length;
+        nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+        await vi.advanceTimersByTimeAsync(FLIGHT_GUARD_COOLDOWN_MS);
         expect(startCalls).toHaveLength(started + 1);
         expect(notesOpen()).toEqual([]);
       });
@@ -4150,6 +4165,35 @@ describe("ops review regressions", () => {
       observeCheck(sha, "passing", 2);
     }
     expect(signalState().signals).toEqual([]);
+  });
+
+  it("does not read a cancelled attempt as failed then passed", () => {
+    for (const sha of ["a", "b"]) {
+      observeFlightChecks(
+        store,
+        "mc",
+        [
+          stored(7, {
+            headSha: sha,
+            checks: [
+              {
+                name: "unit (linux)",
+                workflow: "keeper",
+                kind: "check",
+                state: "failing",
+                conclusion: "CANCELLED",
+                attempt: 1,
+                url: "https://github.com/o/mc/actions/runs/1/job/7",
+              },
+            ],
+          }),
+        ],
+        nowMs,
+      );
+      observeCheck(sha, "passing", 2);
+    }
+    expect(signalState().signals).toEqual([]);
+    expect(JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").flakes).toEqual({});
   });
 
   it("ignores statuses, same-attempt passes and closed PR checks", () => {

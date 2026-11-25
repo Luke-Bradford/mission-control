@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { clockHm, NEW_LOOP, type Run, type RunLoop } from "@mc/core";
+import { clockHm, handoverKey, NEW_LOOP, type Run, type RunLoop } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { commsInboxContext } from "../src/comms/index.ts";
@@ -1548,6 +1548,23 @@ describe("supervisor events (Plan 7a)", () => {
       expect(await sup.send(runId, "k", "again")).toBe("sent");
       expect(Object.keys(store.claimedKeys(runId))).toEqual(["k"]);
       expect(store.commsInboxRead("guido-1", waiting.id)).toBe(true);
+    });
+
+    it("leaves the inbox unread under a handover line, for the fresh session", async () => {
+      const { sup, runId } = await idleRun({
+        inbox: (seatId, id) => commsInboxContext(store, seatId, id),
+      });
+      const waiting = store.addComms({
+        at: Date.now(),
+        from: "CAPCOM",
+        to: "guido-1",
+        ticket: null,
+        text: "for whoever reads next",
+        targetRunId: runId,
+      });
+      if (waiting === null) throw new Error("expected stored Comms row");
+      expect(await sup.send(runId, handoverKey(runId), "hand over")).toBe("sent");
+      expect(store.commsInboxRead("guido-1", waiting.id)).toBe(false);
     });
 
     it("Stop then the engine's end: operator stands, the seat ends stopped", async () => {

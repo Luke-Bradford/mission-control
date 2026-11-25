@@ -219,7 +219,22 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       return { retryAt: null, restartedAt: null };
     }
   };
-  const writeGuard = (g: Guard): void => store.setSetting(FLIGHT_GUARD_SETTING, JSON.stringify(g));
+  /** Checks again when the guard's cooldown ends, so the restart does not wait for the next tick. */
+  let guardTimer: NodeJS.Timeout | null = null;
+  const writeGuard = (g: Guard): void => {
+    store.setSetting(FLIGHT_GUARD_SETTING, JSON.stringify(g));
+    if (guardTimer !== null) clearTimeout(guardTimer);
+    guardTimer = null;
+    if (g.retryAt === null || stopped) return;
+    guardTimer = setTimeout(
+      () => {
+        guardTimer = null;
+        if (!stopped) void check();
+      },
+      Math.max(0, g.retryAt - now()),
+    );
+    guardTimer.unref();
+  };
   /** The last start threw and made no session: it is retried sooner than a run that died. */
   let lastStartThrew = false;
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
@@ -598,6 +613,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
     if (noteOpen()) {
       store.clearNote(FLIGHT_NOTE_KEY, t);
+      // the retry went with the note; when the cooldown restart was is kept for "twice in a row"
+      writeGuard({ retryAt: null, restartedAt: readGuard().restartedAt });
       starts = [];
       bus.emit("attention");
     }
@@ -886,6 +903,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       timer = null;
       if (gapTimer !== null) clearTimeout(gapTimer);
       gapTimer = null;
+      if (guardTimer !== null) clearTimeout(guardTimer);
+      guardTimer = null;
     },
   };
 }

@@ -43,6 +43,9 @@ describe("the not-triaging alert", () => {
         flightStartFailedText("it would not start; the server log has the error"),
       ),
     );
+    // the alert is short: 20 words or fewer besides the reason it carries
+    for (const wait of [30 * 60_000, 2 * 60 * 60_000])
+      expect(flightStartFailedText("REASON", wait).split(/\s+/).length - 1).toBeLessThanOrEqual(20);
     expectPlain(
       flightNotTriagingText(
         "down",
