@@ -1213,8 +1213,9 @@ export function flightState(i: {
       .filter((fact) => fact[1] === "unowned")
       .map((fact) => Number(fact[0])),
   );
-  // Crew runs of this session still listed: live, or ended in the last day short of a merge.
-  // A PR none of them carried was opened outside the crew and is never FLIGHT's to place.
+  // Crew runs of this session that are live or ended in the last day (a merged run only while
+  // its merge steps are kept). A PR none of them carried was opened outside the crew, or left
+  // alone for a day, and is not placed by this wake.
   const crewRuns = store
     .loopRuns(now - FLIGHT_METRICS_DAY_MS)
     .filter((r) => r.repoId === session.repoId && mine.some((s) => s.id === r.agentId));
@@ -1247,13 +1248,13 @@ export function flightState(i: {
           ? null
           : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha };
       // Nobody owns it and its CI has settled (`ci` leaves out the hub's own review status): the
-      // result reaches no seat by itself. Not a ready PR that passed and has no review yet: the hub
-      // queues that review itself.
+      // result reaches no seat by itself. A read that failed says nothing new, so a stale row is
+      // left out (a PR merged since its last good read would otherwise be told as green).
       const unheld =
         p.state === "open" &&
+        !stale.has(p.number) &&
         unowned.has(p.number) &&
         (p.ci === "passing" || p.ci === "failing") &&
-        !(p.ci === "passing" && review === null && !p.isDraft) &&
         crewRuns.some((r) => r.loop?.prNumber === p.number || r.branch === p.branch)
           ? p.ci
           : undefined;

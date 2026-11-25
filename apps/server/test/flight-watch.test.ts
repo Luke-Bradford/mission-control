@@ -698,7 +698,7 @@ describe("FLIGHT's evidence", () => {
       expect(fact()).toEqual(["7:sha7:passing:3"]);
     });
 
-    it("is not marked in the five minutes after its run ended: a hand-over, or a merge not yet read", () => {
+    it("is not marked in the five minutes after its run ended, which covers a hand-over", () => {
       endedHolder();
       nowMs = T0 + 4 * MIN;
       pr({ ci: "passing" });
@@ -723,20 +723,19 @@ describe("FLIGHT's evidence", () => {
       expect(unheld()).toBeUndefined();
     });
 
-    it("is not marked when no crew run carried it, or when the hub will review it next itself", () => {
+    it("is not marked when no crew run carried it in the last day, or when its last read failed", () => {
       nowMs = T0 + 10 * MIN;
       pr({ ci: "passing" });
       expect(unheld()).toBeUndefined(); // opened outside the crew
+      endedHolder({ endedAt: T0 - 25 * HOUR });
+      expect(unheld()).toBeUndefined(); // left alone for over a day
       endedHolder();
       expect(unheld()).toBe("passing");
-      // out of draft, green and unreviewed: the hub queues its own review
+      // draft or ready makes no difference: a ready PR the hub will not review must not hide
       pr({ ci: "passing", isDraft: false });
-      expect(unheld()).toBeUndefined();
-      pr({ ci: "failing", isDraft: false });
-      expect(unheld()).toBe("failing");
-      pr({ ci: "passing", isDraft: false });
-      review("sha7", "fail", 2);
       expect(unheld()).toBe("passing");
+      store.markPullRequestsStale("mc");
+      expect(unheld()).toBeUndefined();
     });
 
     it("is urgent on each new result and settles when a seat takes the PR", () => {
@@ -2691,6 +2690,7 @@ describe("the FLIGHT watcher", () => {
     store.upsertPullRequests("mc", [stored(7, { ci: "passing" })], nowMs);
     await watch.check();
     expect(sendCalls).toHaveLength(2);
+    expect(flightView(config, store, nowMs, () => true).wake?.wokeOn).toContain("unheld (1)");
     // the same result is not told again
     nowMs = T0 + 15 * MIN;
     await watch.check();

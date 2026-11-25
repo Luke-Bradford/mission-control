@@ -1347,10 +1347,11 @@ security exceptions go to the operator, parked with a brief.
 holds it. When that run has ended (FLIGHT passed the PR on or pushed a fix itself, an engine park
 ended the run, a crash, a Stop) the results reach no seat. A PR counts when `prFlow` has shown
 "nobody" as its owner for five minutes (no live run on the PR or its branch, no review under way),
-a crew run of this session carried it in the last day, and its CI verdict is passing or failing.
-A PR out of draft that passed and has no review yet does not count: the hub queues that review
-itself. The fact is the PR, its head, the CI verdict and the review's blocking count, and it wakes
-FLIGHT within the 2-minute debounce. It is told once while it stands; a new head, verdict or review
+a crew run of this session carried it in the last day, its CI verdict is passing or failing, and its
+last read did not fail. The fact is the PR, its head, the CI verdict and the review's blocking count.
+The watch sees it at its next pass (within 5 minutes, or 20 seconds after a change) and then wakes
+FLIGHT within the 2-minute debounce. A ready PR the hub goes on to review itself can cost one wake
+before that review starts; a review under way is an owner, so the fact then waits for its result. It is told once while it stands; a new head, verdict or review
 is a new fact, and so is the same result coming back after a seat held the PR in between. A hub
 restart tells a standing one again. The hub learns the CI verdict of such a PR at its next board
 read (every `poll.board_minutes`), and a review result within seconds. A PR opened outside the crew
