@@ -24,6 +24,10 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
+async function openTab(name: string) {
+  fireEvent.click(await screen.findByRole("tab", { name: new RegExp(name) }));
+}
+
 function show(state: PageState, over: Record<string, unknown> = {}) {
   stubFetch(flightPageApi(state, over));
   return render(<Flight />);
@@ -179,6 +183,7 @@ describe("the FLIGHT page", () => {
       }),
     );
     render(<Flight />);
+    await openTab("Watching");
     const panel = await waitFor(() => {
       const found = document.getElementById("heldWatchP");
       expect(found).not.toBeNull();
@@ -196,12 +201,14 @@ describe("the FLIGHT page", () => {
 
   it("names an empty and failed Watch list", async () => {
     show("running");
+    await openTab("Watching");
     expect(await screen.findByText("Nothing is held.")).toBeTruthy();
     cleanup();
     hub.clear();
     show("running", {
       "/api/attention/held": () => ({ status: 500, body: { error: "held down" } }),
     });
+    await openTab("Watching");
     expect(await screen.findByText("Could not load Watch list: held down")).toBeTruthy();
   });
 
@@ -310,6 +317,7 @@ describe("the FLIGHT page", () => {
 
   it("lists decisions newest first with an anchor per row", async () => {
     show("running");
+    await openTab("Plan");
     await waitFor(() => expect(document.getElementById("decision-1")).not.toBeNull());
     const ids = [...document.querySelectorAll("#decisions li")].map((li) => li.id);
     expect(ids[0]).toBe("decision-1");
@@ -349,6 +357,7 @@ describe("the FLIGHT page", () => {
 
   it("opens a decision row to its basis, one at a time", async () => {
     show("running");
+    await openTab("Plan");
     const rows = await waitFor(() => {
       const r = document.querySelectorAll<HTMLButtonElement>("#decisions .fp-drow");
       expect(r.length).toBeGreaterThan(1);
@@ -414,6 +423,7 @@ describe("the FLIGHT page", () => {
       api["/api/flight"] = { ...api["/api/flight"], decisions: [withId] };
       stubFetch(api);
       render(<Flight />);
+      await openTab("Plan");
       const row = await waitFor(() => {
         const r = document.querySelector<HTMLButtonElement>("#decisions .fp-drow");
         expect(r).not.toBeNull();
@@ -440,6 +450,7 @@ describe("the FLIGHT page", () => {
       api["/api/flight"] = { ...api["/api/flight"], decisions: [live] };
       stubFetch(api);
       render(<Flight />);
+      await openTab("Plan");
       const row = await screen.findByRole("button", { name: /Controller clears/ });
       expect(row.textContent).toContain("PR 1635");
       fireEvent.click(row);
@@ -456,6 +467,7 @@ describe("the FLIGHT page", () => {
       api["/api/flight"] = { ...api["/api/flight"], decisions: [wait] };
       stubFetch(api);
       render(<Flight />);
+      await openTab("Plan");
       await waitFor(() => expect(document.querySelectorAll("#decisions li")).toHaveLength(1));
       await waitFor(() =>
         expect(document.querySelector("#decisions")?.textContent).toContain("11:45"),

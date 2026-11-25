@@ -55,12 +55,18 @@ describe("Demo sub-views", () => {
     expect(document.body.textContent).toMatch(/PR #/);
   });
 
-  it("Flight: status, doing now, blockers and recent decisions on one page", async () => {
+  it("Flight: the control room shows doing now and blockers; Recent decisions is on Plan", async () => {
     await at("/flight");
     await waitFor(() => {
-      for (const name of ["Doing now", "Blockers", "Recent decisions"]) {
+      for (const name of ["Doing now", "Blockers"]) {
         if (!document.body.textContent?.includes(name)) throw new Error(`nothing says ${name}`);
       }
+    });
+    clean();
+    await at("/flight#decisionsP");
+    await waitFor(() => {
+      if (!document.body.textContent?.includes("Recent decisions"))
+        throw new Error("nothing says Recent decisions");
     });
     clean();
   });
