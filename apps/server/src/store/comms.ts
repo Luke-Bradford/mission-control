@@ -39,9 +39,16 @@ export interface CommsHost {
   statement(sql: string): StatementSync;
   run(id: string): Run | null;
   raiseNote(n: NoteInput): void;
+  /** The keys of the round notes not yet cleared (a dismissed one counts until it is cleared). */
+  chatterNoteKeys(): string[];
+  clearNote(key: string, at: number): void;
 }
 
 type Row = Record<string, SQLInputValue>;
+
+/** The key of the note for one pair's rounds on one ticket; `from` sorts before `to`. */
+const chatterNoteKey = (ticket: string, from: string, to: string): string =>
+  `${CHATTER_NOTE_PREFIX}${ticket}:${from}:${to}`;
 
 /** How much of a link's newest message `commsLinkCounts` returns (the graph's hover preview). */
 const COMMS_LINK_PREVIEW = 200;
@@ -184,6 +191,8 @@ export class CommsQueries {
           .get(row.from, rate.since) as { n: number };
         if (count.n >= rate.limit) return;
       }
+      // before the row is stored, so the quiet time is measured to the pair's last message before it
+      this.clearQuietChatterNotes(row.at);
       id = this.insertComms({ ...row, label }, text, replyTo);
       if (
         row.from === COMMS_CAPCOM &&
@@ -210,7 +219,32 @@ export class CommsQueries {
     return stored !== null && repeat ? { ...stored, repeat: true } : stored;
   }
 
-  /** Opens one durable FLIGHT-facing note when a pair first crosses the rolling chatter limit. */
+  /**
+   * Clears each round note whose pair has stored no message on that ticket for the whole window
+   * before `at`, so a note about a conversation that ended waits for nobody to dismiss it. A pair
+   * still talking keeps its note (and a dismissal of it); one that crosses the limit again after a
+   * clear raises it anew, its own first message after the gap included. Runs as `addComms` stores a
+   * message, so a hub storing none keeps the note until the next one.
+   */
+  private clearQuietChatterNotes(at: number): void {
+    const open = this.host.chatterNoteKeys();
+    for (const key of open) {
+      // `chatter:<ticket>:<seat>:<seat>`: a seat id holds no colon, the ticket may ("repo#n", "#n",
+      // "PR n"). A key in any other shape was not built by `chatterNoteKey` and is left alone.
+      const parts = /^(.+):([^:]+):([^:]+)$/.exec(key.slice(CHATTER_NOTE_PREFIX.length));
+      if (parts === null) continue;
+      const [ticket, a, b] = [parts[1], parts[2], parts[3]] as [string, string, string];
+      const last = this.host
+        .statement(
+          `SELECT MAX(at) AS at FROM comms
+           WHERE ticket = ? AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))`,
+        )
+        .get(ticket, a, b, b, a)?.at as number | null | undefined;
+      if (last == null || at - last > COMMS_CHATTER_WINDOW_MS) this.host.clearNote(key, at);
+    }
+  }
+
+  /** Opens FLIGHT's note when a pair is past the rolling round limit; no-op while one is open. */
   private raiseChatterNote(row: NewCommsRow): void {
     if (
       row.ticket === null ||
@@ -230,11 +264,12 @@ export class CommsQueries {
     );
     if (!crossed) return;
     this.host.raiseNote({
-      key: `${CHATTER_NOTE_PREFIX}${row.ticket}:${pair[0]}:${pair[1]}`,
+      key: chatterNoteKey(row.ticket, pair[0] as string, pair[1] as string),
       kind: "blocked",
       runId: null,
       seatId: null,
-      repoId: row.ticket.slice(0, row.ticket.lastIndexOf("#")),
+      // a ticket stored as "#n" or "PR n" names no repo: null, so FLIGHT can still dismiss the note
+      repoId: /^(.+)#\d+$/.exec(row.ticket)?.[1] ?? null,
       text: `${pair[0]} and ${pair[1]} exceeded ${COMMS_CHATTER_ROUNDS} rounds on ${row.ticket}.`,
       at: row.at,
     });
