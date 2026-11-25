@@ -1,0 +1,253 @@
+/* Sessions: one full-width table of every cmux workspace beside the FLIGHT dock
+   (docs/mockups/sessions/sessions.html). */
+#page-sessions {
+  overflow: hidden;
+}
+
+.sess-head {
+  align-items: baseline;
+  gap: var(--sp-3);
+  text-transform: none;
+  letter-spacing: normal;
+  font-family: var(--sans);
+  font-size: var(--fs);
+  font-weight: 400;
+}
+
+.sess-head h1 {
+  margin: 0;
+  font: 600 var(--fs-title) / var(--lh-title) var(--sans);
+  color: var(--fg);
+}
+
+.sess-summary {
+  color: var(--fg-2);
+}
+
+.sess-summary b {
+  color: var(--fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sess-summary b.sess-w {
+  color: var(--warn);
+}
+
+.sess-read {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.sess-banner {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  color: var(--crit);
+  background: var(--crit-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+.sess-note {
+  margin: 0;
+  padding: var(--sp-4);
+  color: var(--fg-2);
+}
+
+.sess-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.sess-table {
+  table-layout: fixed;
+  font-size: var(--fs);
+}
+
+.sess-table .c-name {
+  width: 17%;
+}
+.sess-table .c-folder {
+  width: 17%;
+}
+.sess-table .c-state {
+  width: 128px;
+}
+.sess-table .c-for {
+  width: 56px;
+}
+.sess-table .c-status {
+  width: 14%;
+}
+.sess-table .c-app {
+  width: 15%;
+}
+.sess-table .c-act {
+  width: 72px;
+}
+
+.sess-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.sess-table td {
+  padding: var(--table-cell-y) var(--sp-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.sess-table .num {
+  text-align: right;
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  font-variant-numeric: tabular-nums;
+}
+
+.sess-row {
+  cursor: pointer;
+}
+
+/* The waiting row carries a bar as well as its pill's word. */
+.sess-row.waiting td:first-child {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.sess-name {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.sess-tag {
+  margin-left: var(--sp-2);
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-s);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--fg-2);
+}
+
+.sess-tag.crew {
+  color: var(--think);
+  border-color: color-mix(in srgb, var(--think) 40%, transparent);
+}
+
+.sess-inbox {
+  margin-left: var(--sp-2);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+  color: var(--accent);
+}
+
+.sess-folder {
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+}
+
+.sess-folder b {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.sess-last {
+  color: var(--fg-2);
+}
+
+.sess-dash {
+  color: var(--muted);
+}
+
+.sess-applink {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+}
+
+.sess-applink:hover {
+  text-decoration: underline;
+}
+
+.sess-ans {
+  margin-left: var(--sp-2);
+  font-size: var(--fs-s);
+}
+
+.sess-ans.ok {
+  color: var(--ok);
+}
+.sess-ans.crit {
+  color: var(--crit);
+}
+.sess-ans.muted {
+  color: var(--muted);
+}
+
+.sess-write {
+  font-size: var(--fs-s);
+  background: transparent;
+}
+
+.sess-composer td {
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  background: var(--surface-2);
+  white-space: normal;
+}
+
+.sess-compose {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.sess-compose input {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.sess-hint,
+.sess-err {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--muted);
+}
+
+.sess-err {
+  color: var(--crit);
+}
+
+.sess-foot {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+/* Row states last: they outrank the cell rules above. */
+.sess-row:hover td,
+.sess-row:focus-visible td {
+  background: var(--surface-2);
+}
+
+.sess-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Keyboard reaches the full last line and status: a focused row unwraps them. */
+.sess-row:focus-within .sess-last,
+.sess-row:focus-within .sess-status {
+  white-space: normal;
+}

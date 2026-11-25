@@ -72,6 +72,7 @@ const Setup = lazy(() => import("./pages/Setup.tsx").then((m) => ({ default: m.S
 const Telemetry = lazy(() =>
   import("./pages/Telemetry.tsx").then((m) => ({ default: m.Telemetry })),
 );
+const Sessions = lazy(() => import("./pages/Sessions.tsx").then((m) => ({ default: m.Sessions })));
 const Audit = lazy(() => import("./pages/Audit.tsx").then((m) => ({ default: m.Audit })));
 const Planner = lazy(() => import("./pages/Planner.tsx").then((m) => ({ default: m.Planner })));
 const QaReadiness = lazy(() =>
@@ -268,6 +269,7 @@ const PAGE_TITLES: Record<Route["page"], string> = {
   board: "Board",
   ticket: "Board",
   agent: "Agents",
+  sessions: "Sessions",
   comms: "Comms",
   telemetry: "Telemetry",
   qa: "QA",
@@ -381,6 +383,9 @@ function PageView({ route: r }: { route: Route }) {
       break;
     case "audit":
       page = <Audit />;
+      break;
+    case "sessions":
+      page = <Sessions />;
       break;
     case "qa":
       page = <QaReadiness />;

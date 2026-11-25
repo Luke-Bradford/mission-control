@@ -51,6 +51,7 @@ const PAGE_TITLES: Record<Page, string> = {
   flight: "FLIGHT",
   board: "Board",
   agent: "Agent",
+  sessions: "Sessions",
   comms: "Comms",
   telemetry: "Telemetry",
   audit: "Audit",

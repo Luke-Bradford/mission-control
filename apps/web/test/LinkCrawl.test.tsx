@@ -65,6 +65,7 @@ it("every router page has a map entry with a route to visit", () => {
       "overview",
       "planner",
       "qa",
+      "sessions",
       "setup",
       "telemetry",
       "ticket",
