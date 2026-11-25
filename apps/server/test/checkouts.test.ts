@@ -974,7 +974,8 @@ describe("prepareCheckout", () => {
     symlinkSync(outside, join(root, CODEX_PNPM_STORES_DIR));
     const e = await fail(prepareCheckout(input()));
     expect(e.code).toBe("install");
-    expect(e.message).toContain("shared store unavailable");
+    expect(e.message).toContain("shared pnpm store unavailable");
+    expect(e.message).not.toContain("install failed");
     expect(existsSync(wtPath())).toBe(false);
   });
 
@@ -1376,6 +1377,18 @@ describe("prepareCheckout", () => {
       expect(existsSync(wtPath())).toBe(false);
     });
 
+    it("names every changed install input, a missing root one and new ones together", async () => {
+      onCheckout(
+        "rm -f pnpm-workspace.yaml && mkdir -p packages/x && printf {} > packages/x/package.json && printf {} > .pnpmfile.mjs",
+      );
+      const e = await fail(prepareCheckout(input()));
+      expect(e.code).toBe("protected");
+      expect(e.message).toBe(
+        `branch ${BRANCH} changes pnpm-workspace.yaml, .pnpmfile.mjs, packages/x/package.json; Mission Control won't install from it`,
+      );
+      expect(existsSync(wtPath())).toBe(false);
+    });
+
     it("refuses a worktree missing the base's root pnpm-workspace.yaml", async () => {
       onCheckout("rm -f pnpm-workspace.yaml");
       const e = await fail(prepareCheckout(input()));
@@ -1652,6 +1665,65 @@ describe("ticket checkout recovery", () => {
       branch: `${BRANCH}-stage-2`,
       created: true,
     });
+  });
+
+  /** Puts `BRANCH` in main through a merge commit, so it reads as merged, not cut and unused. */
+  const mergeBranchIn = () => {
+    git(clone, "checkout", "-q", "-b", BRANCH);
+    commit(clone, { "done.txt": "x\n" });
+    git(clone, "checkout", "-q", "main");
+    git(clone, "merge", "-q", "--no-ff", "-m", "merge", BRANCH);
+    git(clone, "push", "-q", "origin", "main");
+  };
+
+  it("keeps a branch cut from main more than 5000 commits back", async () => {
+    git(clone, "branch", BRANCH);
+    const from = git(clone, "rev-parse", "main");
+    const stream = [`commit refs/heads/main\ncommitter n <a@b> 0 +0000\ndata 1\nx\nfrom ${from}\n`];
+    for (let i = 0; i < 5001; i++) {
+      stream.push("commit refs/heads/main\ncommitter n <a@b> 0 +0000\ndata 1\nx\n");
+    }
+    execFileSync("git", ["fast-import", "--quiet"], { cwd: clone, input: stream.join("\n") });
+    git(clone, "reset", "-q", "--hard", "main");
+    git(clone, "push", "-q", "origin", "main");
+
+    // still on main's first-parent line: cut there and not yet used, so it is the ticket's
+    expect(await prepareCheckout(input())).toMatchObject({ branch: BRANCH, created: true });
+  });
+
+  it("judges a branch by origin's tip, not a stale local one", async () => {
+    // the local branch's tip is merged in; origin's has moved on with new work
+    mergeBranchIn();
+    git(clone, "checkout", "-q", "-b", "work", BRANCH);
+    commit(clone, { "work.txt": "x\n" });
+    git(clone, "push", "-q", "origin", `work:refs/heads/${BRANCH}`);
+    git(clone, "checkout", "-q", "main");
+    git(clone, "branch", "-q", "-D", "work");
+
+    expect(await prepareCheckout(input())).toMatchObject({ branch: BRANCH });
+  });
+
+  it("says a history that cannot be read is a branch problem", async () => {
+    mergeBranchIn();
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const shim = join(dir, "rev-list-shim");
+    mkdirSync(shim);
+    writeFileSync(
+      join(shim, "git"),
+      `#!/bin/sh
+case " $* " in
+  *" rev-list --first-parent "*) echo "fatal: bad object" >&2; exit 128 ;;
+esac
+exec "${realGit}" "$@"
+`,
+      { mode: 0o755 },
+    );
+    savedGitPath = process.env.PATH;
+    process.env.PATH = `${shim}:${savedGitPath}`;
+
+    const e = await fail(prepareCheckout(input()));
+    expect(e.code).toBe("branch");
+    expect(e.message).toBe("could not read the history of #42");
   });
 
   it("reuses a ticket branch with an open PR", async () => {
@@ -2131,26 +2203,26 @@ describe("review scratch checkouts", () => {
         "packages/x/package.json": `${PKG}\n`,
         "pnpm-lock.yaml": `${EMPTY_LOCK}\n`,
       },
+      "package.json, packages/x/package.json, pnpm-lock.yaml",
     ],
-    ["package.json scripts (PR 1520)", { "package.json": `${PKG}\n` }],
-    ["pnpm-lock.yaml", { "pnpm-lock.yaml": `${EMPTY_LOCK}\n` }],
+    ["package.json scripts (PR 1520)", { "package.json": `${PKG}\n` }, "package.json"],
+    ["pnpm-lock.yaml", { "pnpm-lock.yaml": `${EMPTY_LOCK}\n` }, "pnpm-lock.yaml"],
     [
       "package.json plus pnpm-lock.yaml (PR 1640)",
       { "package.json": `${PKG}\n`, "pnpm-lock.yaml": `${EMPTY_LOCK}\n` },
+      "package.json, pnpm-lock.yaml",
     ],
   ])(
     "a PR head that changes %s is reviewed read-only, with nothing installed",
-    async (_n, files) => {
+    async (_n, files, changed) => {
       commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
       git(seed, "push", "-q", "origin", "main");
       const { head } = pr(files);
       const install = vi.fn(async () => {});
       const s = await prepareScratch(scratchInput(head), install);
       expect(install).not.toHaveBeenCalled();
-      expect(s.installNote).toMatch(
-        new RegExp(
-          `^Reviewed, not installed: the PR head ${head.slice(0, 7)} changes .*; Mission Control won't install from it$`,
-        ),
+      expect(s.installNote).toBe(
+        `Reviewed, not installed: the PR head ${head.slice(0, 7)} changes ${changed}; Mission Control won't install from it`,
       );
       expect(existsSync(scratchPath())).toBe(true);
       expect(existsSync(join(scratchPath(), "node_modules"))).toBe(false);
@@ -2308,7 +2380,7 @@ describe("a checkout's private pnpm store", () => {
     mkdirSync(outside);
     writeFileSync(join(outside, "keep"), "x\n");
     symlinkSync(outside, storeOf(join(dirname(wtPath()), "linked-3")));
-    await sweepPnpmStores([dirname(wtPath())]);
+    expect(await sweepPnpmStores([dirname(wtPath())])).toBe(1);
     expect(existsSync(storeOf(gone))).toBe(false);
     expect(existsSync(storeOf(wtPath()))).toBe(true);
     expect(existsSync(sharedPnpmStore())).toBe(true);

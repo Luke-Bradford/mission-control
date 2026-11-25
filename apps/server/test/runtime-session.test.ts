@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -435,6 +436,28 @@ describe("startSession against the fake CLI", () => {
     await s.closeSent;
     await until(isExit);
     expect(await exited).toBe(0);
+  });
+
+  it("writes nothing on a keeper link whose writing side has ended, and still says close was sent", async () => {
+    const write = vi.spyOn(Socket.prototype, "write");
+    try {
+      const { s } = start();
+      await s.ready;
+      // the hub's own link: the socket that said hello to the keeper
+      const linkAt = write.mock.calls.findIndex((c) => String(c[0]).includes('"t":"hello"'));
+      const link = write.mock.contexts[linkAt] as Socket;
+      link.end();
+      expect([link.destroyed, link.writableEnded]).toEqual([false, true]);
+      const before = write.mock.contexts.filter((c) => c === link).length;
+      s.send("AFTER");
+      // its exit may never be reported once close is not sent: the keeper is ended by afterEach
+      sessions.splice(sessions.indexOf(s), 1);
+      void s.close();
+      await s.closeSent;
+      expect(write.mock.contexts.filter((c) => c === link)).toHaveLength(before);
+    } finally {
+      write.mockRestore();
+    }
   });
 
   it("an error control response rejects with its message", async () => {

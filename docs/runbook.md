@@ -1326,7 +1326,7 @@ each at most once a day. The hub does the rest with its own timers and no FLIGHT
 flow (the engine tick), free seats (the engine gives a free seat its next ticket), and disk (the disk sweep).
 A build seat that stays idle with tickets open does wake FLIGHT: once per spell, then again while the crew still idles (see below). A free seat, a Ready ticket, a PR's CI turning
 green, a review queued or finished, a merge and a PR ready to merge are in `flight_state` for the
-next wake and wake nobody.
+next wake and wake nobody. The one exception is a crew PR nobody owns (`unheld`, below).
 
 An operator message, a seat's question and a seat's call wake FLIGHT within the debounce (a message within 30 seconds of
 another wake, the others within 2 minutes). The last wake time is kept across a hub restart, so a restart does not repeat a wake for a failure that is still open. Every other reason waits until `FLIGHT_BATCH_MS` (30
@@ -1342,6 +1342,20 @@ spell began in the `flight.idle-seat` setting, and counts the time while FLIGHT 
 line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`. Each spell wakes FLIGHT once, when it has lasted 30 minutes (fact `idle`). While any seat still idles, the hub tells FLIGHT again (fact `idleAgain`): 2 hours after a wake last showed it the idle seats, then 4 hours, then every 8 (`FLIGHT_IDLE_SEAT_AGAIN_MS`, `FLIGHT_IDLE_SEAT_AGAIN_MAX_MS`). Any wake that shows the idle seats restarts that wait, and a seat's new spell puts it back to 2 hours. A seat whose account is at its stop line does not ask again. Until the repeat is due, its time is FLIGHT's `nextWakeAt`. The count starts over when no seat idles.
 A wait on a person is never the reason a seat idles; only money, direction, irreversible actions and
 security exceptions go to the operator, parked with a brief.
+
+**A crew PR nobody owns (`unheld`).** The engine hands a PR's CI and review results to the run that
+holds it. When that run has ended (FLIGHT passed the PR on or pushed a fix itself, an engine park
+ended the run, a crash, a Stop) the results reach no seat. A PR counts when `prFlow` has shown
+"nobody" as its owner for five minutes (no live run on the PR or its branch, no review under way),
+a crew run of this session carried it in the last day, its CI verdict is passing or failing, and its
+last read did not fail. The fact is the PR, its head, the CI verdict and the review's blocking count.
+The watch sees it at its next pass (within 5 minutes, or 20 seconds after a change) and then wakes
+FLIGHT within the 2-minute debounce. A ready PR the hub goes on to review itself can cost one wake
+before that review starts; a review under way is an owner, so the fact then waits for its result. It is told once while it stands; a new head, verdict or review
+is a new fact, and so is the same result coming back after a seat held the PR in between. A hub
+restart tells a standing one again. The hub learns the CI verdict of such a PR at its next board
+read (every `poll.board_minutes`), and a review result within seconds. A PR opened outside the crew
+never counts.
 
 | Signal | Raised when |
 |---|---|
@@ -2714,7 +2728,7 @@ The live check starts the new version the way a real seat does (`checkCli` in `a
 - If no build seat of that vendor is configured, no run can break on that tool, and the old bare check applies instead (`claude -p --allowedTools=Read` or `codex exec --sandbox read-only` in an empty temp dir, same nonce read).
 A pass keeps the version, clears the pending record and records a `cli-update` item; the next seat run uses it. A failure (install, wrong version or check) puts the previous version back (skipped when the failed install changed nothing), holds the failed version until a newer one appears, records a `cli-update-failed` item and raises one Needs-you note (`cli-auto:<tool>:<version>`). If the previous version is not back, new runs stay held and the update stays pending: the next pass (or the hub after a restart, which re-holds runs at start) re-checks and retries the rollback. Each step writes a server log line starting `cli update <tool>:`. The job never touches the guard, the safety floor, CI workflows or the Mission Control block.
 
-**The wake gap.** An operator message, a seat's question, an instruction change, a plan falling due and the daily retrospective wake FLIGHT at once. Every other reason waits until `FLIGHT_BATCH_MS` (30 minutes) after the last wake, whatever its kind. The hub no longer learns which reasons to batch. Settling a question or park, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. An unread plain message from the operator or controller uses a 30-second gap so an idle FLIGHT wakes within a minute. It stays in the `operator` wake fact until FLIGHT reads it, including through an outage longer than six hours. A question or an instruction keeps the 2-minute gap. The safety floor is never held back.
+**The wake gap.** An operator message, a seat's question, an instruction change, a plan falling due, the daily retrospective and a result on a crew PR nobody owns (`unheld`) wake FLIGHT at once. Every other reason waits until `FLIGHT_BATCH_MS` (30 minutes) after the last wake, whatever its kind. The hub no longer learns which reasons to batch. Settling a question or park, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. An unread plain message from the operator or controller uses a 30-second gap so an idle FLIGHT wakes within a minute. It stays in the `operator` wake fact until FLIGHT reads it, including through an outage longer than six hours. A question or an instruction keeps the 2-minute gap. The safety floor is never held back.
 
 **Wakes that end in nothing.** `dismiss_item` acks an item and it leaves FLIGHT's triage list.
 

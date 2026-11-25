@@ -105,6 +105,7 @@ import {
   type ProfileOverride,
   pathGrantProblem,
   pathsNeedingGrant,
+  RATE_LIMIT_PARK_PREFIX,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -171,6 +172,7 @@ import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/que
 import { RepoRulesError } from "../engine/rules.ts";
 import { flightFloor, flightShellContext } from "../flight/floor.ts";
 import { noteFlightWrite } from "../flight/runaway.ts";
+import { flightSeat } from "../flight/seat.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
@@ -694,7 +696,7 @@ export interface Supervisor {
     opts?: {
       first?: string;
       firstPieces?: readonly PromptPiece[];
-      /** The operator's explicit start (the dock): a restart-storm hold does not stop it. */
+      /** The operator's explicit start (the dock). */
       operator?: boolean;
     },
   ): Promise<{ runId: string }>;
@@ -997,9 +999,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const transfers = new Map<string, Promise<AccountTransferResult>>();
   const profilePolicyKey = (runId: string) => `account-profile-denies:${runId}`;
   const credentialPolicyKey = (runId: string) => `flight-credential-revision:${runId}`;
+  const runtimeProfileKey = (runId: string) => `runtime-profile:${runId}`;
   const flightProfileKey = (runId: string) => `flight-runtime-profile:${runId}`;
   // Change it when FLIGHT's launch arguments change: a surviving keeper keeps the ones it started with.
   const FLIGHT_RUNTIME_PROFILE = "controller-v3";
+  // The same for crew seats. A keeper started before seats had this key counts as this profile.
+  const SEAT_RUNTIME_PROFILE = "seat-v1";
   const credentialRevision = (env: Record<string, string> | undefined): string =>
     createHash("sha256")
       .update(JSON.stringify(Object.entries(env ?? {}).sort()))
@@ -1013,13 +1018,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
-  /** Runs already taken back once: a second such exit ends them as a crash. */
+  /** Runs already taken back once: a second such exit ends them as a crash. In memory only, so a hub restart allows one more. */
   const retakenRuns = new Set<string>();
   /** Writer tickets reserved between their eligibility check and the run row being stored. */
   const startingTickets = new Set<string>();
   /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
   const startingWorktrees = new Set<string>();
-  /** Runs whose fresh fix session is being started: its exit at start does not end the run. */
   /** Runs of a CLI update's live check: nothing of theirs is a seat's own to answer for. */
   const checkRuns = new Map<string, { stderr: string | null }>();
   const deferredRecoveries = new Set<string>();
@@ -1277,7 +1281,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const seatId = l.info.seat.id;
     if (transferState(l.run.id)?.pending) return;
     if (live.get(seatId) === l) live.delete(seatId);
-    // a fresh fix session that died at start is the wake's to answer (it resumes the old one)
     if (stopping && l.ending === null) {
       // The hub is going down: the run stays active and is resumed on the next start.
       fold(l);
@@ -1424,7 +1427,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (e.ok !== undefined) {
           void deps.checks?.end({ runId: l.run.id, toolUseId: e.toolUseId }, e.ok, e.exitCode);
         }
-        // a result replayed at an attach was counted by the keeper that first saw it
+        // A replayed result was counted before this attach, so do not count it twice.
         if (
           e.bytes !== undefined &&
           e.bytes > 0 &&
@@ -1476,7 +1479,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           l.parkedTurn = true;
           l.rateLimitedUntil = e.resetsAt;
           const until = e.resetsAt === null ? "—" : clockHm(e.resetsAt, config.operator.timezone);
-          setState(l, "parked", `rate limited until ${until}`);
+          setState(l, "parked", `${RATE_LIMIT_PARK_PREFIX} until ${until}`);
         }
         break;
       case "output":
@@ -1931,7 +1934,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   /**
    * The dollars one CLI session may spend: the run's budget less what its other sessions spent. The
-   * CLI counts only its own session, so a fresh fix session (#1643), or a resume of one, would
+   * CLI counts only its own session, so a run's later session, or a resume of one, would
    * otherwise get the whole budget again. A run with one session gets its whole budget. The spend
    * is the larger of the run's cost and the sum of the transcript's latest `total_cost_usd` per
    * session; this session's own figure is left out. Undefined when the run has no dollar cap.
@@ -2358,6 +2361,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     store.setSetting(profilePolicyKey(run.id), JSON.stringify(profileDenies()));
     if (privateEnv !== undefined)
       store.setSetting(credentialPolicyKey(run.id), credentialRevision(privateEnv));
+    store.setSetting(
+      runtimeProfileKey(run.id),
+      fullAccess ? FLIGHT_RUNTIME_PROFILE : SEAT_RUNTIME_PROFILE,
+    );
     if (fullAccess) store.setSetting(flightProfileKey(run.id), FLIGHT_RUNTIME_PROFILE);
     const l = track(info, run, session, release, {
       spawn: keeperSpawn,
@@ -2853,6 +2860,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           !abandonedStart
         )
           continue;
+        // its keeper may have outlived the start: one still running keeps the run for the next start
+        if (!(await endAndRemoveKeeper(run.agentId, run.id))) continue;
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         recordEnded(run.id, at, "failed", "exit");
@@ -2918,7 +2927,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             credentialRevision(await deps.flightEnvironment());
         if (
           credentialsChanged ||
-          (flight && store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE) ||
+          (flight
+            ? store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE
+            : (store.getSetting(runtimeProfileKey(run.id)) ?? SEAT_RUNTIME_PROFILE) !==
+              SEAT_RUNTIME_PROFILE) ||
           profileDenies().some((profile) => !denied.includes(profile))
         ) {
           if (!(await endKeeper(dir, keeperEndWait(), log))) return;
@@ -4726,9 +4738,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             throw e;
           }
         });
+      // Read before the run is stored: a throw between storing it and the launch would leave it active.
+      let reviewCommands: SeatCommands["review"];
       try {
         if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
         if (external && !(await readSubject())) throw notWanted;
+        reviewCommands = (await commandsOf(info.repo)).review;
       } catch (error) {
         await inClone(checkout, () =>
           removeCheckout(checkout, scratch.path, { force: true }),
@@ -4773,9 +4788,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.upsertRun(run);
       if (scratch.installNote !== undefined) {
         store.setReviewInstallNote(reviewId, scratch.installNote);
-        const flight = config.crew?.sessions
-          .flatMap((session) => session.seats)
-          .find((seat) => seatDef(seat).loop === "watch");
+        const flight = flightSeat(config)?.seat;
         if (flight !== undefined)
           store.addComms({
             at: now(),
@@ -4794,13 +4807,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const previewStarting =
         deps.reviewPreviews === undefined || scratch.installNote !== undefined
           ? false
-          : await deps.reviewPreviews.open({
-              runId,
-              repoId: info.repo.id,
-              pr: review.prNumber,
-              branch: author?.branch ?? subject?.branch ?? "",
-              sha: review.sha,
-            });
+          : await deps.reviewPreviews
+              .open({
+                runId,
+                repoId: info.repo.id,
+                pr: review.prNumber,
+                branch: author?.branch ?? subject?.branch ?? "",
+                sha: review.sha,
+              })
+              .catch((e) => {
+                log(`${seatId}: no review preview: ${errText(e)}`);
+                return false;
+              });
       const evidence = author ? store.evidenceNotes(author.id) : [];
       const prevReply =
         prev === null
@@ -4839,7 +4857,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         touches: touches?.sha === review.sha ? touches.paths : [],
         ...(screenshots === undefined ? {} : { evidence: screenshots }),
         ...(scratch.installNote === undefined ? {} : { installNote: scratch.installNote }),
-        commands: (await commandsOf(info.repo)).review,
+        commands: reviewCommands,
         fullSuite: info.repo.fullSuite ?? [],
         ...(previewStarting ? { preview: true } : {}),
         ...(second === null
@@ -5051,7 +5069,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (!(await endAndRemoveKeeper(seatId, runId))) {
         try {
           store.raiseNote({
-            key: `cleanup:${runId}`,
+            key: `cleanup-keeper:${runId}`,
             kind: "blocked",
             runId,
             seatId,

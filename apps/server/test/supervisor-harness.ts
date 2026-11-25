@@ -355,6 +355,8 @@ function make(
     /** The area GUIDO-1 may write, in place of apps/**. */
     guidoArea?: string[];
     extraSeat?: CrewSeatConfig;
+    /** More seats, added after `extraSeat` in order. */
+    extraSeats?: CrewSeatConfig[];
     auditPack?: (seatId: string) => string;
     /** A second, seatless session "other". */
     secondSession?: boolean;
@@ -395,6 +397,7 @@ function make(
     if (retro) retro.lightModel = over.retroLightModel;
   }
   if (over.extraSeat) cfg.crew?.sessions[0]?.seats.push(over.extraSeat);
+  for (const seat of over.extraSeats ?? []) cfg.crew?.sessions[0]?.seats.push(seat);
   if (over.secondSession) {
     cfg.crew?.sessions.push({
       id: "other",

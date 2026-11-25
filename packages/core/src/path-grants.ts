@@ -51,8 +51,7 @@ export function pathsNeedingGrant(
  * Whether every path `entry` can match lies in `area`. An entry with a `.` or `..` segment never
  * does: `globMatches` reads it as text, so `apps/server/../x` would pass as under `apps/server`.
  * A plain file is matched as `pathInArea` does. A glob counts as inside only when some area glob
- * provably covers it segment by segment (a glob also covers what lies under a folder it matches,
- * as `globMatches` does); anything else is kept for the grant checks.
+ * provably covers it segment by segment; anything else is kept for the grant checks.
  */
 function entryInArea(area: readonly string[], entry: string): boolean {
   const e = entry.split("/");

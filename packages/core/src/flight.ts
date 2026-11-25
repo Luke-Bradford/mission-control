@@ -1209,6 +1209,12 @@ export interface FlightState {
     failingChecks: string[];
     /** Reviews of the PR that reported blocking findings or a failed verdict. */
     reviewRounds?: number;
+    /**
+     * The CI verdict of a crew PR that nobody owns (`prFlow`'s "nobody", past its deadline) and
+     * whose CI has settled. The engine has no run to hand the result to, so FLIGHT is woken for
+     * it at once (wake fact `unheld`); absent on every other PR.
+     */
+    unheld?: "passing" | "failing";
   }[];
   /** Items waiting for triage, oldest first, including those held from the operator. */
   items: {

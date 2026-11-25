@@ -15,6 +15,7 @@ import {
   metricLabel,
   metricReadings,
   percentile,
+  RATE_LIMIT_PARK_PREFIX,
 } from "../src/index.ts";
 
 const HOUR = 3_600_000;
@@ -113,6 +114,7 @@ describe("metric registry", () => {
     expect(isAgentLive(loopParked)).toBe(false);
     // a rate-limit park resumes by itself: not blocked, and not live until it does
     const limited = row({ hudState: "parked", note: "rate limited until 14:00" });
+    expect(RATE_LIMIT_PARK_PREFIX).toBe("rate limited");
     expect(isAgentBlocked(limited)).toBe(false);
     expect(isAgentLive(limited)).toBe(false);
     expect(
