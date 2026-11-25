@@ -115,6 +115,62 @@ beforeEach(() => {
 afterEach(() => store.close());
 
 describe("PR flow ownership and clocks", () => {
+  describe("FLIGHT's watch session that published to the PR", () => {
+    const watch = (patch: Partial<Run> = {}) =>
+      run("flight", {
+        agentId: "flight",
+        loopKind: "watch",
+        branch: null,
+        ticket: null,
+        prs: [{ repo: "o/mc", number: 7 }],
+        startedAt: T + M,
+        ...patch,
+      });
+    beforeEach(() => store.upsertPullRequests("mc", [pr()], T));
+
+    it("does not take the PR from the seat's live run, ended or live", () => {
+      store.upsertRun(run("author"));
+      store.upsertRun(watch({ endedAt: T + 2 * M }));
+      expect(row(T + 10 * M)).toMatchObject({ ownerKind: "seat", seatId: "guido" });
+      expect(prFlowFacts(flow(T + 10 * M))).toEqual([]);
+      store.upsertRun(watch());
+      expect(row(T + 10 * M)).toMatchObject({ ownerKind: "seat", seatId: "guido" });
+    });
+
+    it("does not hide a seat's run tied to the PR by its ticket only", () => {
+      store.upsertRun(run("author", { branch: "feature/other" }));
+      store.upsertRun(watch({ endedAt: T + 2 * M }));
+      expect(row(T + 10 * M)).toMatchObject({ ownerKind: "seat", seatId: "guido" });
+    });
+
+    it("does not own the PR once the seat's run has ended, though it is live", () => {
+      store.upsertRun(run("author", { endedAt: T + 3 * M }));
+      store.upsertRun(watch());
+      expect(row(T + 10 * M)).toMatchObject({ owner: "nobody", ownerSince: T + 3 * M });
+    });
+
+    it("is the PR's run when no other run is", () => {
+      store.upsertRun(watch({ endedAt: T + 2 * M }));
+      expect(row(T + 10 * M)).toMatchObject({ owner: "nobody", ownerSince: T + 2 * M });
+    });
+  });
+
+  it("keeps a later run that published to the PR from another branch as its run", () => {
+    // an observed loop's session moves to its next branch while its PR is still open
+    store.upsertPullRequests("mc", [pr()], T);
+    store.upsertRun(run("first", { endedAt: T + M }));
+    store.upsertRun(
+      run("second", {
+        startedAt: T + 2 * M,
+        branch: "feature/next",
+        ticket: null,
+        prs: [{ repo: "o/mc", number: 7 }],
+      }),
+    );
+    expect(row(T + 10 * M)).toMatchObject({ ownerKind: "seat", seatId: "guido" });
+    expect(prFlowFacts(flow(T + 10 * M))).toEqual([]);
+  });
+
   it("names never-run and ended-run faults from their actual start time", () => {
     store.upsertPullRequests("mc", [pr()], T);
     expect(row()).toMatchObject({ owner: "nobody", ownerSince: T, lastAction: "PR opened" });
