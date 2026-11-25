@@ -29,6 +29,7 @@ export function createSessionSidebar(deps: Deps) {
   const values = new Map<string, Map<string, string>>();
   const urls = new Map<string, string | null>();
   const states = new Map<string, CmuxSessionRow["state"]>();
+  const appAnswers = new Map<string, boolean | null>();
   let timer: NodeJS.Timeout | null = null;
   const set = async (id: string, key: string, value: string | null) => {
     const previous = values.get(id) ?? new Map<string, string>();
@@ -51,6 +52,30 @@ export function createSessionSidebar(deps: Deps) {
     for (const id of values.keys()) if (!live.has(id)) values.delete(id);
     for (const row of view.sessions) {
       try {
+        const previousState = states.get(row.id);
+        const previousAnswer = appAnswers.get(row.id);
+        states.set(row.id, row.state);
+        appAnswers.set(row.id, row.app?.answers ?? null);
+        if (row.owner === "operator" && previousState !== undefined) {
+          if (row.state === "waiting" && previousState !== "waiting")
+            await deps.cmux.notify(
+              row.id,
+              SESSION_NOTICE_TITLE.waiting,
+              `"${row.name}" has a question for you.`,
+            );
+          else if (previousState === "working" && row.state === "idle")
+            await deps.cmux.notify(
+              row.id,
+              SESSION_NOTICE_TITLE.finished,
+              `"${row.name}" finished and is idle.`,
+            );
+          else if (previousAnswer === true && row.app?.answers === false)
+            await deps.cmux.notify(
+              row.id,
+              SESSION_NOTICE_TITLE.appStopped,
+              `Its app at ${row.app.url} stopped answering.`,
+            );
+        }
         const url = row.pr?.url ?? null;
         if (urls.get(row.id) !== url && url !== null) await deps.cmux.linkPr(row.id, url);
         urls.set(row.id, url);
@@ -93,6 +118,7 @@ export function createSessionSidebar(deps: Deps) {
       values.clear();
       urls.clear();
       states.clear();
+      appAnswers.clear();
     },
   };
 }
