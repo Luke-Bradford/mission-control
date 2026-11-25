@@ -754,6 +754,56 @@ describe("reattach after a restart", () => {
     );
   });
 
+  it.each([true, false])(
+    "ends an unheld running row's keeper first when the hub starts (ended: %s)",
+    async (stopped) => {
+      const id = `orphan-keeper-${stopped}:20261020T000000Z`;
+      const run = {
+        id,
+        agentId: "guido-1",
+        repoId: "mc",
+        seq: 1,
+        startedAt: 1,
+        endedAt: null,
+        status: "running" as const,
+        sessionId: "11111111-2222-4333-8444-555555555555",
+        model: "haiku",
+        branch: BRANCH,
+        ticket: "mc#42",
+        costUsd: null,
+        tokens: null,
+        transcriptPath: crewTranscriptPath(dbPath, id),
+        prs: [],
+        summary: null,
+      };
+      writeFileSync(run.transcriptPath, "{}\n");
+      store.upsertRun(run);
+      const folder = crewKeeperDir(dbPath, id);
+      mkdirSync(folder, { recursive: true });
+      const alive = vi
+        .spyOn(keeper, "keeperAlive")
+        .mockImplementation((d) => d === folder && existsSync(folder));
+      const end = vi.spyOn(keeper, "endKeeper").mockImplementation(async (d) => {
+        if (d === folder && stopped) rmSync(folder, { recursive: true, force: true });
+        return d !== folder || stopped;
+      });
+      try {
+        const { sup } = make();
+        sup.start();
+        await until(() =>
+          expect(end).toHaveBeenCalledWith(folder, expect.anything(), expect.anything()),
+        );
+        await sup.stopAll();
+        expect(store.run(id)).toMatchObject(
+          stopped ? { status: "failed" } : { status: "running", endedAt: null },
+        );
+      } finally {
+        alive.mockRestore();
+        end.mockRestore();
+      }
+    },
+  );
+
   it("leaves a run set aside alone when the hub starts, though no seat row holds it", async () => {
     const id = "aside:20261020T000000Z";
     const run = {
@@ -1149,6 +1199,28 @@ describe("a seat keeps running through a restart", () => {
     expect(store.run(runId)?.noReport).toBeUndefined();
     expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+  });
+
+  it.each([
+    ["an older profile is relaunched", "seat-v0", 2],
+    ["no profile (from before seats had one) is attached to", null, 1],
+  ])("a crew seat's surviving keeper with %s", async (_name, profile, launches) => {
+    const first = make();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.stopAll();
+    if (profile === null) store.deleteSetting(`runtime-profile:${runId}`);
+    else store.setSetting(`runtime-profile:${runId}`, profile);
+    const { sup } = make();
+    sup.start();
+    // the row already says idle on this run from before the restart: wait for the take-back itself
+    await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
+    await until(() => expect(starts()).toHaveLength(launches));
+    expect(store.seatSession("guido-1")).toMatchObject({ runId });
+    if (launches === 2) expect(starts()[1]?.argv).toContain("--resume");
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    await sup.stopAll();
   });
 
   it("a hub replaced by a newer one lets go: the keeper and its CLI live on and the newer hub gets the turn (#1912)", async () => {
@@ -2277,15 +2349,26 @@ describe("a seat keeps running through a restart", () => {
 
   it("an engine end whose old keeper will not stop says so in a blocked note", async () => {
     const { runId, dir0, keeperPid, end, real, hub } = await ghostFlight(Number.POSITIVE_INFINITY);
+    // the worktree cannot be removed either: each failure keeps a note of its own
+    prep.failRemove = true;
     try {
+      expect(store.seatSession("flight-1")?.worktree).toEqual(expect.any(String));
       await hub.sup.endRunByEngine(runId);
       expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });
-      expect(store.notes().filter((n) => n.key === `cleanup:${runId}`)).toMatchObject([
+      expect(store.notes().filter((n) => n.key === `cleanup-keeper:${runId}`)).toMatchObject([
         {
           kind: "blocked",
           seatId: "flight-1",
           runId,
           text: expect.stringContaining("its CLI could not be stopped and may still be running"),
+        },
+      ]);
+      expect(store.notes().filter((n) => n.key === `cleanup:${runId}`)).toMatchObject([
+        {
+          kind: "blocked",
+          seatId: "flight-1",
+          runId,
+          text: expect.stringContaining("could not be removed; remove"),
         },
       ]);
       expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false);

@@ -128,13 +128,14 @@ export const sharedPnpmStoreDir = (worktreesRoot: string): string =>
   join(worktreesRoot, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME);
 
 /** Removes one store folder; a link (the folder or the entry) is left alone, never followed. */
-async function removeStoreEntry(storeRoot: string, name: string): Promise<void> {
+async function removeStoreEntry(storeRoot: string, name: string): Promise<boolean> {
   const real = await lstat(storeRoot).catch(() => null);
-  if (real === null || !real.isDirectory()) return;
+  if (real === null || !real.isDirectory()) return false;
   const entry = join(storeRoot, name);
   const stat = await lstat(entry).catch(() => null);
-  if (stat === null || !stat.isDirectory()) return;
+  if (stat === null || !stat.isDirectory()) return false;
   await rm(entry, { recursive: true, force: true });
+  return true;
 }
 
 /**
@@ -169,8 +170,7 @@ export async function sweepPnpmStores(roots: readonly string[]): Promise<number>
       )
         continue;
       try {
-        await removeStoreEntry(storeRoot, name);
-        removed++;
+        if (await removeStoreEntry(storeRoot, name)) removed++;
       } catch {
         // taken at the next start
       }
@@ -293,13 +293,9 @@ export async function prepareSharedPnpmStore(worktreesRoot: string, name: string
     await privateDirectory(store, store);
     return store;
   } catch (e) {
-    throw new CheckoutError(
-      "install",
-      `pnpm install failed for ${name} (shared store unavailable)`,
-      {
-        cause: e,
-      },
-    );
+    throw new CheckoutError("install", `shared pnpm store unavailable for ${name}`, {
+      cause: e,
+    });
   }
 }
 
@@ -831,18 +827,20 @@ async function refuseChangedInputs(
   baseSha: string,
   subject: string,
 ): Promise<void> {
+  const changed: string[] = [];
   // Without its root project/workspace file, the tool walks up to an ancestor's.
   for (const file of tool.rootInputs) {
     if (!inputs.includes(file) && (await baseBlob(read, baseSha, file)) !== null) {
-      throw refuse(subject, `changes ${file}`);
+      changed.push(file);
     }
   }
   for (const file of inputs) {
     const expected = await baseBlob(read, baseSha, file);
     const onDisk = join(path, file);
     const actual = (await lstat(onDisk)).isFile() ? gitId("blob", await readFile(onDisk)) : null;
-    if (expected === null || actual !== expected) throw refuse(subject, `changes ${file}`);
+    if (expected === null || actual !== expected) changed.push(file);
   }
+  if (changed.length > 0) throw refuse(subject, `changes ${changed.join(", ")}`);
 }
 
 /**
@@ -1297,9 +1295,14 @@ async function ticketBranch(
   if (baseSha !== undefined) {
     let line: Promise<Set<string>> | undefined;
     const firstParentLine = () =>
-      (line ??= inClone(["rev-list", "--first-parent", "-n", "5000", baseSha]).then(
-        (out) => new Set(out.split("\n")),
-      ));
+      (line ??= inClone(["rev-list", "--first-parent", baseSha])
+        .then((out) => new Set(out.split("\n")))
+        .catch((e) => {
+          throw new CheckoutError("branch", `could not read the history of #${issue}`, {
+            cause: e,
+            detail: gitReason(e),
+          });
+        }));
     for (const branch of branches) {
       if (merged.has(branch) || open.has(branch)) continue;
       const tip = await inClone([
@@ -1307,14 +1310,14 @@ async function ticketBranch(
         "--verify",
         "--quiet",
         "--end-of-options",
-        `refs/heads/${branch}^{commit}`,
+        `refs/remotes/origin/${branch}^{commit}`,
       ]).catch(() =>
         inClone([
           "rev-parse",
           "--verify",
           "--quiet",
           "--end-of-options",
-          `refs/remotes/origin/${branch}^{commit}`,
+          `refs/heads/${branch}^{commit}`,
         ]).catch(() => null),
       );
       if (tip === null) continue;

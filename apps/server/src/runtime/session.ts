@@ -322,7 +322,7 @@ function createDriver(i: {
   /** Writes a line to the keeper; `done` is called once the socket has taken it (at once when it cannot). */
   const transmit = (obj: Json, done?: () => void) => {
     if (sock === null) outbox.push({ obj, done });
-    else if (sock.destroyed) done?.();
+    else if (sock.destroyed || !sock.writable || sock.writableEnded) done?.();
     else sock.write(`${JSON.stringify(obj)}\n`, () => done?.());
   };
 
