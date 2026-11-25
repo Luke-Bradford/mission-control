@@ -103,6 +103,23 @@ const metrics = (page: RenderedPage) =>
       pageBottom: page.getBoundingClientRect().bottom,
       dockLeft: dock?.getBoundingClientRect().left ?? null,
       pageRight: page.getBoundingClientRect().right,
+      // Words that must read whole: each state pill and each app's address and health, inside
+      // their own box and inside their cell's content box.
+      clippedLabels: [
+        ...document.querySelectorAll<HTMLElement>(
+          "#page-sessions tr.sess-row .pill, #page-sessions .sess-ans, #page-sessions .sess-applink",
+        ),
+      ]
+        .filter((el) => {
+          const cell = el.closest("td") as HTMLElement;
+          const cs = getComputedStyle(cell);
+          const c = cell.getBoundingClientRect();
+          const b = el.getBoundingClientRect();
+          const left = c.left + Number.parseFloat(cs.paddingLeft) - 0.5;
+          const right = c.right - Number.parseFloat(cs.paddingRight) + 0.5;
+          return el.scrollWidth > el.clientWidth || b.left < left || b.right > right;
+        })
+        .map((el) => el.textContent),
     };
   }, undefined);
 
@@ -133,6 +150,7 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
             // The question's answer: every one of six sessions on the first screen.
             if (height >= 900) expect(m.firstScreen).toBe(6);
             for (const h of m.rowHeights) expect(h).toBeLessThanOrEqual(40);
+            expect(m.clippedLabels).toEqual([]);
             expect(m.small).toBe(0);
             // The long last line is cut with an ellipsis and its full text stays in the title.
             expect(m.lastEllipsis).toBe("ellipsis");
@@ -146,6 +164,47 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
         },
         BROWSER_TEST_TIMEOUT_MS,
       );
+
+  for (const scheme of ["light", "dark"] as const)
+    it(
+      `reads the newest inbox message from the keyboard at 1920×940 in ${scheme}`,
+      async () => {
+        const page = await open(1920, 940, scheme, view(6));
+        try {
+          await page.evaluate(() => {
+            document.querySelector<HTMLElement>("#page-sessions button.sess-inbox")?.focus();
+          }, undefined);
+          await page.press("Enter");
+          await page.evaluate(
+            () => new Promise((resolve) => requestAnimationFrame(() => resolve(null))),
+            undefined,
+          );
+          await capture(page, `sessions-1920x940-${scheme}-inbox-open`);
+          const m = await page.evaluate(() => {
+            const button = document.querySelector<HTMLElement>("button.sess-inbox");
+            const panel = document.getElementById(button?.getAttribute("aria-controls") ?? "");
+            const box = panel?.getBoundingClientRect();
+            return {
+              focused: document.activeElement === button,
+              expanded: button?.getAttribute("aria-expanded"),
+              text: panel?.textContent ?? "",
+              onScreen: box ? box.height > 0 && box.bottom <= innerHeight : false,
+              clipped: panel ? panel.scrollWidth > panel.clientWidth : true,
+            };
+          }, undefined);
+          expect(m.focused).toBe(true);
+          expect(m.expanded).toBe("true");
+          expect(m.text).toContain("The pricing API is back.");
+          expect(m.onScreen).toBe(true);
+          expect(m.clipped).toBe(false);
+          // Enter on the disclosure never opens the session.
+          expect(page.requests().some((r) => r.path.endsWith("/focus"))).toBe(false);
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
 
   for (const n of [0, 1, 50])
     it(

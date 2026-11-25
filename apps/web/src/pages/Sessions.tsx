@@ -112,6 +112,14 @@ function Summary({ rows }: { rows: readonly CmuxSessionRow[] }) {
 
 function SessionTable({ rows, now }: { rows: readonly CmuxSessionRow[]; now: number }) {
   const [writing, setWriting] = useState<string | null>(null);
+  // Which rows show their newest inbox message; by id, so a refresh keeps it open.
+  const [reading, setReading] = useState<ReadonlySet<string>>(new Set());
+  const toggleRead = (id: string) =>
+    setReading((was) => {
+      const next = new Set(was);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   return (
     <table className="sess-table">
       <colgroup>
@@ -150,6 +158,8 @@ function SessionTable({ rows, now }: { rows: readonly CmuxSessionRow[]; now: num
             now={now}
             writing={writing === r.id}
             onWrite={(on) => setWriting(on ? r.id : null)}
+            reading={reading.has(r.id)}
+            onRead={() => toggleRead(r.id)}
           />
         ))}
       </tbody>
@@ -172,12 +182,18 @@ function SessionRow({
   now,
   writing,
   onWrite,
+  reading,
+  onRead,
 }: {
   row: CmuxSessionRow;
   now: number;
   writing: boolean;
   onWrite: (on: boolean) => void;
+  reading: boolean;
+  onRead: () => void;
 }) {
+  const msgId = `sess-msg-${r.id}`;
+  const newest = r.inbox.unread > 0 ? r.inbox.newest : null;
   const open = () => void post(ACTIONS.sessionFocus(r.id));
   const onKey = (e: KeyboardEvent<HTMLTableRowElement>) => {
     if (e.key === "Enter" && e.target === e.currentTarget) open();
@@ -194,11 +210,25 @@ function SessionRow({
         <td>
           <span className="sess-name">{r.name}</span>
           <span className={`sess-tag ${r.owner}`}>{r.owner === "crew" ? "Crew" : "Yours"}</span>
-          {r.inbox.unread > 0 && (
-            <span className="sess-inbox" title={r.inbox.newest ?? undefined}>
-              {r.inbox.unread} unread
-            </span>
-          )}
+          {r.inbox.unread > 0 &&
+            (newest ? (
+              <button
+                type="button"
+                className="sess-inbox"
+                aria-label={`${r.inbox.unread} unread ${r.inbox.unread === 1 ? "message" : "messages"} for ${r.name}`}
+                aria-expanded={reading}
+                aria-controls={reading ? msgId : undefined}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRead();
+                }}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                {r.inbox.unread} unread
+              </button>
+            ) : (
+              <span className="sess-inbox">{r.inbox.unread} unread</span>
+            ))}
         </td>
         <td className="sess-folder" title={r.folder ?? undefined}>
           {r.folder ? shortFolder(r.folder) : "—"}
@@ -238,6 +268,13 @@ function SessionRow({
           </button>
         </td>
       </tr>
+      {reading && newest && (
+        <tr className="sess-msg">
+          <td colSpan={COLUMNS} id={msgId}>
+            <span className="sess-msg-label">Newest message</span> {newest}
+          </td>
+        </tr>
+      )}
       {writing && <Composer row={r} onClose={() => onWrite(false)} />}
     </>
   );
@@ -253,11 +290,11 @@ function AppCell({ id, app }: { id: string; app: NonNullable<CmuxSessionRow["app
         ? ["Not answering", "crit"]
         : ["Not checked", "muted"];
   return (
-    <>
+    <div className="sess-appcell">
       <button
         type="button"
         className="sess-applink"
-        title="Open in this session's cmux browser"
+        title={`Open ${app.url} in this session's cmux browser`}
         aria-label={`Open ${shortUrl(app.url)} in this session's cmux browser`}
         onClick={(e) => {
           e.stopPropagation();
@@ -268,7 +305,7 @@ function AppCell({ id, app }: { id: string; app: NonNullable<CmuxSessionRow["app
         {shortUrl(app.url)}
       </button>
       <span className={`sess-ans ${tone}`}>{word}</span>
-    </>
+    </div>
   );
 }
 

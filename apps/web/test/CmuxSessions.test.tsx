@@ -168,6 +168,30 @@ describe("Sessions page", () => {
     expect(fetch).not.toHaveBeenCalledWith(`${PATH}/${ID.store}/focus`, expect.anything());
   });
 
+  it("shows the newest inbox message from a keyboard disclosure that survives a refresh", async () => {
+    const fetch = stubFetch({ [PATH]: VIEW });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    const toggle = screen.getByRole("button", { name: "1 unread message for storefront" });
+    expect(toggle.textContent).toBe("1 unread");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("The pricing API is back.")).toBeNull();
+    toggle.focus();
+    expect(document.activeElement).toBe(toggle);
+    // Enter on the button opens the message, never the session.
+    fireEvent.keyDown(toggle, { key: "Enter" });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const panel = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+    expect(panel?.textContent).toContain("The pricing API is back.");
+    expect(fetch).not.toHaveBeenCalledWith(`${PATH}/${ID.store}/focus`, expect.anything());
+    await act(async () => hub.refetch(PATH));
+    await settled(fetch, PATH);
+    expect(screen.getByText("The pricing API is back.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "1 unread message for storefront" }));
+    expect(screen.queryByText("The pricing API is back.")).toBeNull();
+  });
+
   it("says when no workspace is open", async () => {
     const fetch = stubFetch({ [PATH]: { ok: true, at: NOW, sessions: [] } });
     render(<Sessions />);

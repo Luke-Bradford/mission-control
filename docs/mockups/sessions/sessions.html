@@ -69,10 +69,14 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--mono
 .status{color:var(--fg)}
 .dash{color:var(--muted)}
 .appcell a{font-family:var(--mono);font-size:12px}
-.ans{font-size:12px;margin-left:6px}
+.ans{font-size:12px;white-space:nowrap}
 .ans.ok{color:var(--ok)}
 .ans.bad{color:var(--crit)}
-.inbox{font:12px/16px var(--mono);color:var(--accent);margin-left:6px}
+.inbox{font:12px/16px var(--mono);color:var(--accent);margin-left:6px;background:transparent;border:1px solid rgba(86,216,230,.4);border-radius:4px;padding:0 4px;min-height:24px}
+.inbox[aria-expanded="true"]{background:var(--accent-soft)}
+tr.msgrow td{height:auto;padding:4px 12px 8px;background:var(--surface-2);white-space:normal;cursor:default;color:var(--fg)}
+tr.msgrow .lbl{color:var(--muted);font-size:12px;margin-right:8px}
+.appcell div{display:flex;flex-wrap:wrap;align-items:center;column-gap:8px}
 .write{border:1px solid var(--line-2);background:transparent;border-radius:6px;font-size:12px;padding:2px 8px;min-height:26px}
 .write:hover{border-color:var(--accent)}
 tr.composer td{height:auto;padding:8px 12px 12px;background:var(--surface-2);white-space:normal;cursor:default}
@@ -115,8 +119,8 @@ tr.composer td{height:auto;padding:8px 12px 12px;background:var(--surface-2);whi
       <div class="scroll">
         <table>
           <colgroup>
-            <col style="width:17%"><col style="width:17%"><col style="width:11%"><col style="width:6%">
-            <col><col style="width:14%"><col style="width:15%"><col style="width:64px">
+            <col style="width:14%"><col style="width:14%"><col style="width:152px"><col style="width:52px">
+            <col><col style="width:11%"><col style="width:max(148px,14%)"><col style="width:72px">
           </colgroup>
           <thead><tr>
             <th scope="col">Session</th><th scope="col">Folder · repo</th><th scope="col">State <span class="sort" aria-label="sorted">↓</span></th>
@@ -135,15 +139,16 @@ tr.composer td{height:auto;padding:8px 12px 12px;background:var(--surface-2);whi
               <td><button class="write" type="button">Write</button></td>
             </tr>
             <tr tabindex="0" title="Open in cmux">
-              <td><span class="name">storefront</span><span class="tag">Yours</span><span class="inbox" title="1 unread: The pricing API is back, rebase when free.">✉ 1</span></td>
+              <td><span class="name">storefront</span><span class="tag">Yours</span><button type="button" class="inbox" aria-expanded="true" aria-controls="msg-store" aria-label="1 unread message for storefront">1 unread</button></td>
               <td class="folder" title="/Users/op/Dev/shop-app">~/Dev/shop-app · <b>shop-app</b></td>
               <td><span class="pill working">Working</span></td>
               <td class="num">22m</td>
               <td class="last">Reworking the basket summary so the totals line up with the new price breakdown on mobile</td>
               <td class="status">Basket redesign</td>
-              <td class="appcell"><a href="#" title="Open in this session's cmux browser">localhost:5173</a><span class="ans ok">● Answers</span></td>
+              <td class="appcell"><div><a href="#" title="Open in this session's cmux browser">localhost:5173</a><span class="ans ok">● Answers</span></div></td>
               <td><button class="write" type="button">Write</button></td>
             </tr>
+            <tr class="msgrow"><td colspan="8" id="msg-store"><span class="lbl">Newest message</span>The pricing API is back, rebase when free.</td></tr>
             <tr tabindex="0" title="Open in cmux">
               <td><span class="name">GUIDO-1 · #2235</span><span class="tag crew">Crew</span></td>
               <td class="folder" title="/Users/op/Dev/mc-crew/worktrees/mission-control/guido-1-2235">…/guido-1-2235 · <b>mission-control</b></td>
@@ -189,7 +194,7 @@ tr.composer td{height:auto;padding:8px 12px 12px;background:var(--surface-2);whi
               <td class="num">3h</td>
               <td class="last">GET /api/prices 200 in 14 ms</td>
               <td><span class="dash">—</span></td>
-              <td class="appcell"><a href="#" title="Open in this session's cmux browser">localhost:8080</a><span class="ans bad">✕ Not answering</span></td>
+              <td class="appcell"><div><a href="#" title="Open in this session's cmux browser">localhost:8080</a><span class="ans bad">✕ Not answering</span></div></td>
               <td><button class="write" type="button">Write</button></td>
             </tr>
           </tbody>

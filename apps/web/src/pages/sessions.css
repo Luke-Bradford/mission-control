@@ -66,23 +66,25 @@
   font-size: var(--fs);
 }
 
+/* Fixed widths hold the words that must never clip: State fits "Waiting on you" whole, and App
+   fits "localhost:5173" over "Not answering" when narrow, side by side when wide. */
 .sess-table .c-name {
-  width: 17%;
-}
-.sess-table .c-folder {
-  width: 17%;
-}
-.sess-table .c-state {
-  width: 128px;
-}
-.sess-table .c-for {
-  width: 56px;
-}
-.sess-table .c-status {
   width: 14%;
 }
+.sess-table .c-folder {
+  width: 14%;
+}
+.sess-table .c-state {
+  width: 152px;
+}
+.sess-table .c-for {
+  width: 52px;
+}
+.sess-table .c-status {
+  width: 11%;
+}
 .sess-table .c-app {
-  width: 15%;
+  width: max(148px, 14%);
 }
 .sess-table .c-act {
   width: 72px;
@@ -144,6 +146,30 @@
   color: var(--accent);
 }
 
+button.sess-inbox {
+  padding: 0 var(--sp-1);
+  background: transparent;
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+button.sess-inbox[aria-expanded="true"] {
+  background: var(--accent-soft);
+}
+
+.sess-msg td {
+  padding: var(--sp-1) var(--sp-3) var(--sp-2);
+  background: var(--surface-2);
+  color: var(--fg);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.sess-msg-label {
+  margin-right: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+
 .sess-folder {
   font-family: var(--mono);
   font-size: var(--fs-s);
@@ -163,13 +189,26 @@
   color: var(--muted);
 }
 
+/* The address and its health wrap onto two lines rather than clip either. */
+.sess-appcell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--sp-2);
+  min-width: 0;
+}
+
 .sess-applink {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--accent);
   font-family: var(--mono);
   font-size: var(--fs-s);
+  line-height: var(--lh-s);
 }
 
 .sess-applink:hover {
@@ -177,8 +216,9 @@
 }
 
 .sess-ans {
-  margin-left: var(--sp-2);
   font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  white-space: nowrap;
 }
 
 .sess-ans.ok {
