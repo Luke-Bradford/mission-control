@@ -41,6 +41,8 @@ const PROBE_CACHE_MS = 5000;
 const PROBE_TIMEOUT_MS = 2000;
 /** A workspace's status or screen read still out this long after a view starts is dropped, so one stalled cmux call never holds the list past the 5 s first view. */
 const FIELD_DEADLINE_MS = 3000;
+/** App probes still out this long after a view starts read as not checked, inside the view deadline. */
+const PROBE_DEADLINE_MS = 4000;
 /** The whole view settles within this, so the first view holds the ticket's 5 s even when cmux stalls. */
 const VIEW_DEADLINE_MS = 4500;
 export const CMUX_SLOW_TEXT = "cmux did not answer in time. Mission Control tries again shortly.";
@@ -94,6 +96,8 @@ export interface SessionsDeps {
   tellApps?: boolean;
   /** How long a view waits for each workspace's status and screen reads; default 3 s. */
   fieldDeadlineMs?: number;
+  /** How long after a view starts its app probes may run; default 4 s. */
+  probeDeadlineMs?: number;
   /** How long a whole view waits, cmux's ping and lists included; default 4.5 s. */
   viewDeadlineMs?: number;
   now?: () => number;
@@ -341,10 +345,9 @@ export function createSessions(deps: SessionsDeps): SessionsService {
       lastLine = lastScreenLine(await byDeadline(cmux.readScreen(ws.id, SCREEN_TAIL_LINES), ""));
     const statusKey = Object.keys(statuses).find((k) => k !== SESSION_APP_STATUS_KEY);
     const url = statuses[SESSION_APP_STATUS_KEY]?.trim();
-    const app =
-      url === undefined || url === "" || !isHttp(url)
-        ? null
-        : { url, answers: localAddress(url) === null ? null : await answers(url) };
+    // a local app's probe starts here but is waited for in `withAnswers`, never inside a row's turn
+    const app = url === undefined || url === "" || !isHttp(url) ? null : { url, answers: null };
+    if (app !== null && localAddress(app.url) !== null) void answers(app.url);
     const mine = inbox.filter((m) => m.workspaceId === ws.id);
     const newest = mine[0];
     return {
@@ -375,6 +378,8 @@ export function createSessions(deps: SessionsDeps): SessionsService {
         apps.delete(row.id);
         continue;
       }
+      // a probe cut off by the deadline tells nothing: what was known stays
+      if (answers === null && prev?.url === url) continue;
       let told = prev?.url === url ? prev.told : false;
       const say = async (text: string, event: string) => {
         try {
@@ -409,6 +414,23 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     return turn;
   }
 
+  /**
+   * Each row with whether its local app answers, all probes at once; a probe still out by `late`
+   * leaves the app's address with `answers: null` (not checked).
+   */
+  async function withAnswers(
+    rows: readonly CmuxSessionRow[],
+    late: Promise<void>,
+  ): Promise<CmuxSessionRow[]> {
+    return Promise.all(
+      rows.map(async (row) => {
+        if (row.app === null || localAddress(row.app.url) === null) return row;
+        const answered = await Promise.race([answers(row.app.url), late.then(() => null)]);
+        return { ...row, app: { url: row.app.url, answers: answered } };
+      }),
+    );
+  }
+
   /** The view, or a cmux-is-slow error once the view deadline passes; a late answer is dropped. */
   async function read(): Promise<CmuxSessionsView> {
     const at = now();
@@ -430,8 +452,12 @@ export function createSessions(deps: SessionsDeps): SessionsService {
 
   async function readAll(at: number): Promise<CmuxSessionsView> {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let probeTimer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<void>((done) => {
       timer = setTimeout(done, deps.fieldDeadlineMs ?? FIELD_DEADLINE_MS);
+    });
+    const probesLate = new Promise<void>((done) => {
+      probeTimer = setTimeout(done, deps.probeDeadlineMs ?? PROBE_DEADLINE_MS);
     });
     try {
       const up = await cmux.ping();
@@ -446,8 +472,11 @@ export function createSessions(deps: SessionsDeps): SessionsService {
         ]),
       ]);
       const seats = deps.seatIds();
-      const rows = await inTurns(workspaces, READS_AT_ONCE, (ws) =>
-        rowOf(ws, agentOf(agents, ws.id), inbox, seats, late),
+      const rows = await withAnswers(
+        await inTurns(workspaces, READS_AT_ONCE, (ws) =>
+          rowOf(ws, agentOf(agents, ws.id), inbox, seats, late),
+        ),
+        probesLate,
       );
       for (const id of seen.keys()) if (!rows.some((r) => r.id === id)) seen.delete(id);
       if (deps.tellApps !== false) await tellAppsInTurn(rows, at);
@@ -456,6 +485,7 @@ export function createSessions(deps: SessionsDeps): SessionsService {
       return { ok: false, at, error: e instanceof Error ? e.message : String(e) };
     } finally {
       clearTimeout(timer);
+      clearTimeout(probeTimer);
     }
   }
 

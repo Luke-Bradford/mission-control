@@ -235,6 +235,34 @@ describe("sessions view", () => {
     });
   });
 
+  it("twelve slow apps that are down all keep their address and read as not answering", async () => {
+    const ids = Array.from(
+      { length: 12 },
+      (_, i) => `44444444-4444-4444-8444-${String(i).padStart(12, "0")}`,
+    );
+    const { sessions } = setup(
+      {
+        workspaces: ids.map((id, i) => ({ id, name: `app ${i}` })),
+        sessions: [],
+        screens: Object.fromEntries(ids.map((id) => [id, "$ npm run dev\n"])),
+        statuses: Object.fromEntries(
+          ids.map((id, i) => [id, { app: `http://localhost:${5100 + i}` }]),
+        ),
+      },
+      { probe: () => new Promise((r) => setTimeout(() => r(false), 2000)) },
+    );
+    const t0 = Date.now();
+    const view = await sessions.view();
+    expect(Date.now() - t0).toBeLessThan(5000);
+    if (!view.ok) throw new Error(view.error);
+    expect(view.sessions).toHaveLength(12);
+    for (const [i, id] of ids.entries())
+      expect(view.sessions.find((r) => r.id === id)?.app).toEqual({
+        url: `http://localhost:${5100 + i}`,
+        answers: false,
+      });
+  }, 10_000);
+
   it("tells a session once when its app stops answering, and once when it is back", async () => {
     let answers = true;
     const { fake, sessions } = setup(
