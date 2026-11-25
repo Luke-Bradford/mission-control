@@ -193,6 +193,9 @@ it("leads with a one-sentence verdict, then ranked rows with a number now, a tar
   for (const r of rows) {
     expect(r.querySelector(".meas .v")?.textContent).toMatch(/\d+ → \d+ /);
     expect(r.querySelector(".dec b")?.textContent).toMatch(/^(FLIGHT|You)$/);
+    // The reason line is cut to one line by CSS, so its title holds the whole text.
+    const why = r.querySelector(".audit-why");
+    expect(why?.getAttribute("title")).toBe(why?.textContent);
   }
   // Waste alarms are grouped into one row, ranked first.
   expect(rows[0]?.textContent).toContain("Fix what makes a ticket fail again and again");

@@ -30,7 +30,7 @@ afterEach(() => {
 type Map = Record<string, { routes: string[]; rules: LinkRule[] }>;
 
 /** What is wrong with each click: no rule for it, or a target the rule does not allow. */
-export function problemsOf(clicks: Click[], rules: LinkRule[]): string[] {
+function problemsOf(clicks: Click[], rules: LinkRule[]): string[] {
   const out: string[] = [];
   for (const c of clicks) {
     if (c.kind === "button" && c.target === STAYS) continue; // acts in place
