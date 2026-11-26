@@ -93,7 +93,9 @@ describe("cmux sidebar", () => {
       notify: vi.fn(async () => {}),
     };
     const sidebar = createSessionSidebar({
-      sessions: { view: async () => ({ ok: true as const, at: 0, sessions: [row({ state: "waiting" })] }) },
+      sessions: {
+        view: async () => ({ ok: true as const, at: 0, sessions: [row({ state: "waiting" })] }),
+      },
       cmux,
       store: { getSetting: () => null },
       writes: false,
@@ -123,7 +125,11 @@ describe("cmux sidebar", () => {
     });
     await sidebar.tick();
     expect(cmux.setStatus).toHaveBeenCalledWith("workspace", "mc-cost", "~$1.24 today");
-    expect(cmux.setStatus).toHaveBeenCalledWith("workspace", "mc-check", "Checks failed: pnpm -s lint");
+    expect(cmux.setStatus).toHaveBeenCalledWith(
+      "workspace",
+      "mc-check",
+      "Checks failed: pnpm -s lint",
+    );
     current[0] = row({ state: "waiting" });
     await sidebar.tick();
     expect(cmux.notify).toHaveBeenCalledWith("workspace", "Waiting on you", expect.any(String));

@@ -16,10 +16,10 @@ import {
   COMMS_CAPCOM,
   SESSION_APP_STATUS_KEY,
   SESSION_LINE_MAX,
-  SIDEBAR_KEY_PREFIX,
   SESSION_NO_APP_TEXT,
   SESSION_TEXT_MAX,
   SESSION_UNKNOWN_TEXT,
+  SIDEBAR_KEY_PREFIX,
   sortSessions,
 } from "@mc/core";
 import { cleanText } from "../repo/clean.ts";
