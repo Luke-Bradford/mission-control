@@ -51,9 +51,7 @@ export function FlightModeControl() {
               {FLIGHT_MODE_LABEL[m]}
             </label>
           ))}
-          <span className="fp-mode-hint" title={FLIGHT_MODE_HINT[mode]}>
-            {FLIGHT_MODE_HINT[mode]}
-          </span>
+          <span className="fp-mode-hint">{FLIGHT_MODE_HINT[mode]}</span>
         </>
       )}
       {failure && (

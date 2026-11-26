@@ -52,6 +52,7 @@ const cmux = {
     opened.push(i);
     return `ws-${opened.length}`;
   },
+  workspaces: async () => opened.map((_, n) => ({ id: `ws-${n + 1}`, name: "", cwd: null })),
   readScreen: async () => screen(),
   sendKey: async (_ws: string, key: string) => {
     keys.push(key);

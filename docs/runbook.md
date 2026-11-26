@@ -1407,7 +1407,9 @@ until the operator's next message wakes it. A missing or unreadable setting read
 `cmux session "<name>" finished: it was working and is now idle.` Each is one Needs-you note, keyed
 `cmux-session:<workspace id>`, and it is the operator's at once, never FLIGHT's to triage. A state
 that has not changed raises nothing, and nor does the first sight of a session (after a hub restart
-too). Back to working, or the session gone, clears the note; leaving watch mode clears them all.
+too). A note lasts only while it holds: "waiting on you" while the session waits, "finished" while
+it is idle. Any other change (an answer, Claude exiting, the session gone) clears it, and so does
+every read of a note an earlier hub left that no longer holds; leaving watch mode clears them all.
 
 **Opening a session.** In on-call mode FLIGHT's `cmux_open` opens a new cmux session, and so does the
 Sessions page's New session button: a plain Claude session under the operator's account, with no
@@ -1422,7 +1424,7 @@ logs each one; the message is not logged. The open waits (up to a minute) for Cl
 input prompt, answering its folder-trust prompt on the way (a fresh worktree always shows it; the
 cursor opens on "No, exit", and the hub moves it to "Yes" before Enter). A bad folder or role, or a
 git failure, is a 400. A cmux failure, or a Claude that quits at the trust prompt or is not up in
-time, is a 503, and that workspace is closed.
+time, is a 503, and the workspace this open made is closed (a same-named older one never is).
 
 ### FLIGHT adds a controller check to a ticket
 

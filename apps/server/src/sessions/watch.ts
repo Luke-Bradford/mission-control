@@ -1,7 +1,7 @@
 /**
  * Watch mode: hub code, not an agent, reads every cmux session and tells the operator in Needs you
  * when one starts waiting on him, or goes from working to idle. One note per change: an unchanged
- * state raises nothing, and a first sight raises nothing.
+ * state raises nothing, and a first sight raises nothing. A note is cleared once it no longer holds.
  */
 import {
   type FlightMode,
@@ -72,9 +72,8 @@ export function createSessionWatch(deps: {
       // a failed read says nothing about any session
       if (!view.ok || deps.mode() !== "watch") return;
       let changed = false;
-      const seen = new Set<string>();
+      const states = new Map(view.sessions.map((r) => [r.id, r.state] as const));
       for (const row of view.sessions) {
-        seen.add(row.id);
         const before = last.get(row.id);
         last.set(row.id, row.state);
         if (before === undefined || before === row.state) continue;
@@ -84,15 +83,17 @@ export function createSessionWatch(deps: {
         } else if (before === "working" && row.state === "idle") {
           note(row.id, "flag", sessionFinishedText(row.name), t);
           changed = true;
-        } else if (row.state === "working") {
-          store.clearNote(key(row.id), t);
-          changed = true;
         }
       }
-      for (const id of [...last.keys()]) {
-        if (seen.has(id)) continue;
-        last.delete(id);
-        store.clearNote(key(id), t);
+      for (const id of [...last.keys()]) if (!states.has(id)) last.delete(id);
+      // A note stays only while it is still true: "waiting on you" while the session waits, and
+      // "finished" while it is idle. Any other route out (an answer, Claude exiting, the session
+      // gone) clears it, and so does a note an earlier hub left that no longer holds.
+      for (const n of store.notes()) {
+        if (!n.key.startsWith(SESSION_NOTE_PREFIX)) continue;
+        const state = states.get(n.key.slice(SESSION_NOTE_PREFIX.length));
+        if (state === (n.kind === "question" ? "waiting" : "idle")) continue;
+        store.clearNote(n.key, t);
         changed = true;
       }
       if (changed) bus.emit("attention");

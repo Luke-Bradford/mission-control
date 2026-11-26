@@ -44,10 +44,14 @@ export class SessionOpenError extends Error {
 }
 
 /**
- * What opening needs of cmux: a new workspace running `command` in `cwd`, its screen and keys to
- * answer Claude's folder-trust prompt, and a close for a start that failed.
+ * What opening needs of cmux: the workspaces open before it, a new workspace running `command` in
+ * `cwd`, its screen and keys to answer Claude's folder-trust prompt, and a close for a start that
+ * failed.
  */
-export type SessionCmux = Pick<Cmux, "newWorkspace" | "readScreen" | "sendKey" | "close">;
+export type SessionCmux = Pick<
+  Cmux,
+  "workspaces" | "newWorkspace" | "readScreen" | "sendKey" | "close"
+>;
 
 /** The roles a session may take: the `roles/*.md` files but the README, sorted, without `.md`. */
 export function sessionRoles(rolesDir: string): string[] {
@@ -169,7 +173,10 @@ export async function openSession(
   });
   let id: string;
   try {
-    id = await deps.cmux.newWorkspace({ name, cwd, command: quote(script) });
+    // every workspace open before this one is excluded: a same-named one is never taken for it,
+    // so a failed start closes only the workspace this open made
+    const before = new Set((await deps.cmux.workspaces()).map((w) => w.id));
+    id = await deps.cmux.newWorkspace({ name, cwd, command: quote(script), exclude: before });
   } catch (e) {
     throw new SessionOpenError(503, e instanceof Error ? e.message : String(e));
   }

@@ -186,6 +186,21 @@ describe("the sessions routes", () => {
     expect((await seat.get("/api/sessions/roles")).statusCode).toBe(403);
   });
 
+  it("a failed start closes only the workspace it opened, never a same-named older one", async () => {
+    // Claude quits at its trust prompt in the new workspace; "pricing" is the operator's own
+    fake.patch((s) => {
+      s.screen = "Claude Code will exit: this folder isn't trusted.\n% ";
+    });
+    const input = { folder: dir, worktree: false, role: "GUIDO", message: "m", name: "pricing" };
+    const r = await operator().post("/api/sessions", input);
+    expect(r.statusCode).toBe(503);
+    // the one closed is the workspace this open made; the operator's own "pricing" stays open
+    const closed = fake.state().closed ?? [];
+    expect(closed).toHaveLength(1);
+    expect(closed[0]).not.toBe(PRICING);
+    expect(fake.state().workspaces?.map((w) => w.id)).toContain(PRICING);
+  });
+
   it("POST /api/sessions opens a workspace", async () => {
     const input = { folder: dir, worktree: false, role: "GUIDO", message: "Fix the login test" };
     // the new Claude comes up at its input prompt

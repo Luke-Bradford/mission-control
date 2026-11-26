@@ -51,9 +51,10 @@
 .fp-err {
   color: var(--crit);
 }
-/* How FLIGHT works: three radios and the checked mode's hint, one line. */
+/* How FLIGHT works: three radios and the checked mode's hint, which wraps rather than cuts. */
 .fp-mode {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2) var(--sp-3);
   min-width: 0;
@@ -81,15 +82,11 @@
   font-weight: 600;
 }
 .fp-mode-hint {
-  flex: 0 1 auto;
+  flex: 1 1 24ch;
   min-width: 0;
-  max-width: 48ch;
   color: var(--fg-2);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .fp-muted {
   color: var(--muted);

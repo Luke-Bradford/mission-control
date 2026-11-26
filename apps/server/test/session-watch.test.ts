@@ -125,6 +125,44 @@ describe("the session watch", () => {
     expect(notes()).toEqual([]);
   });
 
+  it.each(["idle", "no-agent"] as const)(
+    "a session that leaves waiting for %s clears its waiting note",
+    async (after) => {
+      await tick();
+      state = "waiting";
+      await tick();
+      expect(notes()).toHaveLength(1);
+      // the operator answered, or Claude exited and left its shell
+      state = after;
+      await tick();
+      expect(notes()).toEqual([]);
+    },
+  );
+
+  it("clears notes left from before a hub restart that are no longer true", async () => {
+    const GONE = "11111111-1111-4111-8111-111111111111";
+    const left = (id: string, kind: "question" | "flag", text: string) =>
+      store.refreshNote({
+        key: `${SESSION_NOTE_PREFIX}${id}`,
+        kind,
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text,
+        at: T0 - HOUR,
+      });
+    left(ID, "question", sessionWaitingText("shop (GUIDO)"));
+    left(GONE, "flag", sessionFinishedText("old"));
+    // the session that was waiting is idle now, and the other one is gone
+    await tick();
+    expect(notes()).toEqual([]);
+    // one still true stays: a session that is still waiting keeps its note
+    left(ID, "question", sessionWaitingText("shop (GUIDO)"));
+    state = "waiting";
+    await tick();
+    expect(notes()).toHaveLength(1);
+  });
+
   it.each(["crew", "on-call"] as const)("raises nothing in %s mode", async (m) => {
     mode = m;
     await tick();
