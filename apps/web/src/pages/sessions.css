@@ -349,10 +349,6 @@ button.sess-inbox[aria-expanded="true"] {
   font: var(--fs-s) / var(--lh-s) var(--mono);
 }
 
-.sess-repo-edit .sess-err {
-  flex-basis: 100%;
-}
-
 .sess-composer td {
   padding: var(--sp-2) var(--sp-3) var(--sp-3);
   background: var(--surface-2);
@@ -381,6 +377,10 @@ button.sess-inbox[aria-expanded="true"] {
 
 .sess-err {
   color: var(--crit);
+}
+
+.sess-repo-edit .sess-err {
+  flex-basis: 100%;
 }
 
 .sess-foot {

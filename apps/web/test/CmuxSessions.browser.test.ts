@@ -51,7 +51,12 @@ function row(i: number, long: boolean): CmuxSessionRow {
     inbox: { unread: i === 1 ? 1 : 0, newest: i === 1 ? "The pricing API is back." : null },
     check:
       i === 0
-        ? { state: "failed", at: NOW - 5 * MIN, command: long ? LONG_COMMAND : "pnpm test", why: "idle" }
+        ? {
+            state: "failed",
+            at: NOW - 5 * MIN,
+            command: long ? LONG_COMMAND : "pnpm test",
+            why: "idle",
+          }
         : i === 1
           ? { state: "running", at: NOW - MIN, command: "pnpm test", why: "operator" }
           : null,
