@@ -56,6 +56,23 @@ state.calls ??= [];
 state.calls.push(args);
 appendFileSync(`${stateAt}.log`, `${JSON.stringify(args)}\n`);
 
+/** A run either creates a workspace with its launcher, or sends that launcher into a durable shell. */
+const launchClaude = (workspace, command) => {
+  if (!state.autoClaude || !command.startsWith("'")) return;
+  const script = readFileSync(command.replace(/^'|'$/g, "").replaceAll("'\\''", "'"), "utf8");
+  const m = script.match(/'--(?:session-id|resume)' '([^']+)'/);
+  if (!m) return;
+  state.sessions ??= [];
+  const dir = state.transcriptDir ?? "/tmp";
+  state.sessions.push({
+    session_id: m[1],
+    lifecycle: "idle",
+    pid: state.claudePid ?? process.ppid,
+    workspace_id: workspace,
+    transcript_path: join(dir, `${m[1]}.jsonl`),
+  });
+};
+
 // global options before the command
 while (args[0]?.startsWith("--")) {
   args = args.slice(args[0] === "--json" ? 1 : 2);
@@ -125,24 +142,7 @@ switch (cmd) {
     if (!state.hideWorkspaces) state.workspaces.push(ws);
     // Seat workspaces start a shell and become Claude launchers only when a run begins. The
     // per-run driver passes its generated launcher as a quoted path; do not try to read `zsh`.
-    if (state.autoClaude && ws.command.startsWith("'")) {
-      const script = readFileSync(
-        ws.command.replace(/^'|'$/g, "").replaceAll("'\\''", "'"),
-        "utf8",
-      );
-      const m = script.match(/'--(?:session-id|resume)' '([^']+)'/);
-      if (m) {
-        state.sessions ??= [];
-        const dir = state.transcriptDir ?? "/tmp";
-        state.sessions.push({
-          session_id: m[1],
-          lifecycle: "idle",
-          pid: state.claudePid ?? process.ppid,
-          workspace_id: ws.id,
-          transcript_path: join(dir, `${m[1]}.jsonl`),
-        });
-      }
-    }
+    launchClaude(ws.id, ws.command);
     ok("OK workspace:1");
     break;
   }
@@ -189,6 +189,7 @@ switch (cmd) {
     const text = rest.at(-1);
     state.sent ??= [];
     state.sent.push({ ws: flag("--workspace"), text, paste: rest.includes("--paste") });
+    launchClaude(flag("--workspace"), text.slice(text.lastIndexOf(" && ") + 4));
     ok();
     break;
   }
