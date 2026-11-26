@@ -1,7 +1,13 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { applyCmuxSessionEvent, startCmuxEvents } from "../src/sessions/events.ts";
+import { createSessions } from "../src/sessions/sessions.ts";
 import { createSessionSidebar } from "../src/sessions/sidebar.ts";
+import { Store } from "../src/store.ts";
+import { fakeCmux } from "./fake-cmux-harness.ts";
 
 const row = (over: Record<string, unknown> = {}) => ({
   id: "workspace",
@@ -66,33 +72,63 @@ describe("cmux sidebar", () => {
   });
 
   it("makes an opened and closed workspace reach a fresh page view within two seconds", async () => {
-    let cached = true;
-    let open = false;
-    const invalidate = vi.fn(() => {
-      cached = false;
+    const dir = mkdtempSync(join(tmpdir(), "mc-cmux-events-"));
+    const old = "11111111-1111-4111-8111-111111111111";
+    const added = "22222222-2222-4222-8222-222222222222";
+    const fake = fakeCmux(dir, { workspaces: [{ id: old, name: "old" }] });
+    let stall = false;
+    const cmux = new Proxy(fake.cmux, {
+      get(target, key, receiver) {
+        if (stall && (key === "statuses" || key === "readScreen"))
+          return () => new Promise(() => {});
+        return Reflect.get(target, key, receiver);
+      },
     });
-    const view = vi.fn(async () => ({
-      ok: true as const,
-      at: 0,
-      sessions: cached ? [] : open ? [row()] : [],
-      repos: [],
-    }));
+    const sessions = createSessions({
+      cmux,
+      store: new Store(join(dir, "mc.sqlite")),
+      seatIds: () => [],
+      projectsDir: join(dir, "projects"),
+      alive: () => true,
+    });
+    const initial = await sessions.view();
+    expect(initial.ok && initial.sessions.map((r) => r.id)).toEqual([old]);
+    stall = true;
     const bus = new ChangeBus();
-    const emitted = vi.fn();
-    bus.subscribe(emitted);
     const sidebar = { tick: vi.fn(async () => {}) };
-    await view();
-    open = true;
-    applyCmuxSessionEvent({ sessions: { invalidate }, bus, sidebar });
-    await vi.waitFor(async () => expect((await view()).sessions).toHaveLength(1), {
-      timeout: 2000,
-    });
-    expect(emitted).toHaveBeenCalledWith("sessions");
-    open = false;
-    applyCmuxSessionEvent({ sessions: { invalidate }, bus, sidebar });
-    await vi.waitFor(async () => expect((await view()).sessions).toHaveLength(0), {
-      timeout: 2000,
-    });
+    const waitForTopic = () =>
+      new Promise<string[]>((resolve) => {
+        bus.subscribe((topic) => {
+          if (topic !== "sessions") return;
+          void sessions
+            .view()
+            .then((view) => resolve(view.ok ? view.sessions.map((r) => r.id) : []));
+        });
+      });
+    const withinTwoSeconds = (event: Promise<string[]>) =>
+      Promise.race([
+        event,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("sessions did not refresh")), 2000),
+        ),
+      ]);
+    try {
+      fake.patch((state) => {
+        state.workspaces?.push({ id: added, name: "added" });
+      });
+      const opened = waitForTopic();
+      applyCmuxSessionEvent({ sessions, bus, sidebar });
+      expect((await withinTwoSeconds(opened)).sort()).toEqual([old, added].sort());
+
+      fake.patch((state) => {
+        state.workspaces = state.workspaces?.filter((workspace) => workspace.id !== added);
+      });
+      const closed = waitForTopic();
+      applyCmuxSessionEvent({ sessions, bus, sidebar });
+      expect(await withinTwoSeconds(closed)).toEqual([old]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("writes a pull request and only changed CI state", async () => {

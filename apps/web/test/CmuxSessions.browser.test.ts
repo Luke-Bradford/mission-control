@@ -129,7 +129,7 @@ const metrics = (page: RenderedPage) =>
     const visible = rows.filter((r) => r.getBoundingClientRect().bottom <= innerHeight);
     const small = [
       ...document.querySelectorAll<HTMLElement>(
-        "#page-sessions button, #page-sessions tr.sess-row",
+        "#page-sessions button, #page-sessions tr.sess-row, #page-sessions .sess-sidebar-toggle",
       ),
     ]
       .map((e) => e.getBoundingClientRect())

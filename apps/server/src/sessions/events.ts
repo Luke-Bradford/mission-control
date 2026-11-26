@@ -2,13 +2,14 @@ import { type Cmux, type CmuxEvent, parseCmuxEvent } from "../runtime/cmux.ts";
 
 /** Makes the event stream's lifecycle change visible to both the Sessions page and sidebar. */
 export function applyCmuxSessionEvent(deps: {
-  sessions: { invalidate(): void };
+  sessions: { refreshMembership(): Promise<void> };
   bus: { emit(topic: "sessions"): void };
   sidebar: { tick(): Promise<void> };
 }): void {
-  deps.sessions.invalidate();
-  deps.bus.emit("sessions");
-  void deps.sidebar.tick();
+  void deps.sessions.refreshMembership().then(() => {
+    deps.bus.emit("sessions");
+    void deps.sidebar.tick();
+  });
 }
 
 export function startCmuxEvents(deps: {

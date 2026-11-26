@@ -82,6 +82,8 @@ export interface SessionsService {
   view(): Promise<CmuxSessionsView>;
   /** Drops the short-lived cmux read cache after a workspace lifecycle event. */
   invalidate(): void;
+  /** Refreshes workspace membership without waiting for each workspace's status or screen. */
+  refreshMembership(): Promise<void>;
   /** The workspace's screen, at most `lines` of its last lines. */
   read(id: string, lines: number): Promise<string>;
   focus(id: string): Promise<void>;
@@ -322,6 +324,8 @@ export function createSessions(deps: SessionsDeps): SessionsService {
   let appsAt = Number.NEGATIVE_INFINITY;
   const probes = new Map<string, { at: number; answers: Promise<boolean> }>();
   let cached: { at: number; view: Promise<CmuxSessionsView> } | null = null;
+  let lastRows = new Map<string, CmuxSessionRow>();
+  let lastRepos: Extract<CmuxSessionsView, { ok: true }>["repos"] = [];
 
   const agentOf = (agents: readonly CmuxAgent[], ws: string): CmuxAgent | null =>
     liveAgentOf(agents, ws, alive);
@@ -363,6 +367,42 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     }
     seen.set(id, { state, since });
     return since;
+  }
+
+  /** A row for a lifecycle refresh: existing details win while the full read enriches it later. */
+  function membershipRow(ws: CmuxWorkspace, agent: CmuxAgent | null): CmuxSessionRow {
+    const state: CmuxSessionState = agent === null ? "no-agent" : STATE_OF[agent.lifecycle];
+    const previous = lastRows.get(ws.id);
+    const since = previous?.state === state ? previous.since : now();
+    seen.set(ws.id, { state, since });
+    const folder = agent?.cwd ?? ws.cwd;
+    if (previous !== undefined)
+      return {
+        ...previous,
+        id: ws.id,
+        name: ws.name,
+        owner: deps.seatIds().some((seat) => ws.name.startsWith(`${seat} · `))
+          ? "crew"
+          : "operator",
+        folder,
+        state,
+        since,
+      };
+    return {
+      id: ws.id,
+      name: ws.name,
+      owner: deps.seatIds().some((seat) => ws.name.startsWith(`${seat} · `)) ? "crew" : "operator",
+      folder,
+      repo: null,
+      repoKey: null,
+      state,
+      since,
+      lastLine: null,
+      status: null,
+      app: null,
+      inbox: { unread: 0, newest: null },
+      check: deps.checks?.checkOf(ws.id) ?? null,
+    };
   }
 
   async function rowOf(
@@ -563,7 +603,10 @@ export function createSessions(deps: SessionsDeps): SessionsService {
         deps.checks === undefined
           ? []
           : await deps.checks.repos(enriched.filter((r) => r.owner === "operator"));
-      return { ok: true, at, sessions: sortSessions(enriched), repos };
+      const result = { ok: true as const, at, sessions: sortSessions(enriched), repos };
+      lastRows = new Map(result.sessions.map((row) => [row.id, row]));
+      lastRepos = repos;
+      return result;
     } catch (e) {
       return { ok: false, at, error: e instanceof Error ? e.message : String(e) };
     } finally {
@@ -594,6 +637,24 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     }
   }
 
+  /** Refreshes the membership cache from cmux without waiting for slow per-workspace enrichment. */
+  async function refreshMembership(): Promise<void> {
+    cached = null;
+    try {
+      const at = now();
+      const [workspaces, agents] = await Promise.all([cmux.workspaces(), cmux.agents()]);
+      const rows = workspaces.map((ws) => membershipRow(ws, agentOf(agents, ws.id)));
+      const ids = new Set(rows.map((row) => row.id));
+      for (const id of seen.keys()) if (!ids.has(id)) seen.delete(id);
+      for (const id of lastRows.keys()) if (!ids.has(id)) lastRows.delete(id);
+      withSpend(rows, agents, at);
+      const view = { ok: true as const, at, sessions: sortSessions(rows), repos: lastRepos };
+      cached = { at, view: Promise.resolve(view) };
+    } catch {
+      // The regular poll remains the backstop when cmux cannot list workspaces here.
+    }
+  }
+
   /** The open workspace with this id; a malformed or unknown id is refused before it reaches cmux. */
   async function workspace(id: string): Promise<CmuxWorkspace> {
     if (!CMUX_WORKSPACE_ID.test(id)) throw new SessionError(404, SESSION_UNKNOWN_TEXT);
@@ -606,6 +667,7 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     invalidate() {
       cached = null;
     },
+    refreshMembership,
     view() {
       if (cached !== null && now() - cached.at < VIEW_CACHE_MS) return cached.view;
       const view = read();

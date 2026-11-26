@@ -41,6 +41,9 @@
 }
 
 .sess-sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--sp-6);
   margin-left: auto;
   color: var(--fg-2);
   font-size: var(--fs-s);
