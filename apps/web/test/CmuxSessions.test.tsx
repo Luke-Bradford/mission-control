@@ -1,5 +1,7 @@
 import {
   type CmuxSessionRow,
+  OPERATOR_HEADER,
+  OPERATOR_TOKEN_REQUIRED,
   type CmuxSessionsView,
   SESSION_BUSY_TEXT,
   SESSION_FOLDER_TEXT,
@@ -276,6 +278,37 @@ describe("Sessions page", () => {
     });
     await waitFor(() => expect(reads()).toBe(before + 1));
     await waitFor(() => expect(screen.queryByRole("form", { name: "New session" })).toBeNull());
+  });
+
+  it("New session reads its roles with the operator token", async () => {
+    const roles = vi.fn((init: RequestInit | undefined) =>
+      new Headers(init?.headers).get(OPERATOR_HEADER) === "fixture-operator"
+        ? { status: 200, body: { roles: ["GUIDO"], folders: [SHOP] } }
+        : { status: 401, body: { error: OPERATOR_TOKEN_REQUIRED } },
+    );
+    const fetch = stubFetch({
+      "/api/operator/bootstrap": { token: "fixture-operator" },
+      [PATH]: VIEW,
+      [`${PATH}/roles`]: roles,
+      [`POST ${PATH}`]: { id: ID.pricing, name: "shop-app (GUIDO)" },
+    });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+    const form = screen.getByRole("form", { name: "New session" });
+    await waitFor(() => expect(within(form).getByRole("option", { name: "GUIDO" })).toBeTruthy());
+    expect(roles.mock.results.some((r) => (r.value as { status: number }).status === 200)).toBe(
+      true,
+    );
+    fireEvent.change(within(form).getByLabelText("Folder"), { target: { value: SHOP } });
+    fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "GUIDO" } });
+    fireEvent.change(within(form).getByLabelText("First message"), { target: { value: "Go" } });
+    const submit = within(form).getByRole("button", { name: "Open" });
+    expect(submit).toHaveProperty("disabled", false);
+    fireEvent.click(submit);
+    await waitFor(() =>
+      expect(fetch.mock.calls.some(([p, i]) => p === PATH && i?.method === "POST")).toBe(true),
+    );
   });
 
   it("New session shows a refusal inline and keeps the form", async () => {

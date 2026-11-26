@@ -554,10 +554,11 @@ const VISIT_REUSE_MS = 2000;
 
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 
-/** Protected JSON reads: PR flow, dependencies, attention materials and cmux sessions. */
+/** Protected JSON reads: PR flow, dependencies, attention materials, cmux sessions and session roles. */
 const readResource = async <T>(path: string): Promise<T> =>
   path === RESOURCES.prFlow.path ||
   path === RESOURCES.sessions.path ||
+  path === RESOURCES.sessionRoles.path ||
   path === RESOURCES.dependencies.path ||
   /^\/api\/attention\/[^/]+\/materials$/.test(path)
     ? apiOperatorGet<T>(path)
