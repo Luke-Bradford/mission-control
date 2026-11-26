@@ -468,10 +468,13 @@ button.sess-inbox[aria-expanded="true"] {
     padding-inline: var(--sp-2);
   }
   .sess-table .c-folder {
-    width: 13%;
+    width: 10%;
   }
   .sess-table .c-branch {
-    width: 14%;
+    width: 11%;
+  }
+  .sess-table .c-name {
+    width: 160px;
   }
   .sess-table .c-state {
     width: 140px;
