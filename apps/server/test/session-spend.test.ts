@@ -390,9 +390,9 @@ describe("session spend", () => {
     writeFileSync(fresh, turn("sess-new", "/nowhere/notes", "n1", NOW + 20_000, u));
     utimesSync(fresh, (NOW + 20_000) / 1000, (NOW + 20_000) / 1000);
     pass(NOW + 30_000);
-    expect(sessionSpendFor(store, ["sess-new"], NOW + 30_000, TZ).get("sess-new")?.today.tokens).toBe(
-      20,
-    );
+    expect(
+      sessionSpendFor(store, ["sess-new"], NOW + 30_000, TZ).get("sess-new")?.today.tokens,
+    ).toBe(20);
     expect(sessionSpendSplit(config, store, NOW + 30_000).readAt).toBeNull();
     // the backlog carries on at each pass until every file is read to its end
     let now = NOW + 30_000;
