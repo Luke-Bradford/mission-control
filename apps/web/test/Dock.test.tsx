@@ -185,14 +185,21 @@ describe("Dock content", () => {
 });
 
 describe("stateWord", () => {
-  const seat = (state: SeatState | null, live = true) => ({ id: "flight", call: "FLIGHT", model: "opus", state, live });
+  const seat = (state: SeatState | null, live = true) => ({
+    id: "flight",
+    call: "FLIGHT",
+    model: "opus",
+    state,
+    live,
+  });
 
   it("says FLIGHT needs input while its Claude in cmux waits on the operator, not stopped", () => {
     expect(stateWord(seat("needs-input"))).toBe("needs your input in cmux");
   });
 
   it("names every live seat state other than stopped without falling back to stopped", () => {
-    for (const s of SEAT_STATES.filter((x) => x !== "stopped")) expect(stateWord(seat(s))).not.toBe("stopped");
+    for (const s of SEAT_STATES.filter((x) => x !== "stopped"))
+      expect(stateWord(seat(s))).not.toBe("stopped");
     expect(stateWord(seat("stopped"))).toBe("stopped");
     expect(stateWord(seat("running", false))).toBe("stopped");
   });
