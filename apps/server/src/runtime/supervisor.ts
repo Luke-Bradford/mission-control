@@ -1408,6 +1408,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const seatId = l.info.seat.id;
     if (transferState(l.run.id)?.pending) return;
     if (live.get(seatId) === l) live.delete(seatId);
+    const seatWorkspace = store.getSetting(cmuxSeatWorkspaceKey(seatId));
+    const ticket = store.getSetting(`cmux.seat-ticket:${seatId}`);
+    if (seatWorkspace !== null)
+      void cmux
+        ?.setStatus(seatWorkspace, "mc-seat", `Idle${ticket === null ? "" : ` · ${ticket}`}`)
+        .catch((error) => log(`${seatId}: could not write cmux seat status: ${errText(error)}`));
     if (stopping && l.ending === null) {
       // The hub is going down: the run stays active and is resumed on the next start.
       fold(l);
@@ -2550,6 +2556,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ...(deps.cmuxPollMs === undefined ? {} : { pollMs: deps.cmuxPollMs }),
             ...(deps.cmuxStartWaitMs === undefined ? {} : { startWaitMs: deps.cmuxStartWaitMs }),
           });
+          const seatWorkspace = store.getSetting(cmuxSeatWorkspaceKey(info.seat.id));
+          if (seatWorkspace !== null) {
+            const ticket = run.ticket === null ? info.seat.role : `#${run.ticket}`;
+            store.setSetting(`cmux.seat-ticket:${info.seat.id}`, ticket);
+            void cmux
+              .setStatus(seatWorkspace, "mc-seat", `Running · ${ticket}`)
+              .catch((error) =>
+                log(`${info.seat.id}: could not write cmux seat status: ${errText(error)}`),
+              );
+          }
           // A start cmux could not make goes on under a keeper: no seat waits on cmux, FLIGHT least
           // of all. The workspace is closed and its Claude stopped before this runs.
           session = withKeeperFallback(inWorkspace, (reason) => {

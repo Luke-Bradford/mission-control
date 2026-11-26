@@ -59,6 +59,8 @@ export async function reconcileCmuxSeatWorkspaces(input: {
     }
     if (!group.workspaceIds.includes(workspace))
       await input.cmux.addToWorkspaceGroup(group.id, workspace);
+    if (input.store.getSetting(`cmux.seat-ticket:${seat.id}`) === null)
+      await input.cmux.setStatus(workspace, "mc-seat", "Idle");
     input.store.setSetting(cmuxSeatWorkspaceKey(seat.id), workspace);
   }
   input.store.setSetting(seatWorkspaceRegistryKey, JSON.stringify(known));
