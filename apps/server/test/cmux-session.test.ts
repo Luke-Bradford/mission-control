@@ -1159,64 +1159,69 @@ describe("with no cmux record of the session", () => {
   });
 
   // Claude's transcripts name the session `sessionId`; its stream-json output says `session_id`. Either is taken.
-  it.each(["sessionId", "session_id"])("an operator's /clear with no record (%s): the new transcript is read from its start and the run holds the new id", async (key) => {
-    const h = await bare();
-    patch((s) => {
-      s.screen = PROMPT_SCREEN;
-    });
-    writeFileSync(join(root, "run", CMUX_PID_FILE), `${launched()}\n`);
-    await h.session.ready;
-    const dir = join(root, "config", "projects", "-some-folder");
-    // another session in the same project folder, from before this start: never taken for the new one
-    mkdirSync(dir, { recursive: true });
-    const before = join(dir, "99999999-9999-4999-8999-999999999999.jsonl");
-    writeFileSync(before, `${JSON.stringify({ type: "user", cwd: root, [key]: "x" })}\n`);
-    const old = Date.now() / 1000 - 3600;
-    utimesSync(before, old, old);
-    own(h, { type: "user", cwd: root, [key]: h.sessionId, message: { content: "brief" } });
-    await wait(
-      () => existsSync(h.transcript) && readFileSync(h.transcript, "utf8").includes("brief"),
-    );
-    // a Claude in another folder writes beside it: not this run's
-    const stranger = join(dir, "88888888-8888-4888-8888-888888888888.jsonl");
-    writeFileSync(
-      stranger,
-      `${JSON.stringify({ type: "user", cwd: "/elsewhere", [key]: "88888888-8888-4888-8888-888888888888", message: { content: "not ours" } })}\n`,
-    );
-    // /clear: the same process, a new session and transcript
-    const fresh = "22222222-2222-4222-8222-222222222222";
-    writeFileSync(
-      join(dir, `${fresh}.jsonl`),
-      `${[
-        { type: "user", cwd: root, [key]: fresh, message: { content: "after clear" } },
-        {
-          type: "assistant",
-          cwd: root,
-          [key]: fresh,
-          message: { content: [{ type: "text", text: "ok" }], usage: { input_tokens: 7 } },
-        },
-      ]
-        .map((l) => JSON.stringify(l))
-        .join("\n")}\n`,
-    );
-    await wait(() => h.events.some((e) => e.kind === "init"));
-    expect(h.events.find((e) => e.kind === "init")).toMatchObject({ sessionId: fresh });
-    await wait(() => readFileSync(h.transcript, "utf8").includes("after clear"));
-    const copied = readFileSync(h.transcript, "utf8");
-    expect(copied).not.toContain("not ours");
-    expect(copied).toContain('"text":"ok"');
-    // its context use is the new session's
-    await expect(h.session.control("get_context_usage")).resolves.toMatchObject({ totalTokens: 7 });
-    // it stays tracked: later lines of the new transcript are copied too
-    appendFileSync(
-      join(dir, `${fresh}.jsonl`),
-      `${JSON.stringify({ type: "user", cwd: root, [key]: fresh, message: { content: "later" } })}\n`,
-    );
-    await wait(() => readFileSync(h.transcript, "utf8").includes("later"));
-    expect(h.session.alive).toBe(true);
-    expect(h.events.filter((e) => e.kind === "init")).toHaveLength(1);
-    h.session.detach();
-  });
+  it.each(["sessionId", "session_id"])(
+    "an operator's /clear with no record (%s): the new transcript is read from its start and the run holds the new id",
+    async (key) => {
+      const h = await bare();
+      patch((s) => {
+        s.screen = PROMPT_SCREEN;
+      });
+      writeFileSync(join(root, "run", CMUX_PID_FILE), `${launched()}\n`);
+      await h.session.ready;
+      const dir = join(root, "config", "projects", "-some-folder");
+      // another session in the same project folder, from before this start: never taken for the new one
+      mkdirSync(dir, { recursive: true });
+      const before = join(dir, "99999999-9999-4999-8999-999999999999.jsonl");
+      writeFileSync(before, `${JSON.stringify({ type: "user", cwd: root, [key]: "x" })}\n`);
+      const old = Date.now() / 1000 - 3600;
+      utimesSync(before, old, old);
+      own(h, { type: "user", cwd: root, [key]: h.sessionId, message: { content: "brief" } });
+      await wait(
+        () => existsSync(h.transcript) && readFileSync(h.transcript, "utf8").includes("brief"),
+      );
+      // a Claude in another folder writes beside it: not this run's
+      const stranger = join(dir, "88888888-8888-4888-8888-888888888888.jsonl");
+      writeFileSync(
+        stranger,
+        `${JSON.stringify({ type: "user", cwd: "/elsewhere", [key]: "88888888-8888-4888-8888-888888888888", message: { content: "not ours" } })}\n`,
+      );
+      // /clear: the same process, a new session and transcript
+      const fresh = "22222222-2222-4222-8222-222222222222";
+      writeFileSync(
+        join(dir, `${fresh}.jsonl`),
+        `${[
+          { type: "user", cwd: root, [key]: fresh, message: { content: "after clear" } },
+          {
+            type: "assistant",
+            cwd: root,
+            [key]: fresh,
+            message: { content: [{ type: "text", text: "ok" }], usage: { input_tokens: 7 } },
+          },
+        ]
+          .map((l) => JSON.stringify(l))
+          .join("\n")}\n`,
+      );
+      await wait(() => h.events.some((e) => e.kind === "init"));
+      expect(h.events.find((e) => e.kind === "init")).toMatchObject({ sessionId: fresh });
+      await wait(() => readFileSync(h.transcript, "utf8").includes("after clear"));
+      const copied = readFileSync(h.transcript, "utf8");
+      expect(copied).not.toContain("not ours");
+      expect(copied).toContain('"text":"ok"');
+      // its context use is the new session's
+      await expect(h.session.control("get_context_usage")).resolves.toMatchObject({
+        totalTokens: 7,
+      });
+      // it stays tracked: later lines of the new transcript are copied too
+      appendFileSync(
+        join(dir, `${fresh}.jsonl`),
+        `${JSON.stringify({ type: "user", cwd: root, [key]: fresh, message: { content: "later" } })}\n`,
+      );
+      await wait(() => readFileSync(h.transcript, "utf8").includes("later"));
+      expect(h.session.alive).toBe(true);
+      expect(h.events.filter((e) => e.kind === "init")).toHaveLength(1);
+      h.session.detach();
+    },
+  );
 
   it("a failed start leaves no secret environment file or launcher behind", async () => {
     patch((s) => {
