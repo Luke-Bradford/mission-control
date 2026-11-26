@@ -297,6 +297,53 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
 
   for (const scheme of ["light", "dark"] as const)
     it(
+      `reads a long branch in full from the keyboard at 1280×800 in ${scheme}`,
+      async () => {
+        const page = await open(1280, 800, scheme, view(6, true));
+        try {
+          const branch = await page.evaluate(() => {
+            const button = document.querySelector<HTMLElement>(
+              ".sess-branch-toggle",
+            ) as HTMLElement;
+            return button.textContent ?? "";
+          }, undefined);
+          let open = false;
+          for (let i = 0; i < 80 && !open; i++) {
+            await page.press("Tab");
+            open = await page.evaluate(
+              () => document.activeElement?.classList.contains("sess-branch-toggle") ?? false,
+              undefined,
+            );
+          }
+          expect(open).toBe(true);
+          await page.press("Enter");
+          const detail = await page.evaluate(() => {
+            const button = document.activeElement as HTMLElement;
+            const panel = document.getElementById(button.getAttribute("aria-controls") ?? "");
+            const row = button.closest("tr") as HTMLElement;
+            return {
+              expanded: button.getAttribute("aria-expanded"),
+              text: panel?.textContent ?? "",
+              onScreen: (panel?.getBoundingClientRect().height ?? 0) > 0,
+              rowHeight: row.getBoundingClientRect().height,
+            };
+          }, undefined);
+          expect(detail.expanded).toBe("true");
+          expect(detail.text).toContain(branch);
+          expect(detail.onScreen).toBe(true);
+          expect(detail.rowHeight).toBeLessThanOrEqual(40);
+          const layout = await metrics(page);
+          expect(layout.clippedHeadings).toEqual([]);
+          expect(layout.clippedLabels).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+
+  for (const scheme of ["light", "dark"] as const)
+    it(
       `reads the newest inbox message from the keyboard at 1920×940 in ${scheme}`,
       async () => {
         const page = await open(1920, 940, scheme, view(6));

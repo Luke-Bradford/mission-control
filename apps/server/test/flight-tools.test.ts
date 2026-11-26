@@ -501,6 +501,7 @@ beforeEach(() => {
     setStatus: async () => {},
     clearStatus: async () => {},
     linkPr: async () => {},
+    clearPr: async () => {},
     notify: async () => {},
     events: () => ({ stop: () => {}, ended: Promise.resolve() }),
   };

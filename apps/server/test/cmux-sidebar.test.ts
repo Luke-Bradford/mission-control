@@ -100,6 +100,7 @@ describe("cmux sidebar", () => {
       setStatus: vi.fn(async () => {}),
       clearStatus: vi.fn(async () => {}),
       linkPr: vi.fn(async () => {}),
+      clearPr: vi.fn(async () => {}),
       notify: vi.fn(async () => {}),
     };
     const sidebar = createSessionSidebar({
@@ -121,6 +122,7 @@ describe("cmux sidebar", () => {
       setStatus: vi.fn(),
       clearStatus: vi.fn(),
       linkPr: vi.fn(),
+      clearPr: vi.fn(),
       notify: vi.fn(),
     };
     const sidebar = createSessionSidebar({
@@ -141,6 +143,7 @@ describe("cmux sidebar", () => {
       setStatus: vi.fn(async () => {}),
       clearStatus: vi.fn(async () => {}),
       linkPr: vi.fn(async () => {}),
+      clearPr: vi.fn(async () => {}),
       notify: vi.fn(async () => {}),
     };
     const sidebar = createSessionSidebar({
@@ -175,6 +178,7 @@ describe("cmux sidebar", () => {
       setStatus: vi.fn(async () => {}),
       clearStatus: vi.fn(async () => {}),
       linkPr: vi.fn(async () => {}),
+      clearPr: vi.fn(async () => {}),
       notify: vi.fn(async () => {}),
     };
     const sidebar = createSessionSidebar({
@@ -197,6 +201,7 @@ describe("cmux sidebar", () => {
       setStatus: vi.fn(async () => {}),
       clearStatus: vi.fn(async () => {}),
       linkPr: vi.fn(async () => {}),
+      clearPr: vi.fn(async () => {}),
       notify: vi.fn(async () => {}),
     };
     const sidebar = createSessionSidebar({
@@ -217,6 +222,7 @@ describe("cmux sidebar", () => {
       setStatus: vi.fn(async () => {}),
       clearStatus: vi.fn(async () => {}),
       linkPr: vi.fn(async () => {}),
+      clearPr: vi.fn(async () => {}),
       notify: vi.fn(async () => {}),
     };
     const sidebar = createSessionSidebar({
@@ -246,6 +252,7 @@ describe("cmux sidebar", () => {
       setStatus: vi.fn(async () => {}),
       clearStatus: vi.fn(async () => {}),
       linkPr: vi.fn(async () => {}),
+      clearPr: vi.fn(async () => {}),
       notify: vi.fn(async () => {}),
     };
     const sidebar = createSessionSidebar({
@@ -268,5 +275,62 @@ describe("cmux sidebar", () => {
     cmux.notify.mockClear();
     await sidebar.tick();
     expect(cmux.notify).not.toHaveBeenCalled();
+  });
+
+  it("notifies both a finish and an app stop in one transition", async () => {
+    const current = [row({ state: "working", app: { url: "http://app.test", answers: true } })];
+    const cmux = {
+      statuses: vi.fn(async () => ({})),
+      setStatus: vi.fn(async () => {}),
+      clearStatus: vi.fn(async () => {}),
+      linkPr: vi.fn(async () => {}),
+      clearPr: vi.fn(async () => {}),
+      notify: vi.fn(async () => {}),
+    };
+    const sidebar = createSessionSidebar({
+      sessions: { view: async () => ({ ok: true as const, at: 0, sessions: current, repos: [] }) },
+      cmux,
+      store: { getSetting: () => null },
+    });
+    await sidebar.tick();
+    current[0] = row({ state: "idle", app: { url: "http://app.test", answers: false } });
+    await sidebar.tick();
+    expect(cmux.notify).toHaveBeenCalledWith("workspace", "Finished", expect.any(String));
+    expect(cmux.notify).toHaveBeenCalledWith("workspace", "App stopped", expect.any(String));
+    cmux.notify.mockClear();
+    await sidebar.tick();
+    expect(cmux.notify).not.toHaveBeenCalled();
+  });
+
+  it("clears only a PR link it created when a branch has no PR", async () => {
+    const current = [row()];
+    let on = true;
+    const cmux = {
+      statuses: vi.fn(async () => ({})),
+      setStatus: vi.fn(async () => {}),
+      clearStatus: vi.fn(async () => {}),
+      linkPr: vi.fn(async () => {}),
+      clearPr: vi.fn(async () => {}),
+      notify: vi.fn(async () => {}),
+    };
+    const sidebar = createSessionSidebar({
+      sessions: { view: async () => ({ ok: true as const, at: 0, sessions: current, repos: [] }) },
+      cmux,
+      store: { getSetting: () => (on ? null : "off") },
+    });
+    await sidebar.tick();
+    current[0] = row({ pr: { ...row().pr, url: "https://example.test/pull/2" } });
+    await sidebar.tick();
+    expect(cmux.linkPr).toHaveBeenLastCalledWith("workspace", "https://example.test/pull/2");
+    current[0] = row({ pr: null });
+    await sidebar.tick();
+    expect(cmux.clearPr).toHaveBeenCalledWith("workspace");
+    cmux.clearPr.mockClear();
+    await sidebar.tick();
+    expect(cmux.clearPr).not.toHaveBeenCalled();
+    on = false;
+    current[0] = row();
+    await sidebar.tick();
+    expect(cmux.linkPr).toHaveBeenCalledTimes(2);
   });
 });

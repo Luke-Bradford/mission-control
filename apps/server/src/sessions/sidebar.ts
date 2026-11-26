@@ -19,7 +19,7 @@ export const cmuxWritesOn = (store: Pick<Store, "getSetting">) =>
 
 type Deps = {
   sessions: Pick<SessionsService, "view">;
-  cmux: Pick<Cmux, "statuses" | "setStatus" | "clearStatus" | "linkPr" | "notify">;
+  cmux: Pick<Cmux, "statuses" | "setStatus" | "clearStatus" | "linkPr" | "clearPr" | "notify">;
   store: Pick<Store, "getSetting">;
   /** Preview hubs read sessions but must never write to the operator's cmux. */
   writes?: boolean;
@@ -86,7 +86,7 @@ export function createSessionSidebar(deps: Deps) {
                 `"${row.name}" has a question for you.`,
               ),
             );
-          else if (previousState === "working" && row.state === "idle")
+          if (previousState === "working" && row.state === "idle")
             await mutate(() =>
               deps.cmux.notify(
                 row.id,
@@ -94,7 +94,7 @@ export function createSessionSidebar(deps: Deps) {
                 `"${row.name}" finished and is idle.`,
               ),
             );
-          else if (previousAnswer === true && app?.answers === false)
+          if (previousAnswer === true && app?.answers === false)
             await mutate(() =>
               deps.cmux.notify(
                 row.id,
@@ -104,9 +104,17 @@ export function createSessionSidebar(deps: Deps) {
             );
         }
         const url = row.pr?.url ?? null;
-        if (urls.get(row.id) !== url && url !== null)
-          await mutate(() => deps.cmux.linkPr(row.id, url));
-        urls.set(row.id, url);
+        const linked = urls.get(row.id);
+        if (!urls.has(row.id)) {
+          if (url !== null && (await mutate(() => deps.cmux.linkPr(row.id, url))))
+            urls.set(row.id, url);
+          else if (url === null) urls.set(row.id, null);
+        } else if (linked !== url) {
+          if (url === null) {
+            if (linked !== null && (await mutate(() => deps.cmux.clearPr(row.id))))
+              urls.set(row.id, null);
+          } else if (await mutate(() => deps.cmux.linkPr(row.id, url))) urls.set(row.id, url);
+        }
         await set(row.id, SIDEBAR_KEYS.ci, row.pr?.ci ? SIDEBAR_CI_TEXT[row.pr.ci] : null);
         await set(
           row.id,
@@ -149,7 +157,6 @@ export function createSessionSidebar(deps: Deps) {
     },
     reset() {
       values.clear();
-      urls.clear();
       states.clear();
       appAnswers.clear();
     },

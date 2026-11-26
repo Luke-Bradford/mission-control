@@ -183,6 +183,38 @@ switch (cmd) {
     ok(entries.map(([k, v]) => `${k}=${v}`).join("\n"));
     break;
   }
+  case "set-status": {
+    const ws = flag("--workspace");
+    state.statuses ??= {};
+    state.statuses[ws] ??= {};
+    state.statuses[ws][rest[0]] = rest[1];
+    ok();
+    break;
+  }
+  case "clear-status": {
+    const ws = flag("--workspace");
+    delete state.statuses?.[ws]?.[rest[0]];
+    ok();
+    break;
+  }
+  case "pr": {
+    const ws = flag("--workspace");
+    state.prs ??= {};
+    if (rest[0] === "clear") delete state.prs[ws];
+    else state.prs[ws] = rest[0];
+    ok();
+    break;
+  }
+  case "notify": {
+    state.notifications ??= [];
+    state.notifications.push({
+      ws: flag("--workspace"),
+      title: flag("--title"),
+      body: flag("--body"),
+    });
+    ok();
+    break;
+  }
   case "agent": {
     const [sub, ...more] = rest;
     if (sub === "inbox")

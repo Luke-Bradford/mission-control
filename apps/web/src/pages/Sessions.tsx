@@ -216,6 +216,7 @@ function SessionTable({
   const named = new Set(repos.filter((r) => r.commands.length > 0).map((r) => r.repo));
   const [writing, setWriting] = useState<string | null>(null);
   const [folderOpen, setFolderOpen] = useState<string | null>(null);
+  const [branchOpen, setBranchOpen] = useState<string | null>(null);
   // Which rows show their newest inbox message; by id, so a refresh keeps it open.
   const [reading, setReading] = useState<ReadonlySet<string>>(new Set());
   const toggleRead = (id: string) =>
@@ -280,6 +281,8 @@ function SessionTable({
             onRead={() => toggleRead(r.id)}
             folderOpen={folderOpen === r.id}
             onFolder={(open) => setFolderOpen(open ? r.id : null)}
+            branchOpen={branchOpen === r.id}
+            onBranch={(open) => setBranchOpen(open ? r.id : null)}
           />
         ))}
       </tbody>
@@ -308,6 +311,8 @@ function SessionRow({
   onRead,
   folderOpen,
   onFolder,
+  branchOpen,
+  onBranch,
 }: {
   row: CmuxSessionRow;
   now: number;
@@ -319,6 +324,8 @@ function SessionRow({
   onRead: () => void;
   folderOpen: boolean;
   onFolder: (open: boolean) => void;
+  branchOpen: boolean;
+  onBranch: (open: boolean) => void;
 }) {
   const msgId = `sess-msg-${r.id}`;
   const newest = r.inbox.unread > 0 ? r.inbox.newest : null;
@@ -389,7 +396,9 @@ function SessionRow({
             )}
           </button>
         </td>
-        <td className="sess-branch">{r.branch ? <BranchCell row={r} /> : <Dash />}</td>
+        <td className="sess-branch">
+          {r.branch ? <BranchCell row={r} open={branchOpen} onOpen={onBranch} /> : <Dash />}
+        </td>
         <td>
           <Pill tone={STATE_TONE[r.state]}>{CMUX_SESSION_STATE_LABEL[r.state]}</Pill>
         </td>
@@ -470,12 +479,29 @@ function SessionRow({
           </td>
         </tr>
       )}
+      {branchOpen && r.branch && (
+        <tr className="sess-branch-detail">
+          <td colSpan={COLUMNS} id={`sess-branch-${r.id}`}>
+            <div>
+              <b>Branch</b> <code>{r.branch}</code>
+            </div>
+          </td>
+        </tr>
+      )}
       {writing && <Composer row={r} onClose={() => onWrite(false)} />}
     </>
   );
 }
 
-function BranchCell({ row }: { row: CmuxSessionRow }) {
+function BranchCell({
+  row,
+  open,
+  onOpen,
+}: {
+  row: CmuxSessionRow;
+  open: boolean;
+  onOpen: (open: boolean) => void;
+}) {
   const ticket = row.ticket;
   const ticketHref = ticket?.repoId ? ticketPath(ticket.repoId, ticket.number) : null;
   return (
@@ -489,7 +515,22 @@ function BranchCell({ row }: { row: CmuxSessionRow }) {
           ) : (
             <span>#{ticket.number}</span>
           ))}
-        <code title={row.branch ?? undefined}>{row.branch}</code>
+        <button
+          type="button"
+          className="sess-branch-toggle"
+          aria-label={`Show full branch ${row.branch}`}
+          aria-expanded={open}
+          aria-controls={open ? `sess-branch-${row.id}` : undefined}
+          title={row.branch ?? undefined}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen(!open);
+          }}
+          onKeyDown={(e) => e.stopPropagation()}
+          onMouseDown={keepRowStill}
+        >
+          {row.branch}
+        </button>
       </div>
       <div className="sess-prline">
         {row.pr ? (

@@ -230,18 +230,21 @@ button.sess-inbox[aria-expanded="true"] {
   font-weight: 500;
 }
 
-.sess-folder-detail td {
+.sess-folder-detail td,
+.sess-branch-detail td {
   padding: var(--sp-2) var(--sp-3);
   background: var(--surface-2);
 }
 
-.sess-folder-detail div {
+.sess-folder-detail div,
+.sess-branch-detail div {
   max-block-size: 96px;
   overflow: auto;
   overflow-wrap: anywhere;
 }
 
-.sess-folder-detail b {
+.sess-folder-detail b,
+.sess-branch-detail b {
   margin-right: var(--sp-2);
   color: var(--muted);
   font-size: var(--fs-s);
@@ -265,11 +268,20 @@ button.sess-inbox[aria-expanded="true"] {
   min-width: 0;
 }
 
-.sess-branchline code {
+.sess-branch-toggle {
+  display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: var(--lh-s);
+  text-align: left;
+  margin-block-end: calc(var(--sp-1) / -4);
 }
 
 .sess-prline {

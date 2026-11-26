@@ -110,6 +110,7 @@ export interface Cmux {
   setStatus(ws: string, key: string, value: string): Promise<void>;
   clearStatus(ws: string, key: string): Promise<void>;
   linkPr(ws: string, url: string): Promise<void>;
+  clearPr(ws: string): Promise<void>;
   notify(ws: string, title: string, body: string): Promise<void>;
   events(
     cursorFile: string,
@@ -525,6 +526,10 @@ export function createCmux(
     async linkPr(ws, url) {
       const r = await cmux(["pr", url, "--workspace", ws]);
       if (r.code !== 0) throw failed("pr", r);
+    },
+    async clearPr(ws) {
+      const r = await cmux(["pr", "clear", "--workspace", ws]);
+      if (r.code !== 0) throw failed("pr clear", r);
     },
     async notify(ws, title, body) {
       const r = await cmux(["notify", "--title", title, "--body", body, "--workspace", ws]);
