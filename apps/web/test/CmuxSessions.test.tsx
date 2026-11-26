@@ -221,7 +221,10 @@ describe("Sessions page", () => {
   });
 
   it("New session opens a session with the chosen role and first message", async () => {
-    const open = vi.fn(() => ({ status: 201, body: { id: ID.pricing, name: "shop-app (GUIDO)" } }));
+    const open = vi.fn((_init: RequestInit | undefined) => ({
+      status: 201,
+      body: { id: ID.pricing, name: "shop-app (GUIDO)" },
+    }));
     const fetch = stubFetch({
       [PATH]: VIEW,
       [`${PATH}/roles`]: { roles: ["GUIDO", "INCO"], folders: ["/Users/op/Dev/shop-app"] },
