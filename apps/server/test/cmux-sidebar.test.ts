@@ -33,12 +33,16 @@ describe("cmux sidebar", () => {
     vi.useFakeTimers();
     try {
       let resolveEnd!: () => void;
-      const starts = vi.fn(() => ({
-        stop: vi.fn(),
-        ended: new Promise<void>((resolve) => {
-          resolveEnd = resolve;
-        }),
-      }));
+      let firstLine: ((line: string) => void) | undefined;
+      const starts = vi.fn((_cursor: string, onLine: (line: string) => void) => {
+        firstLine = onLine;
+        return {
+          stop: vi.fn(),
+          ended: new Promise<void>((resolve) => {
+            resolveEnd = resolve;
+          }),
+        };
+      });
       const changed = vi.fn();
       const events = startCmuxEvents({
         cmux: { events: starts },
@@ -46,7 +50,7 @@ describe("cmux sidebar", () => {
         onChange: changed,
       });
       expect(starts).toHaveBeenCalledTimes(1);
-      const firstLine = starts.mock.calls[0]?.[1] as (line: string) => void;
+      if (firstLine === undefined) throw new Error("cmux events callback was not registered");
       firstLine('{"type":"workspace.created","workspace_id":"new"}');
       expect(changed).toHaveBeenCalledWith({ kind: "created", workspaceId: "new" });
       resolveEnd();
