@@ -4,6 +4,8 @@
  */
 import {
   ACTIVITY_WINDOW_MS,
+  type CmuxSessionRow,
+  type CmuxSessionsView,
   MODEL_TABLE_MIN_RUNS,
   type ModelGroupRow,
   type ModelRate,
@@ -49,6 +51,74 @@ function activitySince(path: string): unknown {
 function telemetryRange(path: string): string | undefined {
   const m = /^\/api\/telemetry\?range=([^&]+)&/.exec(path);
   return m ? `/api/telemetry?range=${m[1]}` : undefined;
+}
+
+/** Demo's cmux workspaces: the operator's own sessions and two crew seats. */
+function demoSessions(): CmuxSessionsView {
+  const now = Date.now();
+  const min = 60_000;
+  const row = (
+    n: number,
+    over: Partial<CmuxSessionRow> & Pick<CmuxSessionRow, "name" | "state">,
+  ): CmuxSessionRow => ({
+    id: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+    owner: "operator",
+    folder: "/Users/demo/Dev/shop-app",
+    repo: "shop-app",
+    since: now - 10 * min,
+    lastLine: null,
+    status: null,
+    app: null,
+    inbox: { unread: 0, newest: null },
+    ...over,
+  });
+  return {
+    ok: true,
+    at: now,
+    sessions: [
+      row(1, {
+        name: "pricing",
+        state: "waiting",
+        since: now - 4 * min,
+        lastLine: "Allow the migration to drop the old price_rules table?",
+        status: "Moving prices to the new table",
+      }),
+      row(2, {
+        name: "storefront",
+        state: "working",
+        since: now - 22 * min,
+        lastLine: "Reworking the basket summary so the totals line up on mobile",
+        status: "Basket redesign",
+        app: { url: "http://localhost:5173", answers: true },
+        inbox: { unread: 1, newest: "The pricing API is back, rebase when free." },
+      }),
+      row(3, {
+        name: "DEV-1 · #101",
+        owner: "crew",
+        state: "working",
+        since: now - 8 * min,
+        folder: "/Users/demo/Dev/worktrees/shop-app/dev-1-101",
+        lastLine: "Running the checkout cache tests",
+      }),
+      row(4, {
+        name: "FLIGHT · crew",
+        owner: "crew",
+        state: "idle",
+        since: now - 11 * min,
+        folder: "/Users/demo/Dev/mission-control",
+        repo: "mission-control",
+        lastLine: "Two PRs wait on review; nothing needs you.",
+      }),
+      row(5, {
+        name: "api server",
+        state: "no-agent",
+        since: now - 180 * min,
+        folder: "/Users/demo/Dev/shop-app/api",
+        lastLine: "GET /api/prices 200 in 14 ms",
+        app: { url: "http://localhost:8080", answers: false },
+      }),
+    ],
+  };
 }
 
 /** A thread between two seats, from what the crew has said to each other. */
@@ -278,6 +348,7 @@ export function answer(path: string): Response {
   const diff = fileDiff(path);
   if (diff !== undefined) return json(diff);
   if (/^\/api\/audit\/models\?range=/.test(path)) return json(modelsView());
+  if (path === "/api/sessions") return json(demoSessions());
   if (path === "/api/comms/traffic") return json(traffic());
   if (path === "/api/comms/open") return json(openItems());
   if (path === "/api/comms/feed") return json(feed());

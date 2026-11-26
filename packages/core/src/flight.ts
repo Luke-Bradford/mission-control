@@ -44,6 +44,7 @@ export const HUD_PAGE_PATHS = {
   audit: "/audit",
   setup: "/setup",
   planner: "/planner",
+  sessions: "/sessions",
 } as const;
 
 export const watchStartRefusedText = (call: string): string =>

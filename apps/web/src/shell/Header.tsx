@@ -32,6 +32,7 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
   { page: "flight", label: "Flight", to: PAGE_PATHS.flight },
   { page: "board", label: "Board", to: PAGE_PATHS.board },
   { page: "agent", label: "Agents", to: PAGE_PATHS.agent },
+  { page: "sessions", label: "Sessions", to: PAGE_PATHS.sessions },
   { page: "comms", label: "Comms", to: PAGE_PATHS.comms },
   { page: "qa", label: "QA", to: PAGE_PATHS.qa },
   { page: "planner", label: "Planner", to: PAGE_PATHS.planner },

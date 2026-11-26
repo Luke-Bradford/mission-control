@@ -150,12 +150,14 @@ import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
 import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./run/rotating-log.ts";
+import { CMUX_COMMAND, createCmux } from "./runtime/cmux.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { watchPreviewParent } from "./runtime/preview-parent.ts";
 import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
+import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
 import { Store } from "./store.ts";
@@ -1024,8 +1026,19 @@ export async function main(): Promise<void> {
   // set once the app exists: `mc operator` calls its routes in process
   let hubApp: ReturnType<typeof buildApp> | null = null;
 
+  // Every cmux workspace on this Mac (the Sessions page, and FLIGHT's cmux_sessions and cmux_send).
+  // A preview hub reads them but never tells a session its app stopped.
+  const sessions = createSessions({
+    cmux: createCmux([CMUX_COMMAND], (m) => log(m)),
+    store,
+    seatIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
+    tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
+    log: (m) => log(m),
+  });
+
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
+    sessions,
     operator: operatorCall(() => hubApp, operatorToken),
     tidy: crewTidy,
     hudShots,
@@ -1143,6 +1156,7 @@ export async function main(): Promise<void> {
   void flushInstructionNotices({ config, store, bus, supervisor });
 
   const app = buildApp({
+    sessions,
     diskUse: hubDiskUse,
     qaReports,
     previews,
@@ -1212,6 +1226,9 @@ export async function main(): Promise<void> {
     return timer;
   };
   if (previewParentTimer !== undefined) trackTimer(previewParentTimer);
+  // a session that names its app is told when it stops answering, whether or not the page is open
+  if (process.env.MC_NO_LOOP_WRITES !== "1")
+    trackTimer(setInterval(() => void sessions.view(), SESSIONS_APP_WATCH_MS)).unref();
   app.addHook("onClose", async () => {
     for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
   });

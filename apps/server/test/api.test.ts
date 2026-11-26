@@ -2088,6 +2088,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/flight/orders", { text: "Fixture order" }],
   ["POST", "/api/flight/orders/:id/revoke", {}],
   ["GET", "/api/flight/instructions"],
+  ["GET", "/api/sessions"],
+  ["POST", "/api/sessions/:id/focus", {}],
+  ["POST", "/api/sessions/:id/send", { text: "hello" }],
+  ["POST", "/api/sessions/:id/app", {}],
   ["GET", "/api/seats/guido-1/instructions"],
   ["POST", "/api/seats/guido-1/instructions", { kind: "text", text: "Fixture instruction" }],
   ["POST", "/api/seats/guido-1/instructions/:instructionId/revoke", {}],
@@ -3297,6 +3301,11 @@ describe("local access", () => {
       if (url.startsWith("/api/prs/")) continue; // needs stored evidence; pr-evidence-api.test.ts covers it
       if (url.includes("/set-aside/")) continue; // needs the Needs-you wiring; needs-you-answer.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
+      if (url.startsWith("/api/sessions")) {
+        // cmux sessions need the operator key; cmux-sessions-api.test.ts covers the rest
+        expect((await (method === "GET" ? get(url) : post(url, json, body))).statusCode).toBe(401);
+        continue;
+      }
       if (
         method === "POST" &&
         (url.startsWith("/api/flight/orders") ||
