@@ -544,7 +544,7 @@ button.sess-inbox[aria-expanded="true"] {
 
 @media (min-width: 2200px) {
   .sess-table td.sess-branch {
-    padding-block: 3px;
+    padding-block: 0;
   }
 }
 
