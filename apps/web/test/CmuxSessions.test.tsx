@@ -1,8 +1,8 @@
 import {
   type CmuxSessionRow,
+  type CmuxSessionsView,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
-  type CmuxSessionsView,
   SESSION_BUSY_TEXT,
   SESSION_FOLDER_TEXT,
   SESSION_NO_CHECKS_TEXT,
