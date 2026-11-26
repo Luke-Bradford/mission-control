@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SESSION_CHECKS_SETTING, SESSION_UNKNOWN_REPO_TEXT, type SessionCheck } from "@mc/core";
 import { afterEach, expect, it, vi } from "vitest";
+import type { Cmux } from "../src/runtime/cmux.ts";
 import {
   type ChecksAgent,
   type ChecksCmux,
@@ -25,6 +26,7 @@ import {
   type SessionChecks,
   type SessionChecksDeps,
 } from "../src/sessions/checks.ts";
+import { createSessions } from "../src/sessions/sessions.ts";
 import { Store } from "../src/store.ts";
 
 const FIXTURES = fileURLToPath(new URL("./fixtures/", import.meta.url));
@@ -153,6 +155,60 @@ it("a turned-on repo's session that edits a file and goes idle shows a passed ch
   await new Promise((r) => setTimeout(r, 400));
   expect(t.checks.checkOf(WS_A)).toEqual(first);
   expect(t.state.messages).toEqual([]);
+});
+
+it("the Sessions view shows the row's passed check and its repo's switch, from the page's own read", async () => {
+  const main = repo();
+  const t = setup([{ id: WS_A, name: "pricing", cwd: main }], [agent(WS_A, main)]);
+  const cmux = {
+    ...t.cmux,
+    statuses: async () => ({}),
+    readScreen: async () => "",
+    inbox: async () => [],
+  } as unknown as Cmux;
+  const sessions = createSessions({
+    cmux,
+    store: t.store,
+    seatIds: () => ["GUIDO-1"],
+    checks: t.checks,
+    tellApps: false,
+    now: (() => {
+      // each read is fresh: the view's 2 s cache would hide the check moving on
+      let at = Date.now();
+      return () => (at += 5000);
+    })(),
+  });
+  const first = await sessions.view();
+  if (!first.ok) throw new Error(first.error);
+  expect(first.sessions[0]).toMatchObject({ repo: "pricing", repoKey: main, check: null });
+  expect(first.repos).toEqual([
+    { repo: main, name: "pricing", on: false, source: null, commands: [], pageCommands: [] },
+  ]);
+  t.checks.setRepo(main, { on: true, commands: [SHORT] }, "operator");
+  await t.checks.tick();
+  writeFileSync(join(main, "price.ts"), "export const p = 1;\n");
+  t.lifecycle(WS_A, "idle");
+  const idleAt = Date.now();
+  t.checks.start();
+  await vi.waitFor(
+    async () => {
+      const v = await sessions.view();
+      expect(v.ok && v.sessions[0]?.check?.state).toBe("passed");
+    },
+    { timeout: 300 + 10_000, interval: 50 },
+  );
+  expect(Date.now() - idleAt).toBeLessThan(300 + 10_000);
+  const last = await sessions.view();
+  expect(last.ok && last.repos).toEqual([
+    {
+      repo: main,
+      name: "pricing",
+      on: true,
+      source: "page",
+      commands: [SHORT],
+      pageCommands: [SHORT],
+    },
+  ]);
 });
 
 it("a failing check sends one message with the command and its last 40 lines, and one notice", async () => {

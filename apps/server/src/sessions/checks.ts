@@ -8,9 +8,9 @@
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { availableParallelism, loadavg } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import {
   SESSION_CHECK_TAIL_LINES,
   SESSION_CHECK_TIMEOUT_MS,
@@ -25,9 +25,11 @@ import { RepoRulesError, readRepoBlock } from "../engine/rules.ts";
 import { parseJson } from "../json.ts";
 import { originRepo } from "../preview/repo.ts";
 import { cleanText } from "../repo/clean.ts";
+import type { Cmux, CmuxAgent, CmuxWorkspace } from "../runtime/cmux.ts";
 import { crewGit } from "../runtime/git.ts";
 import { nodeFirstPath } from "../runtime/node-first.ts";
 import type { Store } from "../store.ts";
+import { checkoutOf, liveAgentOf } from "./sessions.ts";
 
 /** How often the watcher reads cmux while a repo is on or a check is live. */
 export const CHECK_WATCH_MS = 3000;
@@ -48,25 +50,9 @@ const NOTICE_FROM = "Mission Control";
 const UNKNOWN_WORKSPACE_TEXT = "No cmux workspace has that id.";
 
 /** The cmux calls the checks make; the Sessions page's client has them all. */
-export interface ChecksAgent {
-  sessionId: string;
-  lifecycle: "idle" | "running" | "needsInput";
-  pid: number | null;
-  workspaceId: string;
-  transcriptPath: string | null;
-  cwd: string | null;
-}
-export interface ChecksWorkspace {
-  id: string;
-  name: string;
-  cwd: string | null;
-}
-export interface ChecksCmux {
-  ping(): Promise<"up" | "denied" | "down">;
-  agents(): Promise<ChecksAgent[]>;
-  workspaces(): Promise<ChecksWorkspace[]>;
-  agentMessage(ws: string, text: string, from: string): Promise<void>;
-}
+export type ChecksAgent = CmuxAgent;
+export type ChecksWorkspace = CmuxWorkspace;
+export type ChecksCmux = Pick<Cmux, "ping" | "agents" | "workspaces" | "agentMessage">;
 
 /** A refusal with the HTTP status the API gives it. */
 export class SessionChecksError extends Error {
@@ -130,49 +116,7 @@ const pidAlive = (pid: number): boolean => {
   }
 };
 
-const LIFECYCLE_RANK: ChecksAgent["lifecycle"][] = ["needsInput", "running", "idle"];
-
-/** The workspace's live agent: the most pressing record whose process is not known dead. */
-export function liveAgentOf<A extends ChecksAgent>(
-  agents: readonly A[],
-  ws: string,
-  alive: (pid: number) => boolean = pidAlive,
-): A | null {
-  return (
-    agents
-      .filter((a) => a.workspaceId === ws && (a.pid === null || alive(a.pid)))
-      .sort(
-        (a, b) => LIFECYCLE_RANK.indexOf(a.lifecycle) - LIFECYCLE_RANK.indexOf(b.lifecycle),
-      )[0] ?? null
-  );
-}
-
-/**
- * The checkout a folder is in (`top`) and its main checkout (`main`), by the nearest `.git` above
- * it, with no git run: a `.git` file of a worktree names the main checkout in its `gitdir:` line.
- */
-export async function checkoutOf(folder: string): Promise<{ top: string; main: string } | null> {
-  let dir = resolve(folder);
-  for (let depth = 0; depth < 64; depth++) {
-    const dotGit = join(dir, ".git");
-    const s = await lstat(dotGit).catch(() => null);
-    if (s?.isDirectory()) return { top: dir, main: dir };
-    if (s?.isFile()) {
-      const text = await readFile(dotGit, "utf8").catch(() => "");
-      const gitdir = /^gitdir:\s*(.+?)\s*$/m.exec(text)?.[1];
-      if (gitdir !== undefined) {
-        const abs = isAbsolute(gitdir) ? gitdir : resolve(dir, gitdir);
-        if (/[\\/]\.git[\\/]worktrees[\\/][^\\/]+[\\/]?$/.test(abs))
-          return { top: dir, main: resolve(abs, "../../..") };
-      }
-      return { top: dir, main: dir };
-    }
-    const up = dirname(dir);
-    if (up === dir) return null;
-    dir = up;
-  }
-  return null;
-}
+export { checkoutOf, liveAgentOf };
 
 const RepoSetting = z.record(
   z.string(),
