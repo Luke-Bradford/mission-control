@@ -29,6 +29,7 @@ import {
   type CmuxWorkspace,
 } from "../runtime/cmux.ts";
 import type { Store } from "../store.ts";
+import type { SessionChecks } from "./checks.ts";
 
 /** cmux is not running; the hub never starts it for a read. */
 export const CMUX_NOT_RUNNING_TEXT = "cmux is not running.";
@@ -86,6 +87,8 @@ export interface SessionsDeps {
   store: Store;
   /** The configured seat ids: a workspace named `<seat> · …` is the crew's. */
   seatIds: () => string[];
+  /** Each session's repo checks and each repo's switch; absent: rows carry no check, no repos. */
+  checks?: SessionChecks;
   /** Whether a local address answers; default an HTTP GET. */
   probe?: (url: string) => Promise<boolean>;
   /** Where Claude keeps transcripts; only `.jsonl` files under it are read. */
@@ -204,31 +207,51 @@ export function lastAssistantText(tail: string, partialFirst: boolean): string |
 }
 
 /**
- * The repo a folder is in, by the nearest `.git` above it, with no git run: a `.git` file (a
- * worktree) names the main checkout's folder from its `gitdir:` line; a `.git` folder names the
- * folder it is in.
+ * The checkout a folder is in (`top`) and its main checkout (`main`), by the nearest `.git` above
+ * it, with no git run: a `.git` file of a worktree names the main checkout in its `gitdir:` line.
  */
-export async function repoOf(folder: string): Promise<string | null> {
+export async function checkoutOf(folder: string): Promise<{ top: string; main: string } | null> {
   let dir = resolve(folder);
   for (let depth = 0; depth < 64; depth++) {
     const dotGit = join(dir, ".git");
     const s = await lstat(dotGit).catch(() => null);
-    if (s?.isDirectory()) return basename(dir) || null;
+    if (s?.isDirectory()) return { top: dir, main: dir };
     if (s?.isFile()) {
       const text = await readFile(dotGit, "utf8").catch(() => "");
       const gitdir = /^gitdir:\s*(.+?)\s*$/m.exec(text)?.[1];
       if (gitdir !== undefined) {
         const abs = isAbsolute(gitdir) ? gitdir : resolve(dir, gitdir);
         if (/[\\/]\.git[\\/]worktrees[\\/][^\\/]+[\\/]?$/.test(abs))
-          return basename(resolve(abs, "../../..")) || null;
+          return { top: dir, main: resolve(abs, "../../..") };
       }
-      return basename(dir) || null;
+      return { top: dir, main: dir };
     }
     const up = dirname(dir);
     if (up === dir) return null;
     dir = up;
   }
   return null;
+}
+
+/** The repo a folder is in: its main checkout's folder name. */
+export async function repoOf(folder: string): Promise<string | null> {
+  const co = await checkoutOf(folder);
+  return co === null ? null : basename(co.main) || null;
+}
+
+/** The workspace's live agent: the most pressing record whose process is not known dead. */
+export function liveAgentOf<A extends CmuxAgent>(
+  agents: readonly A[],
+  ws: string,
+  alive: (pid: number) => boolean = pidAlive,
+): A | null {
+  return (
+    agents
+      .filter((a) => a.workspaceId === ws && (a.pid === null || alive(a.pid)))
+      .sort(
+        (a, b) => LIFECYCLE_RANK.indexOf(a.lifecycle) - LIFECYCLE_RANK.indexOf(b.lifecycle),
+      )[0] ?? null
+  );
 }
 
 /** At most `n` of `fn` at once, in order. */
@@ -281,13 +304,8 @@ export function createSessions(deps: SessionsDeps): SessionsService {
   const probes = new Map<string, { at: number; answers: Promise<boolean> }>();
   let cached: { at: number; view: Promise<CmuxSessionsView> } | null = null;
 
-  /** The workspace's live agent: the most pressing record whose process is not known dead. */
   const agentOf = (agents: readonly CmuxAgent[], ws: string): CmuxAgent | null =>
-    agents
-      .filter((a) => a.workspaceId === ws && (a.pid === null || alive(a.pid)))
-      .sort(
-        (a, b) => LIFECYCLE_RANK.indexOf(a.lifecycle) - LIFECYCLE_RANK.indexOf(b.lifecycle),
-      )[0] ?? null;
+    liveAgentOf(agents, ws, alive);
 
   const transcriptOk = (path: string | null): path is string =>
     typeof path === "string" && path.endsWith(".jsonl") && resolve(path).startsWith(projects + sep);
@@ -339,9 +357,9 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     const folder = agent?.cwd ?? ws.cwd;
     const byDeadline = <T>(read: Promise<T>, fallback: T) =>
       Promise.race([read.catch(() => fallback), late.then(() => fallback)]);
-    const [since, repo, statuses] = await Promise.all([
+    const [since, checkout, statuses] = await Promise.all([
       sinceOf(ws.id, state, agent),
-      folder === null ? null : repoOf(folder),
+      folder === null ? null : checkoutOf(folder),
       byDeadline(cmux.statuses(ws.id), {} as Record<string, string>),
     ]);
     let lastLine: string | null = null;
@@ -361,7 +379,8 @@ export function createSessions(deps: SessionsDeps): SessionsService {
       name: ws.name,
       owner: seats.some((s) => ws.name.startsWith(`${s} · `)) ? "crew" : "operator",
       folder,
-      repo,
+      repo: checkout === null ? null : basename(checkout.main) || null,
+      repoKey: checkout?.main ?? null,
       state,
       since,
       lastLine,
@@ -371,6 +390,7 @@ export function createSessions(deps: SessionsDeps): SessionsService {
         unread: mine.filter((m) => !m.read).length,
         newest: newest === undefined ? null : oneLine(newest.text),
       },
+      check: deps.checks?.checkOf(ws.id) ?? null,
     };
   }
 
@@ -497,7 +517,12 @@ export function createSessions(deps: SessionsDeps): SessionsService {
       );
       for (const id of seen.keys()) if (!rows.some((r) => r.id === id)) seen.delete(id);
       if (deps.tellApps !== false) await tellAppsInTurn(rows, at);
-      return { ok: true, at, sessions: sortSessions(rows) };
+      // the crew's checkouts have no Repo checks line: their push gate runs checks
+      const repos =
+        deps.checks === undefined
+          ? []
+          : await deps.checks.repos(rows.filter((r) => r.owner === "operator"));
+      return { ok: true, at, sessions: sortSessions(rows), repos };
     } catch (e) {
       return { ok: false, at, error: e instanceof Error ? e.message : String(e) };
     } finally {

@@ -22,7 +22,7 @@ const labelGlob = z
 
 const nonEmpty = z.string().min(1);
 // One plain command: a check is matched whole against a seat's `&&` segment, so it holds no chaining.
-const checkCommand = z
+export const checkCommand = z
   .string()
   .trim()
   .min(1)
