@@ -159,6 +159,46 @@ export function trustMenu(screen: string): { onYes: boolean; toYes: "up" | "down
   if (at < 0 || yes < 0 || options.filter((o) => o.cursor).length !== 1) return null;
   return { onYes: at === yes, toYes: yes < at ? "up" : "down" };
 }
+
+/**
+ * Waits for a Claude just started in a cmux workspace to be up, answering its folder-trust prompt
+ * on the way: the cursor opens on "No, exit", so it is moved to "Yes" a key a poll, each after a
+ * fresh read, and Enter goes only once the screen shows it on "Yes". Up is Claude's input prompt or
+ * its spinner with no trust menu showing. Throws `CMUX_TRUST_QUIT` when Claude quits at the prompt,
+ * `CMUX_QUIT_EARLY` when its process is gone, and `CMUX_TRUST_STUCK` or `CMUX_START_FAILED` when
+ * it is not up in `waitMs`. The seat driver keeps its own poll; an operator's session uses this.
+ */
+export async function answerTrustPrompt(
+  cmux: Pick<Cmux, "readScreen" | "sendKey">,
+  workspace: string,
+  o: { alive?: () => boolean | null; waitMs?: number; pollMs?: number } = {},
+): Promise<void> {
+  const waitMs = o.waitMs ?? START_WAIT_MS;
+  const pollMs = o.pollMs ?? TRUST_KEY_GAP_MS;
+  const t0 = Date.now();
+  let seen = false;
+  let last = "";
+  for (;;) {
+    let screen = "";
+    try {
+      screen = await cmux.readScreen(workspace);
+      last = screen;
+    } catch {
+      // not shown yet
+    }
+    if (TRUST_REFUSED.test(screen)) throw new Error(CMUX_TRUST_QUIT);
+    if (o.alive?.() === false) throw new Error(seen ? CMUX_TRUST_QUIT : CMUX_QUIT_EARLY);
+    const menu = trustMenu(screen);
+    if (menu === null && (CLAUDE_PROMPT.test(screen) || CLAUDE_BUSY.test(screen))) return;
+    if (menu !== null) {
+      seen = true;
+      await cmux.sendKey(workspace, menu.onYes ? "enter" : menu.toYes);
+    }
+    if (Date.now() - t0 >= waitMs)
+      throw new Error(TRUST_PROMPT.test(last) ? CMUX_TRUST_STUCK : CMUX_START_FAILED);
+    await sleep(pollMs);
+  }
+}
 /** The title Claude gives a tool's permission dialog (2.1.331): one per kind of tool. */
 const PERMISSION_TITLE =
   /^\W*(Bash command|Edit file|Overwrite file|Create file|Write file|Read file|Fetch|Tool use)\b/m;

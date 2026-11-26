@@ -100,6 +100,54 @@ export const FLIGHT_DECISION_KINDS = [
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
+/**
+ * How FLIGHT works, picked by the operator: `crew` plans scopes for seats to build; `watch` takes
+ * no work and tells the operator when a cmux session waits on him or finishes; `on-call` runs
+ * nothing by itself. Outside crew only an operator message wakes FLIGHT.
+ */
+export const FLIGHT_MODES = ["crew", "watch", "on-call"] as const;
+export type FlightMode = (typeof FLIGHT_MODES)[number];
+export const FLIGHT_MODE_SETTING = "flight.mode";
+export const FLIGHT_MODE_LABEL: Record<FlightMode, string> = {
+  crew: "Crew",
+  watch: "Watch",
+  "on-call": "On call",
+};
+export const FLIGHT_MODE_HINT: Record<FlightMode, string> = {
+  crew: "Seats take Ready tickets. FLIGHT wakes on crew and board events.",
+  watch: "No seat takes work. You are told when a cmux session waits on you or finishes.",
+  "on-call":
+    "Nothing runs by itself. FLIGHT wakes only for your messages and can open cmux sessions.",
+};
+
+/** In watch mode, the key of a cmux session's Needs-you note: `<prefix><workspace id>`. */
+export const SESSION_NOTE_PREFIX = "cmux-session:";
+/** How often watch mode reads the cmux sessions: a change shows within 10 seconds. */
+export const SESSION_WATCH_MS = 3000;
+export const sessionWaitingText = (name: string): string =>
+  `cmux session "${name}" is waiting on you.`;
+export const sessionFinishedText = (name: string): string =>
+  `cmux session "${name}" finished: it was working and is now idle.`;
+
+/** A new cmux session for the operator: a Claude session in a folder, with a role and a first message. */
+export interface OpenSessionInput {
+  /** An existing absolute folder. */
+  folder: string;
+  /** Open in a fresh worktree of the folder's repo, on a new `session/<slug>` branch. */
+  worktree: boolean;
+  /** A role file in `roles/`, without `.md`. */
+  role: string;
+  message: string;
+  /** Default `<folder name> (<ROLE>)`. */
+  name?: string;
+}
+/** start_seat outside crew mode: the operator chose a mode where no seat takes work. */
+export const seatStartNotCrewText = (mode: FlightMode): string =>
+  `No seat starts in ${FLIGHT_MODE_LABEL[mode]} mode; only Crew mode starts seats.`;
+export const SESSION_OPEN_NOT_ON_CALL_TEXT = "FLIGHT opens sessions only in on-call mode.";
+export const SESSION_FOLDER_TEXT = "folder must be an existing absolute folder.";
+export const SESSION_ROLE_TEXT = "role must name a file in roles/.";
+
 /** The setting that keeps which tool set FLIGHT's live run was started with. */
 export const FLIGHT_RUN_TOOLS_SETTING = "flight.run-tools";
 /** The setting that keeps the live run's context at its first turn, so a hub restart does not lose it. */
@@ -1128,6 +1176,8 @@ export interface FlightTriage {
 
 /** The full crew state returned by the `flight_state` tool. */
 export interface FlightState {
+  /** How FLIGHT works; absent in crew mode. Outside crew no seat takes work. */
+  mode?: FlightMode;
   /** The operator's slow pace while it is on; absent at normal pace. Starts outside it are refused. */
   pace?: PaceView;
   /** Every open PR, unowned first. A wake carries the rows that changed (see FlightWake). */

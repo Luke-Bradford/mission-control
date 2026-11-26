@@ -13,6 +13,7 @@ import {
   type CmuxSessionState,
   type CmuxSessionsView,
   COMMS_CAPCOM,
+  type OpenSessionInput,
   SESSION_APP_STATUS_KEY,
   SESSION_LINE_MAX,
   SESSION_NO_APP_TEXT,
@@ -31,6 +32,7 @@ import {
 import { sessionSpendFor } from "../spend/sessions.ts";
 import type { Store } from "../store.ts";
 import type { SessionChecks } from "./checks.ts";
+import { openSession, sessionRoles } from "./open.ts";
 
 /** cmux is not running; the hub never starts it for a read. */
 export const CMUX_NOT_RUNNING_TEXT = "cmux is not running.";
@@ -81,6 +83,10 @@ export interface SessionsService {
   send(id: string, text: string, askedBy: string): Promise<"sent" | "busy">;
   /** Opens the session's app in a browser pane of its own workspace. */
   openApp(id: string, askedBy: string): Promise<void>;
+  /** The roles a new session may take, and the folders the open sessions are in. */
+  roles(): Promise<{ roles: string[]; folders: string[] }>;
+  /** Opens a new session for the operator (see open.ts); throws a SessionOpenError. */
+  open(input: OpenSessionInput, askedBy: string): Promise<{ id: string; name: string }>;
 }
 
 export interface SessionsDeps {
@@ -96,6 +102,8 @@ export interface SessionsDeps {
   projectsDir?: string;
   /** Whether a process is alive; default `kill(pid, 0)`. */
   alive?: (pid: number) => boolean;
+  /** The `roles/` folder a new session's role prompt comes from; absent: no role is offered. */
+  rolesDir?: string;
   /** Whether a session is told when its app stops answering (default true; off in a preview hub). */
   tellApps?: boolean;
   /** How long a view waits for each workspace's status and screen reads; default 3 s. */
@@ -603,6 +611,23 @@ export function createSessions(deps: SessionsDeps): SessionsService {
         `Opened the app of cmux session "${ws.name}" in its browser, asked by ${askedBy}`,
         now(),
       );
+    },
+    async roles() {
+      const view = await this.view();
+      const folders = view.ok ? view.sessions.flatMap((r) => (r.folder ? [r.folder] : [])) : [];
+      return {
+        roles: deps.rolesDir === undefined ? [] : sessionRoles(deps.rolesDir),
+        folders: [...new Set(folders)].sort(),
+      };
+    },
+    async open(input, askedBy) {
+      const opened = await openSession(
+        { cmux, store, rolesDir: deps.rolesDir ?? "", now },
+        input,
+        askedBy,
+      );
+      cached = null;
+      return { id: opened.id, name: opened.name };
     },
   };
 }

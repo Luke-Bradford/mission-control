@@ -491,6 +491,69 @@ button.sess-inbox[aria-expanded="true"] {
   text-align: left;
 }
 
+.sess-new {
+  flex: none;
+  min-height: 24px;
+}
+
+/* The New session form: one row of fields above the table, the message under them. */
+.sess-open {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) auto minmax(0, 1fr);
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.sess-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+
+.sess-field input,
+.sess-field select,
+.sess-field textarea {
+  min-height: 32px;
+  min-width: 0;
+  font-size: var(--fs);
+  color: var(--fg);
+}
+
+.sess-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 32px;
+  white-space: nowrap;
+}
+
+.sess-first {
+  grid-column: 1 / -1;
+}
+
+.sess-first textarea {
+  resize: vertical;
+}
+
+.sess-open-act {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.sess-open > .sess-hint,
+.sess-open > .sess-err {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .sess-row:is(:focus-visible, :has(:focus-visible)) .sess-check-detail {
   display: block;
   white-space: normal;

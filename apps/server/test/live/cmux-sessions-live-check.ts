@@ -13,15 +13,22 @@
  * not answering, with no notice typed into the shell; and the workspace is closed again through the
  * cmux command, never through the hub. It prints the raw `list-windows`, `list-status`,
  * `list-workspaces`, `sessions` and `agent inbox` output, to check the fake against.
+ *
+ * Then it opens five Claude sessions in a row through `openSession` (the New session button and
+ * FLIGHT's cmux_open), as GUIDO with a one-word first message. Each start passes only when Claude's
+ * own process (the pid its launch script wrote) is alive and a new transcript under
+ * `~/.claude/projects/` holds the first message: never from cmux's record. Each is closed after.
  * Exit code 0 is a pass.
  */
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createCmux } from "../../src/runtime/cmux.ts";
+import { openSession } from "../../src/sessions/open.ts";
 import { createSessions } from "../../src/sessions/sessions.ts";
 import { Store } from "../../src/store.ts";
 
@@ -51,6 +58,34 @@ const cmux = createCmux(["cmux"], (m) => log(`cmux: ${m}`));
 const sessions = createSessions({ cmux, store, seatIds: () => ["guido-1", "flight-1"] });
 const name = `live-check ${randomUUID().slice(0, 8)}`;
 let id: string | null = null;
+/** The sessions openSession made, closed at the end. */
+const opened: { id: string; pidFile: string }[] = [];
+const ROLES_DIR = fileURLToPath(new URL("../../../../roles", import.meta.url));
+const PROJECTS = join(homedir(), ".claude", "projects");
+const OPENS = 5;
+const START_WAIT_MS = 60_000;
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+/** A transcript written since `since` that holds `text`. */
+const transcriptWith = (text: string, since: number): string | null => {
+  for (const dir of existsSync(PROJECTS) ? readdirSync(PROJECTS) : []) {
+    const at = join(PROJECTS, dir);
+    if (!statSync(at).isDirectory()) continue;
+    for (const f of readdirSync(at)) {
+      const file = join(at, f);
+      if (!f.endsWith(".jsonl") || statSync(file).mtimeMs < since) continue;
+      if (readFileSync(file, "utf8").includes(text)) return file;
+    }
+  }
+  return null;
+};
 
 try {
   check((await cmux.ping()) === "up", "cmux answers");
@@ -116,6 +151,36 @@ try {
     "no app notice is typed into a shell",
   );
 
+  for (let n = 1; n <= OPENS; n++) {
+    const marker = `MC-OPEN-${n}-${randomUUID().slice(0, 8)}`;
+    const since = Date.now();
+    const o = await openSession(
+      { cmux, store, rolesDir: ROLES_DIR },
+      {
+        folder: root,
+        worktree: false,
+        role: "GUIDO",
+        message: `Reply with the single word OK. ${marker}`,
+        name: `live-open ${marker}`,
+      },
+      "operator",
+    );
+    opened.push(o);
+    let pid: number | null = null;
+    let transcript: string | null = null;
+    for (let waited = 0; waited < START_WAIT_MS && (pid === null || transcript === null); ) {
+      await sleep(1000);
+      waited += 1000;
+      if (pid === null && existsSync(o.pidFile)) {
+        const read = Number(readFileSync(o.pidFile, "utf8").trim());
+        pid = Number.isInteger(read) && read > 0 ? read : null;
+      }
+      transcript ??= transcriptWith(marker, since);
+    }
+    check(pid !== null && alive(pid), `start ${n}: Claude's process is alive (pid ${pid})`);
+    check(transcript !== null, `start ${n}: its transcript holds the first message`);
+  }
+
   log("raw output, to check fake-cmux.mjs against:");
   console.log("--- list-windows\n", cmuxCli("--json", "--id-format", "uuids", "list-windows"));
   console.log("--- list-status\n", cmuxCli("list-status", "--workspace", id));
@@ -135,6 +200,13 @@ try {
       !(await cmux.workspaces()).some((w) => w.id === id),
       "the workspace is closed through the cmux command",
     );
+  }
+  for (const o of opened) {
+    try {
+      cmuxCli("close-workspace", "--workspace", o.id);
+    } catch (e) {
+      log(`could not close ${o.id}: ${String(e)}`);
+    }
   }
   store.close();
   rmSync(root, { recursive: true, force: true });

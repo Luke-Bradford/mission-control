@@ -372,6 +372,16 @@ export function answer(path: string): Response {
   if (diff !== undefined) return json(diff);
   if (/^\/api\/audit\/models\?range=/.test(path)) return json(modelsView());
   if (path === "/api/sessions") return json(demoSessions());
+  if (path === "/api/sessions/roles")
+    return json({
+      roles: ["FIDO", "GUIDO", "INCO", "RETRO"],
+      folders: [
+        "/Users/demo/Dev/mission-control",
+        "/Users/demo/Dev/shop-app",
+        "/Users/demo/Dev/shop-app/api",
+      ],
+    });
+  if (path === "/api/settings/flight-mode") return json({ mode: "crew" });
   if (path === "/api/comms/traffic") return json(traffic());
   if (path === "/api/comms/open") return json(openItems());
   if (path === "/api/comms/feed") return json(feed());

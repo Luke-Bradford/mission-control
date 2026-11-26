@@ -1,7 +1,10 @@
 import {
   type CmuxSessionRow,
   type CmuxSessionsView,
+  OPERATOR_HEADER,
+  OPERATOR_TOKEN_REQUIRED,
   SESSION_BUSY_TEXT,
+  SESSION_FOLDER_TEXT,
   SESSION_NO_CHECKS_TEXT,
   SESSIONS_REFRESH_MS,
   type SessionRepoChecks,
@@ -303,6 +306,99 @@ describe("Sessions page", () => {
     );
     expect(screen.getByText("pricing")).toBeTruthy();
     expect(screen.getByText(/Last good read/)).toBeTruthy();
+  });
+
+  it("New session opens a session with the chosen role and first message", async () => {
+    const open = vi.fn((_init: RequestInit | undefined) => ({
+      status: 201,
+      body: { id: ID.pricing, name: "shop-app (GUIDO)" },
+    }));
+    const fetch = stubFetch({
+      [PATH]: VIEW,
+      [`${PATH}/roles`]: { roles: ["GUIDO", "INCO"], folders: ["/Users/op/Dev/shop-app"] },
+      [`POST ${PATH}`]: open,
+    });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+    await settled(fetch, `${PATH}/roles`);
+    const form = screen.getByRole("form", { name: "New session" });
+    const submit = within(form).getByRole("button", { name: "Open" });
+    expect(submit).toHaveProperty("disabled", true);
+    fireEvent.change(within(form).getByLabelText("Folder"), {
+      target: { value: "/Users/op/Dev/shop-app" },
+    });
+    fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "GUIDO" } });
+    expect(submit).toHaveProperty("disabled", true);
+    fireEvent.change(within(form).getByLabelText("First message"), {
+      target: { value: "Fix the login test" },
+    });
+    expect(submit).toHaveProperty("disabled", false);
+    const reads = () =>
+      fetch.mock.calls.filter(([p, i]) => p === PATH && (i?.method ?? "GET") === "GET").length;
+    const before = reads();
+    fireEvent.click(submit);
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(open.mock.calls[0]?.[0]?.body))).toEqual({
+      folder: "/Users/op/Dev/shop-app",
+      worktree: false,
+      role: "GUIDO",
+      message: "Fix the login test",
+    });
+    await waitFor(() => expect(reads()).toBe(before + 1));
+    await waitFor(() => expect(screen.queryByRole("form", { name: "New session" })).toBeNull());
+  });
+
+  it("New session reads its roles with the operator token", async () => {
+    const roles = vi.fn((init: RequestInit | undefined) =>
+      new Headers(init?.headers).get(OPERATOR_HEADER) === "fixture-operator"
+        ? { status: 200, body: { roles: ["GUIDO"], folders: [SHOP] } }
+        : { status: 401, body: { error: OPERATOR_TOKEN_REQUIRED } },
+    );
+    const fetch = stubFetch({
+      "/api/operator/bootstrap": { token: "fixture-operator" },
+      [PATH]: VIEW,
+      [`${PATH}/roles`]: roles,
+      [`POST ${PATH}`]: { id: ID.pricing, name: "shop-app (GUIDO)" },
+    });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+    const form = screen.getByRole("form", { name: "New session" });
+    await waitFor(() => expect(within(form).getByRole("option", { name: "GUIDO" })).toBeTruthy());
+    expect(roles.mock.results.some((r) => (r.value as { status: number }).status === 200)).toBe(
+      true,
+    );
+    fireEvent.change(within(form).getByLabelText("Folder"), { target: { value: SHOP } });
+    fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "GUIDO" } });
+    fireEvent.change(within(form).getByLabelText("First message"), { target: { value: "Go" } });
+    const submit = within(form).getByRole("button", { name: "Open" });
+    expect(submit).toHaveProperty("disabled", false);
+    fireEvent.click(submit);
+    await waitFor(() =>
+      expect(fetch.mock.calls.some(([p, i]) => p === PATH && i?.method === "POST")).toBe(true),
+    );
+  });
+
+  it("New session shows a refusal inline and keeps the form", async () => {
+    const fetch = stubFetch({
+      [PATH]: VIEW,
+      [`${PATH}/roles`]: { roles: ["GUIDO"], folders: [] },
+      [`POST ${PATH}`]: () => ({ status: 400, body: { error: SESSION_FOLDER_TEXT } }),
+    });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+    await settled(fetch, `${PATH}/roles`);
+    const form = screen.getByRole("form", { name: "New session" });
+    fireEvent.change(within(form).getByLabelText("Folder"), { target: { value: "shop-app" } });
+    fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "GUIDO" } });
+    fireEvent.click(within(form).getByLabelText("Fresh worktree"));
+    fireEvent.change(within(form).getByLabelText("First message"), { target: { value: "Go" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Open" }));
+    expect((await within(form).findByRole("alert")).textContent).toContain(SESSION_FOLDER_TEXT);
+    const sent = fetch.mock.calls.find(([p, i]) => p === PATH && i?.method === "POST");
+    expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ worktree: true });
   });
 
   it("reads again every few seconds while open", async () => {

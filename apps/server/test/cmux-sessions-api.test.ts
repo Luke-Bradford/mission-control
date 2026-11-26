@@ -2,12 +2,15 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   OPERATOR_HEADER,
   SESSION_BUSY_TEXT,
   SESSION_CHECKS_SETTING,
   SESSION_CREW_CHECKS_TEXT,
+  SESSION_FOLDER_TEXT,
   SESSION_NO_CHECKS_TEXT,
+  SESSION_ROLE_TEXT,
   SESSION_UNKNOWN_REPO_TEXT,
   SESSIONS_OFF_TEXT,
 } from "@mc/core";
@@ -19,12 +22,14 @@ import type { CcConfig } from "../src/config.ts";
 import { createSessionChecks, type SessionChecks } from "../src/sessions/checks.ts";
 import { createSessions } from "../src/sessions/sessions.ts";
 import { Store } from "../src/store.ts";
-import { type FakeCmux, type FakeState, fakeCmux } from "./fake-cmux-harness.ts";
+import { commandOf, type FakeCmux, type FakeState, fakeCmux } from "./fake-cmux-harness.ts";
 
 const PRICING = "11111111-1111-4111-8111-111111111111";
 const WAITING = "22222222-2222-4222-8222-222222222222";
 const UNKNOWN = "99999999-9999-4999-8999-999999999999";
 const KEY = "operator-key";
+/** The hub's own role prompts. */
+const ROLES_DIR = fileURLToPath(new URL("../../../roles", import.meta.url));
 const config: CcConfig = {
   operator: { id: "operator", timezone: "Europe/London" },
   accounts: [],
@@ -66,6 +71,7 @@ function start(over: Partial<AppDeps> = {}) {
       store,
       seatIds: () => ["GUIDO-1"],
       probe: async () => true,
+      rolesDir: ROLES_DIR,
     }),
     tokens: {
       resolve: (t: string) => (t === "seat-token" ? { seatId: "s", runId: "r" } : null),
@@ -166,6 +172,95 @@ describe("the sessions routes", () => {
       { ws: PRICING, type: "browser", url: "http://localhost:5173" },
     ]);
     expect((await operator().post(`/api/sessions/${WAITING}/app`)).statusCode).toBe(400);
+  });
+
+  it("lists the roles and the sessions' folders", async () => {
+    fake.patch((s) => {
+      for (const w of s.workspaces ?? []) w.cwd = dir;
+    });
+    const r = await operator().get("/api/sessions/roles");
+    expect(r.statusCode).toBe(200);
+    expect(r.json().roles).toEqual(["AUDIT", "FAO", "FLIGHT", "GUIDO", "INCO", "RETRO"]);
+    expect(r.json().folders).toEqual([dir]);
+    const seat = as({ [OPERATOR_HEADER]: KEY, authorization: "Bearer seat-token" });
+    expect((await seat.get("/api/sessions/roles")).statusCode).toBe(403);
+  });
+
+  it("a failed start closes only the workspace it opened, never a same-named older one", async () => {
+    // Claude quits at its trust prompt in the new workspace; "pricing" is the operator's own
+    fake.patch((s) => {
+      s.screen = "Claude Code will exit: this folder isn't trusted.\n% ";
+    });
+    const input = { folder: dir, worktree: false, role: "GUIDO", message: "m", name: "pricing" };
+    const r = await operator().post("/api/sessions", input);
+    expect(r.statusCode).toBe(503);
+    // the one closed is the workspace this open made; the operator's own "pricing" stays open
+    const closed = fake.state().closed ?? [];
+    expect(closed).toHaveLength(1);
+    expect(closed[0]).not.toBe(PRICING);
+    expect(fake.state().workspaces?.map((w) => w.id)).toContain(PRICING);
+  });
+
+  it("two opens at once with the same name each get, and close, only their own workspace", async () => {
+    const input = { folder: dir, worktree: false, role: "GUIDO", message: "m" };
+    fake.patch((s) => {
+      s.screen = "│ ❯ │\n  ? for shortcuts\n";
+    });
+    const both = await Promise.all([
+      operator().post("/api/sessions", input),
+      operator().post("/api/sessions", input),
+    ]);
+    expect(both.map((r) => r.statusCode)).toEqual([201, 201]);
+    const ids = both.map((r) => r.json().id);
+    expect(new Set(ids).size).toBe(2);
+    // both starts fail: each closes the workspace it made, and nothing else
+    fake.patch((s) => {
+      s.screen = "Claude Code will exit: this folder isn't trusted.\n% ";
+    });
+    const failed = await Promise.all([
+      operator().post("/api/sessions", input),
+      operator().post("/api/sessions", input),
+    ]);
+    expect(failed.map((r) => r.statusCode)).toEqual([503, 503]);
+    const closed = fake.state().closed ?? [];
+    expect(closed).toHaveLength(2);
+    expect(new Set(closed).size).toBe(2);
+    for (const id of [...ids, PRICING]) expect(closed).not.toContain(id);
+  });
+
+  it("POST /api/sessions opens a workspace", async () => {
+    const input = { folder: dir, worktree: false, role: "GUIDO", message: "Fix the login test" };
+    // the new Claude comes up at its input prompt
+    fake.patch((s) => {
+      s.screen = "│ ❯ │\n  ? for shortcuts\n";
+    });
+    const r = await operator().post("/api/sessions", input);
+    expect(r.statusCode).toBe(201);
+    expect(r.json()).toMatchObject({ name: expect.stringMatching(/ \(GUIDO\)$/) });
+    expect(fake.log().map(commandOf)).toContain("new-workspace");
+    const listed = await operator().get("/api/sessions");
+    expect(listed.json().sessions.find((s: { id: string }) => s.id === r.json().id)).toMatchObject({
+      owner: "operator",
+    });
+    expect(
+      store
+        .hubEvents(0)
+        .map((e) => e.text)
+        .join("\n"),
+    ).not.toContain("Fix the login test");
+
+    const bad = async (over: object, error: string) => {
+      const res = await operator().post("/api/sessions", { ...input, ...over });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({ error });
+    };
+    await bad({ folder: "relative/path" }, SESSION_FOLDER_TEXT);
+    await bad({ role: "NOBODY" }, SESSION_ROLE_TEXT);
+    expect((await operator().post("/api/sessions", { ...input, message: "" })).statusCode).toBe(
+      400,
+    );
+    const seat = as({ [OPERATOR_HEADER]: KEY, authorization: "Bearer seat-token" });
+    expect((await seat.post("/api/sessions", input)).statusCode).toBe(403);
   });
 
   it("answers 503 on a hub without cmux sessions", async () => {
