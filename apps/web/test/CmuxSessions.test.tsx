@@ -134,7 +134,9 @@ describe("Sessions page", () => {
     const today = within(first).getByText("~$1.23");
     const tip = "Today ~$1.23 · 412k tok · Last 7 days ~$6.80 · 2.10M tok";
     expect(today.getAttribute("title")).toBe(tip);
-    expect(today.getAttribute("aria-label")).toBe(tip);
+    expect(document.getElementById(today.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      tip,
+    );
     expect(today.tabIndex).toBe(0);
     expect(today.closest("td")?.className).toContain("num");
     // No spend reads as a dash, whether the row has none or no agent.

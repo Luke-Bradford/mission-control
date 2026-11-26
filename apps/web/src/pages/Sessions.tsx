@@ -208,6 +208,7 @@ function SessionRow({
   onRead: () => void;
 }) {
   const msgId = `sess-msg-${r.id}`;
+  const spendId = `sess-spend-${r.id}`;
   const newest = r.inbox.unread > 0 ? r.inbox.newest : null;
   const open = () => void post(ACTIONS.sessionFocus(r.id));
   const onKey = (e: KeyboardEvent<HTMLTableRowElement>) => {
@@ -268,10 +269,15 @@ function SessionRow({
         </td>
         <td className="num">
           {r.spend && (r.spend.today.tokens > 0 || r.spend.week.tokens > 0) ? (
-            // biome-ignore lint/a11y/noNoninteractiveTabindex: focus shows the week, as hover does
-            <span tabIndex={0} title={spendTitle(r.spend)} aria-label={spendTitle(r.spend)}>
-              {r.spend.today.tokens > 0 ? cost(r.spend.today.costUsd) : "—"}
-            </span>
+            <>
+              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: focus shows the week, as hover does */}
+              <span tabIndex={0} title={spendTitle(r.spend)} aria-describedby={spendId}>
+                {r.spend.today.tokens > 0 ? cost(r.spend.today.costUsd) : "—"}
+              </span>
+              <span id={spendId} className="sr-only">
+                {spendTitle(r.spend)}
+              </span>
+            </>
           ) : (
             <Dash />
           )}
