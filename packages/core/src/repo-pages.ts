@@ -1,7 +1,9 @@
 import { HUD_PAGE_PATHS } from "./flight.ts";
 
+/** The words of the repository-required line that link to Setup › Repos. */
+export const REPO_REQUIRED_LINK = "Setup › Repos";
 /** What a page that reads a repository's board says on a hub with none set up. */
-export const REPO_REQUIRED_TEXT = "This page needs a repository: add one on Setup › Repos.";
+export const REPO_REQUIRED_TEXT = `This page needs a repository: add one on ${REPO_REQUIRED_LINK}.`;
 
 /** The pages that read a configured repository's board, tickets or plans. */
 const REPO_PAGES: ReadonlySet<string> = new Set(["board", "planner", "qa"]);

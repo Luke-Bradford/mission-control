@@ -36,6 +36,12 @@ describe("work-Mac runbook", () => {
     expect(runbook).toContain("http://127.0.0.1:$MC_PORT/");
   });
 
+  it("gives launchd a PATH built from the folders of the installed node and cmux", () => {
+    expect(runbook).toContain('dirname "$(command -v node)"');
+    expect(runbook).toContain('dirname "$(command -v cmux)"');
+    expect(runbook).toContain("<key>PATH</key><string><path></string>");
+  });
+
   it("names no path, label or port of the hub's own Mac", () => {
     expect(runbook).not.toMatch(/\/Users\//);
     expect(runbook).not.toContain("mc-node");

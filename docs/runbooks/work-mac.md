@@ -115,10 +115,16 @@ echo "data:   $MC_DATA"
 echo "logs:   $MC_LOG_DIR"
 echo "port:   $MC_PORT"
 echo "label:  $MC_LABEL"
+echo "path:   $(dirname "$(command -v node)"):$(dirname "$(command -v cmux)"):/usr/bin:/bin:/usr/sbin:/sbin"
 ```
 
+If `command -v cmux` prints nothing, put the cmux command on your PATH first (cmux's settings
+offer to install it) and print the values again.
+
 Create `~/Library/LaunchAgents/<label>.plist`, replacing every `<...>` with the printed value.
-Write full paths: launchd does not expand `~` or `$HOME`.
+Write full paths: launchd does not expand `~` or `$HOME`. launchd starts the hub with only the
+system PATH, so `<path>` is how the hub finds `cmux` and `node`. To show pull requests later, sign
+in to `gh` and add the folder of `command -v gh` to the same PATH.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -132,6 +138,7 @@ Write full paths: launchd does not expand `~` or `$HOME`.
   </array>
   <key>WorkingDirectory</key><string><hub></string>
   <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string><path></string>
     <key>MC_CONFIG</key><string><config></string>
     <key>MC_DB</key><string><data>/mc.sqlite</string>
     <key>MC_PORT</key><string><port></string>
