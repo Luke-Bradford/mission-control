@@ -986,6 +986,8 @@ export interface CrewSandboxInput {
   denyRead: string[];
   /** The hub-owned pnpm store seats may read but never write. */
   pnpmStoreDir: string;
+  /** The repo's explicitly configured loopback host:port pairs. */
+  localServices?: readonly string[];
   /**
    * The node and pnpm install folders the seat's tools run from, re-allowed for reads inside the
    * home folder's deny. Default [].
@@ -1163,8 +1165,9 @@ function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
 
 /**
  * What a seat's network may not reach: the hub and every other service on this Mac's loopback, and
- * the link-local range (cloud metadata). The hub's own routes trust loopback callers more than the
- * open internet, so opening the network does not open these.
+ * the link-local range (cloud metadata). A repo can add exact loopback host:port pairs to its
+ * sandbox's allow list. The hub's own routes trust loopback callers more than the open internet,
+ * so config validation never permits its port.
  */
 export const SEAT_DENIED_HOSTS = [
   "localhost",
@@ -1209,8 +1212,12 @@ export function crewSandboxSettings(
       allowUnsandboxedCommands: false,
       // Defaults to true: every Bash not explicitly denied would be allowed, bypassing the allowlist.
       autoAllowBashIfSandboxed: false,
-      // a bare "*" matches every host: seats may reach the network
-      network: { allowedDomains: ["*"], deniedDomains: [...SEAT_DENIED_HOSTS] },
+      // A bare "*" matches every host. Exact repo-local services override the loopback denial;
+      // no other loopback address or port is allowed.
+      network: {
+        allowedDomains: ["*", ...(i.localServices ?? [])],
+        deniedDomains: [...SEAT_DENIED_HOSTS],
+      },
       filesystem: {
         // Nothing under a git dir. When the cwd is a linked worktree the CLI itself opens most of
         // the clone's git dir to sandboxed Bash; an explicit denyWrite on the whole

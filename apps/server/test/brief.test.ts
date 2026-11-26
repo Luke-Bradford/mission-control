@@ -240,6 +240,13 @@ describe("ticketBrief profile lines", () => {
 });
 
 describe("ticketBrief", () => {
+  it("names the configured local services a seat may use", () => {
+    expect(
+      ticketBrief({ ...input, localServices: ["127.0.0.1:5432", "127.0.0.1:6379"] }),
+    ).toContain("Local services you may use: 127.0.0.1:5432, 127.0.0.1:6379.");
+    expect(ticketBrief(input)).not.toContain("Local services you may use:");
+  });
+
   it("carries a body up to the collector's cap whole, with no cut note", () => {
     const body = `${"a".repeat(11_999)}Z`;
     const out = ticketBrief({ ...input, body, bodyLength: body.length });

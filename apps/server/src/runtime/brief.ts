@@ -78,6 +78,8 @@ export interface BriefInput {
   commands: readonly string[];
   /** The repo's whole-suite commands, which take the test lock. */
   fullSuite: readonly string[];
+  /** Exact loopback host:port pairs the repo's seats may use. */
+  localServices?: readonly string[];
   /** The run's template profile, as snapshotted; absent adds no profile lines. */
   profile?: RunProfile;
   /** This build ticket has no recorded plan, so its seat must write one before coding. */
@@ -211,6 +213,10 @@ export function ticketBrief(i: BriefInput): string {
     i.commands.length === 0
       ? `No repository validation commands are configured. You may still use ordinary local commands to inspect and complete the work inside the sandbox.${fullSuiteText(i.fullSuite)}`
       : `Configured validation commands: ${codeList(i.commands)}. You may also use ordinary local commands to inspect and complete the work inside the sandbox.${fullSuiteText(i.fullSuite)}`;
+  const localServices =
+    i.localServices === undefined || i.localServices.length === 0
+      ? null
+      : `Local services you may use: ${i.localServices.join(", ")}.`;
   const profile = profileLines(i);
   const last =
     i.loop === "plan"
@@ -238,6 +244,7 @@ export function ticketBrief(i: BriefInput): string {
       : []),
     ...(i.loop === "build" && i.planless ? [SELF_PLAN, ""] : []),
     ran,
+    ...(localServices === null ? [] : [localServices]),
     ...(writer
       ? [
           "A shell call that returns a session id is still running. Poll that session until it reports a final numeric exit code. Do not report evidence or end your turn while a required check is running. If polling is refused, report the blocker instead of claiming a pass.",

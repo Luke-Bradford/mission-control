@@ -461,6 +461,33 @@ describe("portFromEnv (MC_PORT)", () => {
   );
 });
 
+describe("local_services", () => {
+  it("loads a repo's explicitly named loopback services", () => {
+    const config = parseConfig(
+      withNode(readFileSync(EXAMPLE_SOURCE, "utf8")).replace(
+        "    github: octo-org/shop-app\n",
+        "    github: octo-org/shop-app\n    local_services: [127.0.0.1:5432, 127.0.0.1:6379]\n",
+      ),
+      "test",
+    );
+    expect(config.repos[0]?.localServices).toEqual(["127.0.0.1:5432", "127.0.0.1:6379"]);
+  });
+
+  it("refuses the hub's loopback port as a local service", () => {
+    const error = errorOf(() =>
+      parseConfig(
+        withNode(readFileSync(EXAMPLE_SOURCE, "utf8")).replace(
+          "    github: octo-org/shop-app\n",
+          `    github: octo-org/shop-app\n    local_services: [127.0.0.1:${DEFAULT_PORT}]\n`,
+        ),
+        "test",
+      ),
+    );
+    expect(error.path).toBe("repos[0].localServices[0]");
+    expect(error.message).toContain("hub's port");
+  });
+});
+
 describe("crew", () => {
   const hub = mkdtempSync(join(tmpdir(), "mc-hub-"));
   const guard = { hubRoot: hub };

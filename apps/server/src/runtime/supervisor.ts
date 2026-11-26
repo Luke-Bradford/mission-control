@@ -2320,6 +2320,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         dataDir: realpathSync(dirname(deps.dbPath)),
         hubRoot: existsSync(deps.hubRoot) ? realpathSync(deps.hubRoot) : deps.hubRoot,
         pnpmStoreDir: pnpmStore,
+        localServices: info.repo.localServices ?? [],
         denyRead: [
           ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
           ...profileDenies(),
@@ -4429,6 +4430,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           granted: grants,
           commands: def.mode === "writer" ? (commands.writer ?? []) : (commands.review ?? []),
           fullSuite: info.repo.fullSuite ?? [],
+          localServices: info.repo.localServices ?? [],
           leftoverChanges: checkout.leftoverChanges,
           ...(run.profile ? { profile: run.profile } : {}),
           ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),

@@ -275,6 +275,8 @@ export interface CcConfig {
     requiredChecks?: string[];
     /** What the repo's seats may run: `writer` for writers, `review` for read-only and scratch seats. Loaded: always set. */
     commands?: SeatCommands;
+    /** Exact loopback host:port pairs the repo's seats may use. Loaded config sets this to [] when absent. */
+    localServices?: string[];
     /** Board rules from user config; the optional repo block tightens safety rules and fills omitted policy keys. */
     rules?: RepoRules;
     /** Globs seats may not edit or commit, on top of core's PROTECTED_FILES. Loaded: always set (default []). */
@@ -512,6 +514,15 @@ export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
 /** A launchd job label: it goes into a `launchctl print gui/<uid>/<label>` argument. */
 const LAUNCHD_LABEL = /^[A-Za-z0-9._-]+$/;
 const nonEmpty = z.string().min(1);
+const localService = z.string().refine(
+  (value) => {
+    const match = /^127\.0\.0\.1:(\d+)$/.exec(value);
+    if (match === null) return false;
+    const port = Number(match[1]);
+    return Number.isInteger(port) && port >= 1 && port <= 65535;
+  },
+  "must be 127.0.0.1 followed by a port",
+);
 /** The default seat commands as fresh arrays: what the hub's own repo uses when it sets no `commands`. */
 export const defaultSeatCommands = (): SeatCommands => ({
   writer: [...DEFAULT_SEAT_COMMANDS.writer],
@@ -627,6 +638,7 @@ const fileSchema = z
         commands: z
           .strictObject({ writer: z.array(seatCommand), review: z.array(seatCommand) })
           .optional(),
+        local_services: z.array(localService).default([]),
         protected: z.array(protectedGlob).default([]),
         keep_branches: z.array(nonEmpty).default([]),
         rules: repoRulesSchema.optional(),
@@ -828,6 +840,7 @@ const fileSchema = z
         ...(r.run_command === undefined ? {} : { runCommand: r.run_command }),
         requiredChecks: r.required_checks,
         ...(r.commands === undefined ? {} : { commands: r.commands }),
+        localServices: r.local_services,
         protectedFiles: r.protected,
         keepBranches: r.keep_branches,
         ...(r.rules === undefined ? {} : { rules: resolveRepoRules(r.rules) }),
@@ -1547,6 +1560,15 @@ export function parseConfig(
   const accountIds = new Set(cfg.accounts.map((a) => a.id));
   const crewRepoIds = new Set((cfg.crew?.sessions ?? []).map((s) => s.repoId));
   cfg.repos.forEach((r, i) => {
+    (r.localServices ?? []).forEach((service, at) => {
+      const port = Number(service.slice(service.lastIndexOf(":") + 1));
+      if (port === portFromEnv(process.env.MC_PORT, process.env)) {
+        throw new ConfigError(
+          `repos[${i}].localServices[${at}]`,
+          "must not name the hub's port",
+        );
+      }
+    });
     if (r.autonomy === "merge" && !crewRepoIds.has(r.id)) {
       throw new ConfigError(
         `repos[${i}].autonomy`,
