@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { gzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 export const CREW_TRANSCRIPT_GZIP_AFTER_MS = 24 * 60 * 60_000;
 export const CREW_TRANSCRIPT_DELETE_AFTER_MS = 14 * 24 * 60 * 60_000;
@@ -98,16 +98,18 @@ const walkFiles = (root: string, visit: (path: string) => void): void => {
 };
 
 /** The session metadata carries the worktree cwd. A malformed or unknown session is never ours. */
-const codexWorktree = (path: string, worktrees: string | undefined): string | null => {
+const transcriptWorktree = (path: string, worktrees: string | undefined): string | null => {
   if (worktrees === undefined) return null;
-  let text: string;
+  let text: Buffer;
   try {
-    text = readFileSync(path, "utf8").slice(0, 65_536);
+    const input = readFileSync(path);
+    text = path.endsWith(".gz") ? gunzipSync(input) : input;
   } catch {
     return null;
   }
+  const start = text.toString("utf8", 0, 65_536);
   const root = `${resolve(worktrees)}/`;
-  for (const match of text.matchAll(/"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
+  for (const match of start.matchAll(/"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
     try {
       const cwd = JSON.parse(`"${match[1]}"`) as unknown;
       if (typeof cwd === "string" && resolve(cwd).startsWith(root)) return resolve(cwd);
@@ -152,11 +154,14 @@ export function cleanupCrewLeftovers(input: CrewLeftoverInput): CrewLeftoverResu
       out.skippedLive++;
       continue;
     }
-    walkFiles(project, (path) => cleanTranscript(path, input.now, out));
+    walkFiles(project, (path) => {
+      if (transcriptWorktree(path, input.worktrees) === null) return;
+      cleanTranscript(path, input.now, out);
+    });
   }
   if (input.codexSessions !== undefined)
     walkFiles(input.codexSessions, (path) => {
-      const worktree = codexWorktree(path, input.worktrees);
+      const worktree = transcriptWorktree(path, input.worktrees);
       if (worktree === null) return;
       if (input.liveWorktrees.has(worktree)) {
         out.skippedLive++;
@@ -196,11 +201,13 @@ export function crewLeftoverFootprint(
 ): CrewLeftoverFootprint {
   let claudeProjectsBytes = 0;
   for (const project of crewProjects(input.claudeProjects, input.worktrees))
-    claudeProjectsBytes += bytes(project);
+    walkFiles(project, (path) => {
+      if (transcriptWorktree(path, input.worktrees) !== null) claudeProjectsBytes += bytes(path);
+    });
   let codexSessionsBytes = 0;
   if (input.codexSessions !== undefined)
     walkFiles(input.codexSessions, (path) => {
-      if (codexWorktree(path, input.worktrees) !== null) codexSessionsBytes += bytes(path);
+      if (transcriptWorktree(path, input.worktrees) !== null) codexSessionsBytes += bytes(path);
     });
   let browserProfilesBytes = 0;
   let chromeTempBytes = 0;

@@ -149,7 +149,8 @@ import {
   reorderQueue,
 } from "./queue/queue-reorder.ts";
 import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./repo/branch-tidy.ts";
-import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
+import { crewLeftoverFootprint } from "./repo/crew-leftovers.ts";
+import { clearLeftovers, closeFinishedPreviews, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
 import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./run/rotating-log.ts";
@@ -1227,6 +1228,13 @@ export async function main(): Promise<void> {
   });
   void flushInstructionNotices({ config, store, bus, supervisor });
 
+  const crewLeftoverPaths = {
+    worktrees: config.crew?.worktrees,
+    claudeProjects: join(homedir(), ".claude", "projects"),
+    codexSessions: join(homedir(), ".codex", "sessions"),
+    tmp: tmpdir(),
+  };
+  let leftoverFootprint: ReturnType<typeof crewLeftoverFootprint> | null = null;
   const app = buildApp({
     sessions,
     onSessionSidebarChange: (on) => {
@@ -1235,6 +1243,7 @@ export async function main(): Promise<void> {
     sessionChecks,
     notifications,
     diskUse: hubDiskUse,
+    leftoverFootprint: () => leftoverFootprint,
     qaReports,
     previews,
     previewRepoId,
@@ -1523,26 +1532,24 @@ export async function main(): Promise<void> {
   trackTimer(setInterval(silence, 60_000)).unref();
   trackTimer(setTimeout(silence, 60_000)).unref();
   // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
-  const leftovers = () => {
+  const leftovers = async () => {
     try {
       for (const text of clearLeftovers({
         store,
         config,
         now: Date.now(),
-        crewLeftovers: {
-          worktrees: config.crew?.worktrees,
-          claudeProjects: join(homedir(), ".claude", "projects"),
-          codexSessions: join(homedir(), ".codex", "sessions"),
-          tmp: tmpdir(),
-        },
+        crewLeftovers: crewLeftoverPaths,
       }))
         log(`leftovers: ${text}`);
+      leftoverFootprint = crewLeftoverFootprint(crewLeftoverPaths);
+      const previewsClosed = await closeFinishedPreviews({ previews, store, config });
+      if (previewsClosed > 0) log(`leftovers: removed ${previewsClosed} finished preview(s)`);
     } catch (e) {
       log(`leftovers: pass failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  trackTimer(setInterval(leftovers, LEFTOVERS_EVERY_MS)).unref();
-  trackTimer(setTimeout(leftovers, 5_000)).unref();
+  trackTimer(setInterval(() => void leftovers(), LEFTOVERS_EVERY_MS)).unref();
+  trackTimer(setTimeout(() => void leftovers(), 5_000)).unref();
   crewReloader.start();
   flightWatch.start();
   stopDiscovery = startCodexDiscovery({

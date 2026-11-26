@@ -3217,12 +3217,7 @@ describe("GET /api/machine", () => {
       seats: 0,
       perSessionMax: 0,
       transcripts: null,
-      leftovers: {
-        claudeProjectsBytes: 0,
-        codexSessionsBytes: 0,
-        browserProfilesBytes: 0,
-        chromeTempBytes: 0,
-      },
+      leftovers: null,
     });
     const latest: MachineSample = {
       at: NOW,
@@ -3244,12 +3239,7 @@ describe("GET /api/machine", () => {
       seats: 0,
       perSessionMax: 0,
       transcripts: null,
-      leftovers: {
-        claudeProjectsBytes: 0,
-        codexSessionsBytes: 0,
-        browserProfilesBytes: 0,
-        chromeTempBytes: 0,
-      },
+      leftovers: null,
     });
     await a.close();
   });
@@ -3305,14 +3295,27 @@ describe("GET /api/machine", () => {
     });
   });
 
-  it("reports crew cleanup-store sizes for the Machine panel", async () => {
-    const leftovers = (await get("/api/machine")).json().leftovers;
-    expect(leftovers).toEqual({
-      claudeProjectsBytes: expect.any(Number),
-      codexSessionsBytes: expect.any(Number),
-      browserProfilesBytes: expect.any(Number),
-      chromeTempBytes: expect.any(Number),
+  it("returns the scheduled cleanup-store snapshot without measuring files", async () => {
+    const leftovers = {
+      claudeProjectsBytes: 101,
+      codexSessionsBytes: 202,
+      browserProfilesBytes: 303,
+      chromeTempBytes: 404,
+    };
+    let reads = 0;
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      leftoverFootprint: () => {
+        reads++;
+        return leftovers;
+      },
     });
+    const response = await a.inject("/api/machine");
+    expect(response.json().leftovers).toEqual(leftovers);
+    expect(reads).toBe(1);
+    await a.close();
   });
 });
 

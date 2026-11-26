@@ -7,6 +7,37 @@ import { type CrewLeftoverInput, cleanupCrewLeftovers } from "./crew-leftovers.t
 /** How often the hub clears leftovers; the pass is idempotent, so a missed or repeated one is harmless. */
 export const LEFTOVERS_EVERY_MS = 60 * 60_000;
 
+type PreviewCloser = {
+  list(): { pr: number; repoId?: string }[];
+  close(pr: number, repoId?: string): Promise<boolean>;
+};
+
+/** Stops previews when the cached board proves their PR or ticket is finished. */
+export async function closeFinishedPreviews(deps: {
+  previews: PreviewCloser | undefined;
+  store: Pick<Store, "pullRequest" | "board">;
+  config: Pick<CcConfig, "hubRepo">;
+}): Promise<number> {
+  if (deps.previews === undefined) return 0;
+  let closed = 0;
+  for (const preview of deps.previews.list()) {
+    const repoId = preview.repoId ?? deps.config.hubRepo;
+    if (repoId === undefined || repoId === null) continue;
+    const pr = deps.store.pullRequest(repoId, preview.pr);
+    if (pr === null) continue;
+    const ticket = pr.ticket?.startsWith(`${repoId}#`)
+      ? Number(pr.ticket.slice(repoId.length + 1))
+      : null;
+    const ticketClosed =
+      ticket !== null &&
+      Number.isSafeInteger(ticket) &&
+      deps.store.board(repoId).some((item) => item.issueNumber === ticket && item.closed);
+    if (pr.state === "open" && !ticketClosed) continue;
+    if (await deps.previews.close(preview.pr, preview.repoId)) closed++;
+  }
+  return closed;
+}
+
 /**
  * Clears what finished work left on the hub: a seat question set aside, a merge hold released and a
  * parked state closed, each on an ended run whose work is over. Each gets a hub event. Local only:

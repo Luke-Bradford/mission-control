@@ -1,6 +1,5 @@
 import { statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { Run } from "@mc/core";
 import {
@@ -417,7 +416,6 @@ import {
   resolveQueueReorder,
 } from "./queue/queue-reorder.ts";
 import { cleanText } from "./repo/clean.ts";
-import { crewLeftoverFootprint } from "./repo/crew-leftovers.ts";
 import {
   changedFiles,
   committedLinesBatch,
@@ -608,6 +606,8 @@ export interface AppDeps {
   prEvidence?: PrEvidenceStore;
   /** The screenshots RETRO took on review previews; absent: the retrieval route answers 404. */
   reviewShots?: HudShotStore;
+  /** A scheduled snapshot of crew cleanup stores; it is never measured while answering a request. */
+  leftoverFootprint?: () => MachineView["leftovers"];
   queueReorder?: QueueReorderDeps;
   config: CcConfig;
   /** Cached Codex model catalogs, isolated by each account's CLI binding. */
@@ -1030,10 +1030,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   let transcriptFootprintCache: {
     at: number;
     value: ReturnType<typeof transcriptFootprint>;
-  } | null = null;
-  let leftoverFootprintCache: {
-    at: number;
-    value: ReturnType<typeof crewLeftoverFootprint>;
   } | null = null;
   /** Audit views by range: served while younger than AUDIT_CACHE_MS, then refreshed behind the reply. */
   const auditCache = new Map<
@@ -4257,20 +4253,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 transcriptFootprintCache = { at: now(), value };
                 return value;
               })();
-        const leftoverCached = leftoverFootprintCache;
-        const leftovers =
-          leftoverCached !== null && now() - leftoverCached.at < 60_000
-            ? leftoverCached.value
-            : (() => {
-                const value = crewLeftoverFootprint({
-                  worktrees: config.crew?.worktrees,
-                  claudeProjects: join(homedir(), ".claude", "projects"),
-                  codexSessions: join(homedir(), ".codex", "sessions"),
-                  tmp: tmpdir(),
-                });
-                leftoverFootprintCache = { at: now(), value };
-                return value;
-              })();
         const sessions = config.crew?.sessions ?? [];
         const counts = sessions.map((s) => s.seats.length);
         const latest = machine();
@@ -4283,7 +4265,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           seats: counts.reduce((a, b) => a + b, 0),
           perSessionMax: Math.max(0, ...counts),
           transcripts: footprint,
-          leftovers,
+          leftovers: deps.leftoverFootprint?.() ?? null,
         };
       });
 
