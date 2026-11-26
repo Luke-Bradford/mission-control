@@ -51,6 +51,46 @@
 .fp-err {
   color: var(--crit);
 }
+/* How FLIGHT works: three radios and the checked mode's hint, one line. */
+.fp-mode {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  min-width: 0;
+  max-width: 100%;
+}
+.fp-mode-label {
+  flex: none;
+  font-weight: 600;
+}
+.fp-mode-opt {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: var(--sp-5);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fp-mode-opt input {
+  width: var(--sp-4);
+  height: var(--sp-4);
+  margin: 0;
+}
+.fp-mode-opt.on {
+  font-weight: 600;
+}
+.fp-mode-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 48ch;
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .fp-muted {
   color: var(--muted);
 }
@@ -586,6 +626,9 @@
   }
   .fp-title > .fp-records {
     order: 2;
+  }
+  .fp-title > .fp-mode {
+    flex: 0 4 auto;
   }
   .fp-title > .fp-q {
     flex: 0 8 auto;

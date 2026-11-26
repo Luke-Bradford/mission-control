@@ -81,6 +81,8 @@ export const RESOURCES = {
   prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
   /** Every cmux workspace on this Mac, read from cmux; the Sessions page polls it, no topic. */
   sessions: { path: "/api/sessions", topic: null },
+  /** The New session form's choices: role files and the folders sessions are open in. */
+  sessionRoles: { path: "/api/sessions/roles", topic: null },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).
@@ -165,6 +167,8 @@ export const RESOURCES = {
     topic: "settings",
   }),
   crewPause: { path: "/api/settings/crew-pause", topic: ["settings", "agents"] },
+  /** How FLIGHT works: `{ mode }`, crew, watch or on-call. */
+  flightMode: { path: "/api/settings/flight-mode", topic: ["settings", "agents"] },
   away: { path: "/api/settings/away", topic: "settings" },
   /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
   telemetry: (range: string, agent = "", account = "", ticket = ""): ResourceRef => ({
@@ -354,6 +358,8 @@ export const ACTIONS = {
   sessionSend: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/send`,
   /** Body `{}`; opens the session's app in that workspace's cmux browser. */
   sessionApp: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/app`,
+  /** Body: an OpenSessionInput; answers 201 `{ id, name }`. */
+  sessionOpen: RESOURCES.sessions.path,
   saveInstruction: (seatId: string | null) =>
     seatId === null ? "/api/flight/orders" : `/api/seats/${enc(seatId)}/instructions`,
   revokeInstruction: (seatId: string | null, id: number) =>
@@ -396,6 +402,8 @@ export const ACTIONS = {
   handled: (key: string) => `/api/attention/${enc(key)}/handled`,
   /** Body: the whole AwaySettings. */
   crewPause: RESOURCES.crewPause.path,
+  /** Body `{ mode }`. */
+  flightMode: RESOURCES.flightMode.path,
   away: RESOURCES.away.path,
   /** Body `{ github, project }`; answers a RepoPreview and writes nothing. */
   previewRepo: "/api/repos/preview",

@@ -3,6 +3,7 @@ import {
   type CmuxSessionRow,
   type CmuxSessionState,
   type CmuxSessionsView,
+  type OpenSessionInput,
   type PillTone,
   SESSION_TEXT_MAX,
   SESSIONS_REFRESH_MS,
@@ -65,6 +66,7 @@ export function Sessions() {
   const rows = useMemo(() => (shown ? sortSessions(shown.sessions) : []), [shown]);
   const error = view && !view.ok ? view.error : res.error ? res.error.message : null;
   const time = (at: number) => (tz ? clockTime(at, tz) : "—");
+  const [opening, setOpening] = useState(false);
 
   return (
     <section id="page-sessions" className="panel sess" aria-labelledby="sess-title">
@@ -76,7 +78,17 @@ export function Sessions() {
             ? `${error ? "Last good read" : "Read from cmux"} ${time(shown.at)} · every ${SESSIONS_REFRESH_MS / 1000} s`
             : null}
         </span>
+        <button
+          type="button"
+          className="sess-new"
+          aria-expanded={opening}
+          aria-controls={opening ? "sess-open" : undefined}
+          onClick={() => setOpening(!opening)}
+        >
+          New session
+        </button>
       </div>
+      {opening && <OpenForm onClose={() => setOpening(false)} />}
       {error && (
         <p className="sess-banner" role="alert">
           Could not read cmux: {error}
@@ -366,5 +378,117 @@ function Composer({ row, onClose }: { row: CmuxSessionRow; onClose: () => void }
         )}
       </td>
     </tr>
+  );
+}
+
+/** The New session form's choices, from GET /api/sessions/roles. */
+interface OpenChoices {
+  roles: string[];
+  folders: string[];
+}
+
+/**
+ * Opens a new Claude session in cmux for the operator: a folder (or a fresh worktree of its repo),
+ * a role from roles/ and a first message. The session is the operator's, not the crew's.
+ */
+function OpenForm({ onClose }: { onClose: () => void }) {
+  const choices = useResource<OpenChoices>(RESOURCES.sessionRoles);
+  const [folder, setFolder] = useState("");
+  const [worktree, setWorktree] = useState(false);
+  const [role, setRole] = useState("");
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ready = folder.trim() !== "" && role !== "" && text.trim() !== "";
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    const body: OpenSessionInput = { folder: folder.trim(), worktree, role, message: text };
+    try {
+      const opened = await apiPost<{ id: string; name: string }>(ACTIONS.sessionOpen, body);
+      toast(`Opened ${opened.name}.`);
+      hub.refetch(RESOURCES.sessions.path);
+      onClose();
+    } catch (err) {
+      setError(message(err));
+      setBusy(false);
+    }
+  };
+  const roles = choices.data?.roles ?? [];
+  return (
+    <form
+      id="sess-open"
+      className="sess-open"
+      aria-label="New session"
+      onSubmit={(e) => void submit(e)}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
+    >
+      <label className="sess-field sess-folderin">
+        <span>Folder</span>
+        <input
+          // biome-ignore lint/a11y/noAutofocus: the operator just asked for a new session
+          autoFocus
+          value={folder}
+          list="sess-folders"
+          placeholder="/Users/you/Dev/repo"
+          onChange={(e) => setFolder(e.target.value)}
+        />
+        <datalist id="sess-folders">
+          {(choices.data?.folders ?? []).map((f) => (
+            <option key={f} value={f} />
+          ))}
+        </datalist>
+      </label>
+      <label className="sess-check">
+        <input type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} />
+        Fresh worktree
+      </label>
+      <label className="sess-field">
+        <span>Role</span>
+        <select value={role} onChange={(e) => setRole(e.target.value)}>
+          <option value="">
+            {choices.data ? "Choose a role" : choices.error ? "Roles not read" : "Reading roles…"}
+          </option>
+          {roles.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="sess-field sess-first">
+        <span>First message</span>
+        <textarea
+          rows={3}
+          value={text}
+          maxLength={SESSION_TEXT_MAX}
+          onChange={(e) => setText(e.target.value)}
+        />
+      </label>
+      <div className="sess-open-act">
+        <button type="submit" className="primary" disabled={busy || !ready}>
+          {busy ? "Opening…" : "Open"}
+        </button>
+        <button type="button" className="ghost" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+      {error ? (
+        <p className="sess-err" role="alert">
+          {error}
+        </p>
+      ) : choices.error ? (
+        <p className="sess-err">Could not read the roles: {choices.error.message}</p>
+      ) : (
+        <p className="sess-hint">
+          Opens Claude in a new cmux workspace with the role's prompt, then sends the message. The
+          session is yours.
+        </p>
+      )}
+    </form>
   );
 }

@@ -1,4 +1,4 @@
-import type { FlightView } from "@mc/core";
+import { FLIGHT_MODE_HINT, type FlightView } from "@mc/core";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
@@ -102,6 +102,44 @@ describe("buildBlockers", () => {
 });
 
 describe("the FLIGHT page", () => {
+  it("the mode control shows and changes the mode", async () => {
+    let mode = "crew";
+    const set = vi.fn((init: RequestInit | undefined) => {
+      mode = (JSON.parse(String(init?.body)) as { mode: string }).mode;
+      return { status: 200, body: { mode } };
+    });
+    show("running", {
+      "/api/settings/flight-mode": () => ({ status: 200, body: { mode } }),
+      "POST /api/settings/flight-mode": set,
+    });
+    const group = await screen.findByRole("radiogroup", { name: "Mode" });
+    await waitFor(() =>
+      expect(within(group).getByRole("radio", { name: "Crew" })).toHaveProperty("checked", true),
+    );
+    expect(group.textContent).toContain(FLIGHT_MODE_HINT.crew);
+    fireEvent.click(within(group).getByRole("radio", { name: "On call" }));
+    await waitFor(() => expect(set).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(set.mock.calls[0]?.[0]?.body))).toEqual({ mode: "on-call" });
+    await waitFor(() =>
+      expect(within(group).getByRole("radio", { name: "On call" })).toHaveProperty("checked", true),
+    );
+    expect(group.textContent).toContain(FLIGHT_MODE_HINT["on-call"]);
+  });
+
+  it("the mode control says a failed change inline and keeps the mode", async () => {
+    show("running", {
+      "/api/settings/flight-mode": { mode: "watch" },
+      "POST /api/settings/flight-mode": () => ({ status: 500, body: { error: "disk full" } }),
+    });
+    const group = await screen.findByRole("radiogroup", { name: "Mode" });
+    await waitFor(() =>
+      expect(within(group).getByRole("radio", { name: "Watch" })).toHaveProperty("checked", true),
+    );
+    fireEvent.click(within(group).getByRole("radio", { name: "Crew" }));
+    expect((await within(group).findByRole("alert")).textContent).toContain("disk full");
+    expect(within(group).getByRole("radio", { name: "Watch" })).toHaveProperty("checked", true);
+  });
+
   it.each([
     ["#ordersP", "ordersP"],
     ["#instructionsP", "instructionsP"],
