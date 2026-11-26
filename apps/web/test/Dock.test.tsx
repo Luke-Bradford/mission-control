@@ -1,3 +1,4 @@
+import { SEAT_STATES, type SeatState } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub, streamStatus } from "../src/data.ts";
@@ -7,7 +8,7 @@ import {
   FLIGHT_STOPPED_NOTICE,
   type FlightView,
 } from "../src/flight/flightTypes.ts";
-import { Dock } from "../src/shell/Dock.tsx";
+import { Dock, stateWord } from "../src/shell/Dock.tsx";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { installKeys } from "../src/shell/keys.ts";
 import {
@@ -180,6 +181,20 @@ describe("Dock content", () => {
     const chip = screen.getByText("P2");
     expect(chip.className).toContain("bs-later");
     expect(chip.getAttribute("title")).toBe("FLIGHT itself, with structured decision briefs.");
+  });
+});
+
+describe("stateWord", () => {
+  const seat = (state: SeatState | null, live = true) => ({ id: "flight", call: "FLIGHT", model: "opus", state, live });
+
+  it("says FLIGHT needs input while its Claude in cmux waits on the operator, not stopped", () => {
+    expect(stateWord(seat("needs-input"))).toBe("needs your input in cmux");
+  });
+
+  it("names every live seat state other than stopped without falling back to stopped", () => {
+    for (const s of SEAT_STATES.filter((x) => x !== "stopped")) expect(stateWord(seat(s))).not.toBe("stopped");
+    expect(stateWord(seat("stopped"))).toBe("stopped");
+    expect(stateWord(seat("running", false))).toBe("stopped");
   });
 });
 
