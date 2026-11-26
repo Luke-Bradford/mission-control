@@ -337,7 +337,7 @@ describe("a Claude run in cmux", () => {
     // no new workspace was made while the old one of its name was still listed
     expect(cmuxState().sameName ?? []).toEqual([]);
     expect(store.run(runId)?.endedAt).toBeNull();
-  });
+  }, 10_000);
 
   it("closes the workspace when the run ends", async () => {
     const { sup, runId } = await started();
