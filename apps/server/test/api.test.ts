@@ -2089,6 +2089,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/flight/orders/:id/revoke", {}],
   ["GET", "/api/flight/instructions"],
   ["GET", "/api/sessions"],
+  ["GET", "/api/sessions/sidebar"],
+  ["POST", "/api/sessions/sidebar", { on: true }],
   ["POST", "/api/sessions/:id/focus", {}],
   ["POST", "/api/sessions/:id/send", { text: "hello" }],
   ["POST", "/api/sessions/:id/app", {}],
