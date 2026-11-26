@@ -35,10 +35,16 @@
 }
 
 .sess-read {
-  margin-left: auto;
   color: var(--muted);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
+}
+
+.sess-sidebar-toggle {
+  margin-left: auto;
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  white-space: nowrap;
 }
 
 .sess-banner {
@@ -74,6 +80,9 @@
 }
 .sess-table .c-folder {
   width: 14%;
+}
+.sess-table .c-branch {
+  width: 15%;
 }
 .sess-table .c-state {
   width: 152px;
@@ -196,6 +205,34 @@ button.sess-inbox[aria-expanded="true"] {
 .sess-folder b {
   color: var(--fg);
   font-weight: 500;
+}
+
+.sess-branchcell {
+  min-width: 0;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.sess-branchline,
+.sess-prline {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.sess-branchline code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sess-prline {
+  color: var(--muted);
+}
+.sess-prline .pill {
+  font-size: inherit;
 }
 
 .sess-last {
@@ -321,6 +358,9 @@ button.sess-inbox[aria-expanded="true"] {
   }
   .sess-table .c-folder {
     width: 13%;
+  }
+  .sess-table .c-branch {
+    width: 14%;
   }
   .sess-table .c-state {
     width: 140px;

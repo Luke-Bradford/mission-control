@@ -45,6 +45,18 @@ function row(i: number, long: boolean): CmuxSessionRow {
           ? { url: "http://localhost:8080", answers: false }
           : null,
     inbox: { unread: i === 1 ? 1 : 0, newest: i === 1 ? "The pricing API is back." : null },
+    branch: i === 0 ? `feature/2262-${"cmux-sidebar-".repeat(5)}status` : `feature/${2200 + i}`,
+    ticket: { number: 2200 + i, repoId: "mission-control" },
+    pr:
+      i === 0
+        ? {
+            number: 2269,
+            url: "https://github.com/Luke-Bradford/mission-control/pull/2269",
+            isDraft: false,
+            ci: "pending",
+            review: "requested",
+          }
+        : null,
   };
 }
 

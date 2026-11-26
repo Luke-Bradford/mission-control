@@ -79,8 +79,10 @@ export const RESOURCES = {
     topic: ["agents", "boards", "attention", "flight"],
   },
   prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
-  /** Every cmux workspace on this Mac, read from cmux; the Sessions page polls it, no topic. */
-  sessions: { path: "/api/sessions", topic: null },
+  /** Every cmux workspace on this Mac, read from cmux; events refresh it between polls. */
+  sessions: { path: "/api/sessions", topic: "sessions" },
+  /** Whether the hub may add its own fields and notices to cmux workspaces. */
+  sessionsSidebar: { path: "/api/sessions/sidebar", topic: null },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).
@@ -348,6 +350,8 @@ export const RESOURCES = {
 
 /** Mutation endpoints. */
 export const ACTIONS = {
+  /** Body `{ on }`; controls Mission Control's own cmux sidebar fields and notices. */
+  sessionsSidebar: RESOURCES.sessionsSidebar.path,
   /** Body `{}`; brings the cmux workspace to the front. */
   sessionFocus: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/focus`,
   /** Body `{ text }`; pastes it into the workspace, then Enter. 409 while it has a question open. */

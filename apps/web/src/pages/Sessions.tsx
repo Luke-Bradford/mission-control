@@ -14,6 +14,7 @@ import { useTz } from "../clock.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { clockTime, plural } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
+import { followLink, ticketPath } from "../router.ts";
 import { toast } from "../shell/Toast.tsx";
 import "./sessions.css";
 
@@ -26,7 +27,7 @@ const STATE_TONE: Record<CmuxSessionState, PillTone> = {
   "no-agent": "plain",
 };
 
-const COLUMNS = 8;
+const COLUMNS = 9;
 
 /** Time in a state as this hub saw it: `4m`, `3h`, `2d`. */
 export function forLabel(ms: number): string {
@@ -51,6 +52,8 @@ const message = (error: unknown): string =>
  */
 export function Sessions() {
   const res = useResource<CmuxSessionsView>(RESOURCES.sessions);
+  const sidebar = useResource<{ on: boolean }>(RESOURCES.sessionsSidebar);
+  const [writesOverride, setWritesOverride] = useState<boolean | null>(null);
   const tz = useTz();
   useEffect(() => {
     const timer = setInterval(() => hub.refetch(RESOURCES.sessions.path), SESSIONS_REFRESH_MS);
@@ -65,6 +68,15 @@ export function Sessions() {
   const rows = useMemo(() => (shown ? sortSessions(shown.sessions) : []), [shown]);
   const error = view && !view.ok ? view.error : res.error ? res.error.message : null;
   const time = (at: number) => (tz ? clockTime(at, tz) : "—");
+  const writesOn = writesOverride ?? sidebar.data?.on ?? true;
+  const setWrites = async (on: boolean) => {
+    try {
+      await apiPost(ACTIONS.sessionsSidebar, { on });
+      setWritesOverride(on);
+    } catch (err) {
+      toast(message(err));
+    }
+  };
 
   return (
     <section id="page-sessions" className="panel sess" aria-labelledby="sess-title">
@@ -73,9 +85,21 @@ export function Sessions() {
         {shown && <Summary rows={rows} />}
         <span className="sess-read">
           {shown
-            ? `${error ? "Last good read" : "Read from cmux"} ${time(shown.at)} · every ${SESSIONS_REFRESH_MS / 1000} s`
+            ? `${error ? "Last good read" : "Read from cmux"} ${time(shown.at)} · every ${SESSIONS_REFRESH_MS / 1000} s${writesOn ? "" : " · cmux writes off"}`
             : null}
         </span>
+        <label
+          className="sess-sidebar-toggle"
+          title="Shows the pull request, CI, cost and checks in each workspace's sidebar, and sends notices to cmux."
+        >
+          <input
+            type="checkbox"
+            checked={writesOn}
+            disabled={sidebar.loading}
+            onChange={(event) => void setWrites(event.currentTarget.checked)}
+          />
+          Write to cmux
+        </label>
       </div>
       {error && (
         <p className="sess-banner" role="alert">
@@ -127,6 +151,7 @@ function SessionTable({ rows, now }: { rows: readonly CmuxSessionRow[]; now: num
       <colgroup>
         <col className="c-name" />
         <col className="c-folder" />
+        <col className="c-branch" />
         <col className="c-state" />
         <col className="c-for" />
         <col />
@@ -138,6 +163,7 @@ function SessionTable({ rows, now }: { rows: readonly CmuxSessionRow[]; now: num
         <tr>
           <th scope="col">Session</th>
           <th scope="col">Folder · repo</th>
+          <th scope="col">Branch · PR</th>
           <th scope="col" aria-sort="ascending">
             State <span aria-hidden="true">↓</span>
           </th>
@@ -247,6 +273,7 @@ function SessionRow({
             </>
           )}
         </td>
+        <td className="sess-branch">{r.branch ? <BranchCell row={r} /> : <Dash />}</td>
         <td>
           <Pill tone={STATE_TONE[r.state]}>{CMUX_SESSION_STATE_LABEL[r.state]}</Pill>
         </td>
@@ -285,6 +312,51 @@ function SessionRow({
       )}
       {writing && <Composer row={r} onClose={() => onWrite(false)} />}
     </>
+  );
+}
+
+function BranchCell({ row }: { row: CmuxSessionRow }) {
+  const ticket = row.ticket;
+  const ticketHref = ticket?.repoId ? ticketPath(ticket.repoId, ticket.number) : null;
+  return (
+    <div className="sess-branchcell">
+      <div className="sess-branchline">
+        {ticket &&
+          (ticketHref ? (
+            <a href={ticketHref} onClick={(e) => followLink(e, ticketHref)}>
+              #{ticket.number}
+            </a>
+          ) : (
+            <span>#{ticket.number}</span>
+          ))}
+        <code title={row.branch ?? undefined}>{row.branch}</code>
+      </div>
+      <div className="sess-prline">
+        {row.pr ? (
+          <>
+            <a href={row.pr.url} onClick={(e) => e.stopPropagation()}>
+              PR {row.pr.number}
+            </a>
+            {row.pr.ci && (
+              <Pill
+                tone={row.pr.ci === "failing" ? "crit" : row.pr.ci === "passing" ? "ok" : "warn"}
+              >{`CI ${row.pr.ci === "pending" ? "running" : row.pr.ci}`}</Pill>
+            )}
+            {row.pr.review && (
+              <span>
+                {row.pr.review === "changes"
+                  ? "Changes asked"
+                  : row.pr.review === "requested"
+                    ? "Review asked"
+                    : "Approved"}
+              </span>
+            )}
+          </>
+        ) : (
+          "No PR"
+        )}
+      </div>
+    </div>
   );
 }
 
