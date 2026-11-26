@@ -658,10 +658,23 @@ function Totals({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
 }
 
 /** One owner's share of a day and repo: ~USD over its tokens, both visible; `—` when it used none. */
-function SpendTd({ c, strong = false }: { c: SpendCell; strong?: boolean }) {
-  if (c.tokens === 0 && c.costUsd === 0) return <td className="r num muted">{DASH}</td>;
+function SpendTd({
+  c,
+  strong = false,
+  style,
+}: {
+  c: SpendCell;
+  strong?: boolean;
+  style?: CSSProperties;
+}) {
+  if (c.tokens === 0 && c.costUsd === 0)
+    return (
+      <td className="r num muted" style={style}>
+        {DASH}
+      </td>
+    );
   return (
-    <td className={`r num${strong ? "" : " fg2"}`}>
+    <td className={`r num${strong ? "" : " fg2"}`} style={style}>
       {cost(c.costUsd)}
       <span className="s muted" style={{ display: "block" }}>
         {kTokens(c.tokens)} tok
@@ -670,12 +683,49 @@ function SpendTd({ c, strong = false }: { c: SpendCell; strong?: boolean }) {
   );
 }
 
+/** Day rows the Spend by owner panel shows before its table scrolls. */
+const OWNER_ROWS_SHOWN = 8;
+
+/** The footer stays in view while the rows scroll, so the account total is always on screen. */
+const STICKY_FOOT: CSSProperties = {
+  position: "sticky",
+  bottom: 0,
+  zIndex: 1,
+  background: "var(--surface)",
+};
+const STICKY_HEAD: CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 1,
+  background: "var(--surface)",
+};
+
 /** Every Claude session on this Mac by day and repo: the operator's, the crew's and FLIGHT's. */
 function SpendByOwner({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const tz = useTz();
   const split = t?.sessionSpend;
-  const readAt =
-    split?.readAt == null || tz === null ? "Not read yet" : `Read ${hhmm(split.readAt, tz)}`;
+  const at = split?.readAt == null || tz === null ? null : hhmm(split.readAt, tz);
+  const readAt = split?.failed
+    ? `${at === null ? "No full read yet" : `Last full read ${at}`} · ${split.failed}`
+    : at === null
+      ? "Not read yet"
+      : `Read ${at}`;
+  // Measured whole rows: the region ends on a row boundary, never through one.
+  const scroller = useRef<HTMLElement>(null);
+  const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const rows = el ? [...el.querySelectorAll<HTMLElement>("tbody tr")] : [];
+    if (!el || !split || rows.length <= OWNER_ROWS_SHOWN) {
+      setMaxHeight(undefined);
+      return;
+    }
+    const h = (q: Element | null) => (q ? q.getBoundingClientRect().height : 0);
+    const shown = rows.slice(0, OWNER_ROWS_SHOWN).reduce((n, row) => n + h(row), 0);
+    const px = Math.ceil(h(el.querySelector("thead")) + shown + h(el.querySelector("tfoot")));
+    setMaxHeight(px > 0 ? px : undefined);
+  }, [split]);
+  const scrolls = (split?.rows.length ?? 0) > OWNER_ROWS_SHOWN;
   return (
     <Panel
       id="tSpendOwner"
@@ -691,16 +741,32 @@ function SpendByOwner({ t, scope }: { t: Telemetry | undefined; scope: Scope }) 
         <p className="pb s muted">No Claude sessions in the last 7 days.</p>
       ) : (
         <>
-          <div className="pb tw" style={{ maxHeight: 440, overflowY: "auto" }}>
+          <section
+            ref={scroller}
+            className="pb tw"
+            aria-label="Spend by owner rows"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: a keyboard user scrolls the rows from here
+            tabIndex={0}
+            // its own height, not the grid row's leftover; the outline sits inside the panel's clip
+            style={{ flex: "none", maxHeight, overflowY: "auto", outlineOffset: -2 }}
+          >
             <table style={{ "--table-row": "40px" } as CSSProperties}>
               <thead>
                 <tr>
-                  <th>Day</th>
-                  <th>Repo</th>
-                  <th className="r">Yours</th>
-                  <th className="r">Crew</th>
-                  <th className="r">FLIGHT</th>
-                  <th className="r">Total</th>
+                  <th style={STICKY_HEAD}>Day</th>
+                  <th style={STICKY_HEAD}>Repo</th>
+                  <th className="r" style={STICKY_HEAD}>
+                    Yours
+                  </th>
+                  <th className="r" style={STICKY_HEAD}>
+                    Crew
+                  </th>
+                  <th className="r" style={STICKY_HEAD}>
+                    FLIGHT
+                  </th>
+                  <th className="r" style={STICKY_HEAD}>
+                    Total
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -719,13 +785,16 @@ function SpendByOwner({ t, scope }: { t: Telemetry | undefined; scope: Scope }) 
               </tbody>
               <tfoot>
                 <tr>
-                  <th colSpan={5}>Account total</th>
-                  <SpendTd c={split.total} strong />
+                  <th colSpan={5} style={STICKY_FOOT}>
+                    Account total
+                  </th>
+                  <SpendTd c={split.total} strong style={STICKY_FOOT} />
                 </tr>
               </tfoot>
             </table>
-          </div>
+          </section>
           <p className="pnote">
+            {scrolls && `${split.rows.length} rows: scroll the table for the rest. `}
             Priced from each transcript's token counts at API list rates. Crew figures can differ a
             little from the runs' reported cost.
             {split.unpricedTokens > 0 &&

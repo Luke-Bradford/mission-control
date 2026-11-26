@@ -123,7 +123,7 @@ describe("session spend", () => {
     expect(cell?.today.tokens).toBe(1500 + 500 + 4500 + 1100);
     expect(Math.abs((cell?.week.costUsd ?? 0) - week) / week).toBeLessThan(0.01);
     expect(cell?.week.tokens).toBe(7600 + 2000);
-    expect(cell?.unpriced).toBe(false);
+    expect(cell?.unpricedTokens).toEqual({ today: 0, week: 0 });
   });
 
   it("keeps numbers only, never transcript text", () => {
@@ -286,12 +286,48 @@ describe("session spend", () => {
     expect(src).not.toMatch(/node:child_process/);
   });
 
+  it("counts tokens without a price per window, apart from the priced cost", () => {
+    const p = join(root, "p");
+    mkdirSync(p);
+    const yesterday = NOW - 24 * 3_600_000;
+    writeFileSync(
+      join(p, "mixed.jsonl"),
+      turn(
+        "mixed",
+        "/x",
+        "a1",
+        yesterday,
+        { input_tokens: 70, output_tokens: 30 },
+        "claude-mystery-1",
+      ) +
+        turn("mixed", "/x", "a2", NOW - 2000, { input_tokens: 1000, output_tokens: 500 }) +
+        turn(
+          "mixed",
+          "/x",
+          "a3",
+          NOW - 1000,
+          { input_tokens: 5, output_tokens: 5 },
+          "claude-mystery-1",
+        ),
+    );
+    read();
+    const c = sessionSpendFor(store, ["mixed"], NOW, TZ).get("mixed");
+    expect(c?.today).toEqual({
+      tokens: 1510,
+      costUsd: expect.closeTo((1000 * 4 + 500 * 20) / 1e6, 12),
+    });
+    expect(c?.unpricedTokens).toEqual({ today: 10, week: 110 });
+  });
+
   it("a missing root fails the pass and records nothing", () => {
     expect(() => readSessionSpend({ config, store, root: join(dir, "gone"), now: NOW })).toThrow(
       /cannot read/,
     );
     expect(store.getSetting(SESSION_SPEND_READ_SETTING)).toBeNull();
-    expect(sessionSpendSplit(config, store, NOW).readAt).toBeNull();
+    expect(sessionSpendSplit(config, store, NOW)).toMatchObject({
+      readAt: null,
+      failed: "The transcripts folder could not be read.",
+    });
   });
 
   it("an empty root is a successful read", () => {
@@ -314,7 +350,16 @@ describe("session spend", () => {
     }
     expect(sessionSpendFor(store, ["ok"], NOW, TZ).get("ok")?.today.tokens).toBe(20);
     expect(sessionSpendFor(store, ["locked"], NOW, TZ).get("locked")).toBeUndefined();
+    // the totals now miss a session: the last full read stays as it was, and the panel says so
+    expect(sessionSpendSplit(config, store, NOW)).toMatchObject({
+      readAt: null,
+      failed: "1 transcript could not be read.",
+    });
     read(NOW + 30_000);
+    expect(sessionSpendSplit(config, store, NOW + 30_000)).toMatchObject({
+      readAt: NOW + 30_000,
+      failed: null,
+    });
     expect(sessionSpendFor(store, ["locked"], NOW, TZ).get("locked")?.today.tokens).toBe(20);
     expect(sessionSpendFor(store, ["ok"], NOW, TZ).get("ok")?.today.tokens).toBe(20);
   });

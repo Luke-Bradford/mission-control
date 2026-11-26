@@ -121,7 +121,7 @@ describe("Sessions page", () => {
     const spend = {
       today: { tokens: 412_000, costUsd: 1.234 },
       week: { tokens: 2_100_000, costUsd: 6.8 },
-      unpriced: false,
+      unpricedTokens: { today: 0, week: 0 },
     };
     const rows = ROWS.map((r) =>
       r.id === ID.pricing ? { ...r, spend } : r.id === ID.store ? { ...r, spend: null } : r,
@@ -132,17 +132,55 @@ describe("Sessions page", () => {
     expect(screen.getByRole("columnheader", { name: "Today" }).className).toContain("num");
     const first = bodyRows()[0] as HTMLElement;
     const today = within(first).getByText("~$1.23");
-    const tip = "Today ~$1.23 · 412k tok · Last 7 days ~$6.80 · 2.10M tok";
-    expect(today.getAttribute("title")).toBe(tip);
-    expect(document.getElementById(today.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
-      tip,
-    );
     expect(today.tabIndex).toBe(0);
     expect(today.closest("td")?.className).toContain("num");
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    // Keyboard focus shows the week on screen, tied to the cell; leaving hides it.
+    fireEvent.focus(today);
+    const tip = screen.getByRole("tooltip");
+    expect(tip.textContent).toBe("Today ~$1.23 · 412k tok · Last 7 days ~$6.80 · 2.10M tok");
+    expect(today.getAttribute("aria-describedby")).toBe(tip.id);
+    fireEvent.blur(today);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.mouseEnter(today);
+    expect(screen.getByRole("tooltip").textContent).toContain("Last 7 days ~$6.80");
+    fireEvent.mouseLeave(today);
+    expect(screen.queryByRole("tooltip")).toBeNull();
     // No spend reads as a dash, whether the row has none or no agent.
     const cells = (i: number) => within(bodyRows()[i] as HTMLElement).getAllByRole("cell");
     expect(cells(1)[4]?.textContent).toBe("—");
     expect(cells(3)[4]?.textContent).toBe("—");
+  });
+
+  it("never shows a model without a price as a known cost", async () => {
+    const none = {
+      today: { tokens: 3300, costUsd: 0 },
+      week: { tokens: 3300, costUsd: 0 },
+      unpricedTokens: { today: 3300, week: 3300 },
+    };
+    const part = {
+      today: { tokens: 1510, costUsd: 0.014 },
+      week: { tokens: 1610, costUsd: 0.014 },
+      unpricedTokens: { today: 10, week: 110 },
+    };
+    const rows = ROWS.map((r) =>
+      r.id === ID.pricing ? { ...r, spend: none } : r.id === ID.store ? { ...r, spend: part } : r,
+    );
+    const fetch = stubFetch({ [PATH]: { ...VIEW, sessions: rows } });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    const all = within(bodyRows()[0] as HTMLElement).getByText("No price");
+    fireEvent.focus(all);
+    expect(screen.getByRole("tooltip").textContent).toBe(
+      "Today no price · 3.3k tok, all without a price · Last 7 days no price · 3.3k tok, all without a price",
+    );
+    fireEvent.blur(all);
+    expect(screen.queryByText("~$0.00")).toBeNull();
+    const some = within(bodyRows()[1] as HTMLElement).getByText("~$0.01+");
+    fireEvent.focus(some);
+    expect(screen.getByRole("tooltip").textContent).toBe(
+      "Today ~$0.01+ · 1.5k tok, 10 without a price · Last 7 days ~$0.01+ · 1.6k tok, 110 without a price",
+    );
   });
 
   it("clicking a row opens it in cmux", async () => {

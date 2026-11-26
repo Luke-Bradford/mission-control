@@ -1702,6 +1702,7 @@ describe("Cost and tokens tab", () => {
           total: c(3600, 4.35),
           unpricedTokens: 1234,
           readAt: NOW,
+          failed: null,
         },
       }),
       undefined,
@@ -1740,6 +1741,42 @@ describe("Cost and tokens tab", () => {
     expect(p.textContent).toMatch(/Read \d\d:\d\d/);
   });
 
+  it("Spend by owner keeps a long week in a labelled, focusable scroll region with the total in view", async () => {
+    const c = (tokens: number, costUsd: number) => ({ tokens, costUsd });
+    const rows = Array.from({ length: 20 }, (_, i) => ({
+      day: `2026-11-${String(25 - (i % 7)).padStart(2, "0")}`,
+      repo: `repo-${i}`,
+      operator: c(100, 0.1),
+      crew: c(0, 0),
+      flight: c(0, 0),
+      total: c(100, 0.1),
+    }));
+    await loaded(
+      tel({
+        sessionSpend: {
+          rows,
+          total: c(2000, 2),
+          unpricedTokens: 0,
+          readAt: NOW,
+          failed: "1 transcript could not be read.",
+        },
+      }),
+      undefined,
+      undefined,
+      "cost",
+      "table",
+    );
+    const p = panel("tSpendOwner");
+    const region = within(p).getByRole("region", { name: "Spend by owner rows" });
+    expect(region.tabIndex).toBe(0);
+    expect(region.querySelectorAll("tbody tr")).toHaveLength(20);
+    // the account total stays in view while the rows scroll
+    expect((p.querySelector("tfoot th") as HTMLElement).style.position).toBe("sticky");
+    expect(p.textContent).toContain("20 rows: scroll the table for the rest.");
+    // a pass that missed a transcript never reads as fresh
+    expect(p.textContent).toMatch(/Last full read \d\d:\d\d · 1 transcript could not be read\./);
+  });
+
   it("Spend by owner says so when there are no sessions", async () => {
     await loaded(
       tel({
@@ -1748,6 +1785,7 @@ describe("Cost and tokens tab", () => {
           total: { tokens: 0, costUsd: 0 },
           unpricedTokens: 0,
           readAt: null,
+          failed: null,
         },
       }),
       undefined,

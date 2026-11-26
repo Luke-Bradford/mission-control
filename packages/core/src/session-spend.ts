@@ -71,8 +71,8 @@ export interface SpendCell {
 export interface SessionSpendCell {
   today: SpendCell;
   week: SpendCell;
-  /** Some of the session's tokens came from a model without a price. */
-  unpriced: boolean;
+  /** Tokens from models without a price in each window: counted in tokens, not in cost. */
+  unpricedTokens: { today: number; week: number };
 }
 
 /** One local day and repo of the split; operator + crew + flight equals total. */
@@ -95,8 +95,10 @@ export interface SessionSpendSplit {
   total: SpendCell;
   /** Tokens from models without a price, counted in tokens but not cost. */
   unpricedTokens: number;
-  /** When the transcripts were last read; null before the first pass. */
+  /** When every transcript was last read in full; null before the first full pass. */
   readAt: number | null;
+  /** What the latest pass could not read, in words, so the totals may miss some; null when it read all. */
+  failed: string | null;
 }
 
 /** How often the hub reads new transcript lines. */

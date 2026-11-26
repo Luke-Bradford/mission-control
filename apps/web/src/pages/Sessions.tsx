@@ -6,6 +6,7 @@ import {
   type PillTone,
   SESSION_TEXT_MAX,
   SESSIONS_REFRESH_MS,
+  type SpendCell,
   sortSessions,
 } from "@mc/core";
 import {
@@ -13,14 +14,17 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   useEffect,
+  useId,
   useMemo,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { clockTime, cost, kTokens, plural } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
+import "../hud/charts/Hover.css";
 import { toast } from "../shell/Toast.tsx";
 import "./sessions.css";
 
@@ -49,9 +53,31 @@ const shortFolder = (folder: string): string => folder.replace(/^\/Users\/[^/]+(
 /** The address without its scheme: `localhost:5173`. */
 const shortUrl = (url: string): string => url.replace(/^[a-z]+:\/\//i, "").replace(/\/$/, "");
 
+type Spend = NonNullable<CmuxSessionRow["spend"]>;
+
+/**
+ * One window's ~cost: `—` with no use, `no price` when every token's model has none, and `~$1.23+`
+ * when some have none, so an unknown cost never reads as a known one.
+ */
+function spendAmount(c: SpendCell, unpriced: number): string {
+  if (c.tokens === 0) return "—";
+  if (unpriced >= c.tokens) return "no price";
+  return `${cost(c.costUsd)}${unpriced > 0 ? "+" : ""}`;
+}
+
+function spendWindow(label: string, c: SpendCell, unpriced: number): string {
+  const without =
+    unpriced === 0
+      ? ""
+      : unpriced >= c.tokens
+        ? ", all without a price"
+        : `, ${kTokens(unpriced)} without a price`;
+  return `${label} ${spendAmount(c, unpriced)} · ${kTokens(c.tokens)} tok${without}`;
+}
+
 /** The Today cell's hover and focus text: today's and the last 7 local days' ~cost and tokens. */
-export const spendTitle = (s: NonNullable<CmuxSessionRow["spend"]>): string =>
-  `Today ${cost(s.today.costUsd)} · ${kTokens(s.today.tokens)} tok · Last 7 days ${cost(s.week.costUsd)} · ${kTokens(s.week.tokens)} tok`;
+export const spendTitle = (s: Spend): string =>
+  `${spendWindow("Today", s.today, s.unpricedTokens.today)} · ${spendWindow("Last 7 days", s.week, s.unpricedTokens.week)}`;
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : "The hub did not answer.";
@@ -215,7 +241,6 @@ function SessionRow({
   onRead: () => void;
 }) {
   const msgId = `sess-msg-${r.id}`;
-  const spendId = `sess-spend-${r.id}`;
   const newest = r.inbox.unread > 0 ? r.inbox.newest : null;
   const open = () => void post(ACTIONS.sessionFocus(r.id));
   const onKey = (e: KeyboardEvent<HTMLTableRowElement>) => {
@@ -277,15 +302,7 @@ function SessionRow({
         </td>
         <td className="num">
           {r.spend && (r.spend.today.tokens > 0 || r.spend.week.tokens > 0) ? (
-            <>
-              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: focus shows the week, as hover does */}
-              <span tabIndex={0} title={spendTitle(r.spend)} aria-describedby={spendId}>
-                {r.spend.today.tokens > 0 ? cost(r.spend.today.costUsd) : "—"}
-              </span>
-              <span id={spendId} className="sr-only">
-                {spendTitle(r.spend)}
-              </span>
-            </>
+            <SpendToday spend={r.spend} />
           ) : (
             <Dash />
           )}
@@ -331,6 +348,50 @@ function SessionRow({
  * would move the button between press and release and turn the click into a click on the row.
  */
 const keepRowStill = (e: MouseEvent) => e.preventDefault();
+
+/**
+ * Today's ~cost; hover or keyboard focus shows today and the last 7 days on screen. The tip sits on
+ * the page, outside the table, so the cell's clipping never cuts it.
+ */
+function SpendToday({ spend }: { spend: Spend }) {
+  const [at, setAt] = useState<{ right: number; top: number } | null>(null);
+  const tip = useId();
+  const show = (target: HTMLElement) => {
+    const box = target.getBoundingClientRect();
+    // right-aligned under the figure, as the column is; kept inside the window
+    setAt({
+      right: Math.max(8, window.innerWidth - box.right),
+      top: Math.max(8, Math.min(box.bottom + 4, window.innerHeight - 48)),
+    });
+  };
+  const text = spendAmount(spend.today, spend.unpricedTokens.today);
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: focus and hover disclose the week, not an action
+    <span
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: focus shows the week, as hover does
+      tabIndex={0}
+      aria-describedby={at ? tip : undefined}
+      onFocus={(e) => show(e.currentTarget)}
+      onBlur={() => setAt(null)}
+      onMouseEnter={(e) => show(e.currentTarget)}
+      onMouseLeave={() => setAt(null)}
+    >
+      {text === "no price" ? "No price" : text}
+      {at &&
+        createPortal(
+          <span
+            id={tip}
+            role="tooltip"
+            className="tip"
+            style={{ position: "fixed", zIndex: 20, right: at.right, top: at.top }}
+          >
+            {spendTitle(spend)}
+          </span>,
+          document.body,
+        )}
+    </span>
+  );
+}
 
 const Dash = () => <span className="sess-dash">—</span>;
 

@@ -22,8 +22,11 @@ import { offsetSince, readNewLines } from "../transcript/tail.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 
-/** The setting that holds when the transcripts were last read (epoch ms). */
+/** The setting that holds when every transcript was last read in full (epoch ms). */
 export const SESSION_SPEND_READ_SETTING = "sessionSpend.readAt";
+/** The setting that holds what the latest pass could not read, in words; empty when it read all. */
+export const SESSION_SPEND_FAILED_SETTING = "sessionSpend.failed";
+const ROOT_FAILED_TEXT = "The transcripts folder could not be read.";
 /** Most transcript bytes one pass reads; a longer first read carries on at the next pass. */
 export const SESSION_SPEND_PASS_BYTES = 64 * 1024 * 1024;
 
@@ -120,8 +123,9 @@ const KINDS = ["input", "output", "cacheWrite5m", "cacheWrite1h", "cacheRead"] a
  * its counts grew by, on this pass or a later one. A file that shrank is read again from its start
  * and replaces its earlier rows. Starts no process and calls no model.
  *
- * Throws when `root` cannot be read (nothing is recorded, readAt is kept) or, after reading the
- * rest, when some transcripts could not be read (their offsets are kept).
+ * Throws when `root` cannot be read (nothing is recorded) or, after reading the rest, when some
+ * transcripts could not be read (their offsets are kept). Either way readAt keeps the last full
+ * read and the failure is stored for the panel, so partial totals never look fresh.
  */
 export function readSessionSpend(i: {
   config: CcConfig;
@@ -140,7 +144,14 @@ export function readSessionSpend(i: {
   let files = 0;
   let added = 0;
   let budget = SESSION_SPEND_PASS_BYTES;
-  const { paths, unreadable } = transcriptFiles(root);
+  let listed: { paths: string[]; unreadable: string[] };
+  try {
+    listed = transcriptFiles(root);
+  } catch (e) {
+    store.setSetting(SESSION_SPEND_FAILED_SETTING, ROOT_FAILED_TEXT);
+    throw e;
+  }
+  const { paths, unreadable } = listed;
   const failed = [...unreadable];
   for (const path of paths) {
     let st: { size: number; mtimeMs: number };
@@ -274,11 +285,17 @@ export function readSessionSpend(i: {
     );
     if (unread) failed.push(path);
   }
-  store.setSetting(SESSION_SPEND_READ_SETTING, String(now));
-  if (failed.length > 0)
+  if (failed.length > 0) {
+    store.setSetting(
+      SESSION_SPEND_FAILED_SETTING,
+      `${failed.length} ${failed.length === 1 ? "transcript" : "transcripts"} could not be read.`,
+    );
     throw new Error(
       `${failed.length} of the transcripts under ${root} could not be read: ${failed.slice(0, 3).join(", ")}`,
     );
+  }
+  store.setSetting(SESSION_SPEND_READ_SETTING, String(now));
+  store.setSetting(SESSION_SPEND_FAILED_SETTING, "");
   return { files, added };
 }
 
@@ -389,6 +406,7 @@ export function sessionSpendSplit(config: CcConfig, store: Store, now: number): 
     if (r.costUsd === null) unpricedTokens += r.input + r.output;
   }
   const readAt = store.getSetting(SESSION_SPEND_READ_SETTING);
+  const failed = store.getSetting(SESSION_SPEND_FAILED_SETTING);
   return {
     rows: [...rows.values()].sort(
       (a, b) =>
@@ -399,6 +417,7 @@ export function sessionSpendSplit(config: CcConfig, store: Store, now: number): 
     total,
     unpricedTokens,
     readAt: readAt === null ? null : Number(readAt),
+    failed: failed === null || failed === "" ? null : failed,
   };
 }
 
@@ -415,12 +434,15 @@ export function sessionSpendFor(
   for (const r of store.sessionSpendOf(sessionIds, days[0] as string)) {
     let c = out.get(r.sessionId);
     if (!c) {
-      c = { today: cell(), week: cell(), unpriced: false };
+      c = { today: cell(), week: cell(), unpricedTokens: { today: 0, week: 0 } };
       out.set(r.sessionId, c);
     }
     addTo(c.week, r);
     if (r.day === today) addTo(c.today, r);
-    if (r.costUsd === null && r.input + r.output > 0) c.unpriced = true;
+    if (r.costUsd === null) {
+      c.unpricedTokens.week += r.input + r.output;
+      if (r.day === today) c.unpricedTokens.today += r.input + r.output;
+    }
   }
   return out;
 }
