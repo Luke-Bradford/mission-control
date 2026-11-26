@@ -35,6 +35,17 @@ One read is shared for 2 s. The actions:
 
 Every route needs the operator token. A seat's token gets 403. A hub without cmux answers 503.
 
+## Crew app workspaces
+
+Each configured crew app runs in a dedicated `<repo> · app` workspace. The hub starts one pane per
+`app_commands` entry from a private worktree at refreshed `origin/main`; it gives every command a
+different loopback port, sets the first URL as the workspace `app` status, and never starts eBull's
+launchd-owned jobs process. The Sessions page lists each app workspace and provides Start and Stop.
+
+Every minute the hub fetches `origin/main`: a changed commit restarts that repository's workspace.
+When an app URL stops answering, it restarts it no more than once per five minutes and records the
+restart in the hub log. Preview hubs never start or restart crew apps.
+
 ## Opening a session
 
 The New session button reads `GET /api/sessions/roles`: `{ roles, folders }`, the `roles/*.md`

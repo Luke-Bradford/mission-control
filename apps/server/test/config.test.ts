@@ -1577,6 +1577,16 @@ describe("guard config", () => {
     expect(() => parse(empty)).toThrow();
   });
 
+  it("loads several development app commands", () => {
+    const apps = text.replace(
+      FULL_SUITE_BLOCK,
+      `${FULL_SUITE_BLOCK}\n    app_commands:\n      - command: pnpm dev\n        url: http://127.0.0.1:$PORT`,
+    );
+    expect(parse(apps).repos[2]?.appCommands).toEqual([
+      { command: "pnpm dev", url: "http://127.0.0.1:$PORT" },
+    ]);
+  });
+
   it.each(["rm -rf /", "pnpm -s tests", "pnpm test", "git push"])(
     "finds full_suite entry %j that crew seats may not run, against the writer commands",
     (cmd) => {

@@ -105,6 +105,7 @@ export const RESOURCES = {
   crewDetail: (id: string): ResourceRef => ({ path: crewDetailPath(id), topic: "agents" }),
   // Reads each session's checkout folders from disk on each fetch, so once per visit.
   crewSessions: { path: "/api/crew/sessions", topic: null },
+  crewApps: { path: "/api/sessions/apps", topic: null },
   // Whether this server runs crew sessions (off on a preview, or when another server holds
   // the lock).
   crewStatus: { path: "/api/crew/status", topic: "config" },
@@ -362,6 +363,7 @@ export const ACTIONS = {
   sessionSend: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/send`,
   /** Body `{}`; opens the session's app in that workspace's cmux browser. */
   sessionApp: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/app`,
+  crewApp: (repo: string, action: string) => `/api/sessions/apps/${enc(repo)}/${action}`,
   /** Body: an OpenSessionInput; answers 201 `{ id, name }`. */
   sessionOpen: RESOURCES.sessions.path,
   /** Body `{}`; queues the session's repo checks. 400 with the reason when it has none or is a crew seat. */

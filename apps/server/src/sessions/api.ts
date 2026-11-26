@@ -24,6 +24,7 @@ import { SessionError, type SessionsService } from "./sessions.ts";
 const SendInput = z.strictObject({ text: z.string().min(1).max(SESSION_TEXT_MAX) });
 const SidebarInput = z.strictObject({ on: z.boolean() });
 const noBody = z.strictObject({}).optional();
+const AppAction = z.enum(["start", "stop"]);
 const RepoChecksInput = z.strictObject({
   repo: z.string().min(1).max(4096),
   on: z.boolean().optional(),
@@ -87,6 +88,28 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
 
   // Reader: docs/runbooks/cmux-sessions.md#the-sessions-page (every cmux workspace on this Mac)
   api.get("/sessions", { preHandler: auth }, async () => sessions().view());
+  // Reader: apps/web/src/pages/Sessions.tsx (the app workspace Start and Stop controls)
+  api.get("/sessions/apps", { preHandler: auth }, async () => deps.crewApps?.view() ?? []);
+  // Reader: apps/web/src/pages/Sessions.tsx (the app workspace Start and Stop controls)
+  api.post<{ Params: { repo: string; action: "start" | "stop" } }>(
+    "/sessions/apps/:repo/:action",
+    { preHandler: auth },
+    async (req, reply) => {
+      if (!noBody.safeParse(req.body).success)
+        return reply.code(400).send({ error: "Send an empty object." });
+      const action = AppAction.safeParse(req.params.action);
+      if (!action.success) return reply.code(404).send({ error: "No app action has that name." });
+      if (!deps.crewApps) return reply.code(503).send({ error: SESSIONS_OFF_TEXT });
+      const found = deps.crewApps.view().some((app) => app.id === req.params.repo);
+      if (!found) return reply.code(404).send({ error: "No configured app has that repository." });
+      try {
+        await deps.crewApps[action.data](req.params.repo);
+        return { ok: true };
+      } catch (error) {
+        return failure(error, reply);
+      }
+    },
+  );
   // Reader: docs/runbooks/cmux-sessions.md#opening-a-session (the New session form's choices)
   api.get("/sessions/roles", { preHandler: auth }, async () => sessions().roles());
   // Reader: docs/runbooks/cmux-sessions.md#opening-a-session (the New session button)

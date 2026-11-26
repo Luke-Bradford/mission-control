@@ -98,6 +98,8 @@ export interface Cmux {
   /** Opens `url` in a browser pane of the workspace. */
   openBrowser(ws: string, url: string): Promise<void>;
   newWorkspace(i: CmuxWorkspaceInput): Promise<string>;
+  /** Opens another terminal pane in a workspace. */
+  newPane(ws: string, cwd: string, command: string): Promise<void>;
   /** The Claude records cmux holds (`cmux sessions`), from one shared call per second. */
   agents(): Promise<CmuxAgent[]>;
   /** "busy": a dialog is open or a draft is typed; nothing was sent. */
@@ -457,6 +459,20 @@ export function createCmux(
         if (Date.now() - t0 >= wait) throw new CmuxError("cmux made no workspace we could find");
         await sleep(FIND_RETRY_MS);
       }
+    },
+    async newPane(ws, cwd, command) {
+      const r = await cmux([
+        "new-pane",
+        "--type",
+        "terminal",
+        "--workspace",
+        ws,
+        "--cwd",
+        cwd,
+        "--command",
+        command,
+      ]);
+      if (r.code !== 0) throw failed("new-pane", r);
     },
     agents() {
       if (agentsCall !== null && Date.now() - agentsAt < AGENTS_CACHE_MS) return agentsCall;

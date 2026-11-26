@@ -161,6 +161,7 @@ import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { createSessionChecks } from "./sessions/checks.ts";
+import { CREW_APP_DEFAULTS, createCrewApps } from "./sessions/apps.ts";
 import { applyCmuxSessionEvent, startCmuxEvents } from "./sessions/events.ts";
 import { createBranchPrs } from "./sessions/pr.ts";
 import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
@@ -1041,6 +1042,23 @@ export async function main(): Promise<void> {
   // Every cmux workspace on this Mac (the Sessions page, and FLIGHT's cmux_sessions and cmux_send).
   // A preview hub reads them but never tells a session its app stopped.
   const cmux = createCmux([CMUX_COMMAND], (m) => log(m));
+  const crewApps = createCrewApps({
+    cmux,
+    run: (command, args) =>
+      new Promise<string>((resolve, reject) =>
+        execFile(command, args, (error, stdout) => (error ? reject(error) : resolve(stdout))),
+      ),
+    repos: () =>
+      config.repos.flatMap((repo) => {
+        const checkout = config.crew?.sessions.find((session) => session.repoId === repo.id)?.checkout;
+        const commands = repo.appCommands ?? CREW_APP_DEFAULTS[repo.id.toLowerCase()];
+        return checkout && commands?.length
+          ? [{ id: repo.id, checkout, commands }]
+          : [];
+      }),
+    root: `${config.crew?.worktrees ?? dirname(dbPath)}-apps`,
+    log: (m) => log(m),
+  });
   const seatIds = () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];
   const branchPrs = createBranchPrs({ store, repos: () => config.repos, gh });
   const notifications = new LocalNotifications(store, config, bus, Date.now);
@@ -1228,6 +1246,7 @@ export async function main(): Promise<void> {
   void flushInstructionNotices({ config, store, bus, supervisor });
 
   const app = buildApp({
+    crewApps,
     sessions,
     onSessionSidebarChange: (on) => {
       if (on) sessionSidebar.reset();
@@ -1312,6 +1331,10 @@ export async function main(): Promise<void> {
   // a preview hub never runs a repo's commands by itself
   if (process.env.MC_NO_LOOP_WRITES !== "1") sessionChecks.start();
   app.addHook("onClose", async () => sessionChecks.stop());
+  if (process.env.MC_NO_LOOP_WRITES !== "1") {
+    for (const crewApp of crewApps.view()) void crewApps.start(crewApp.id).catch((error) => log(String(error)));
+    trackTimer(setInterval(() => void crewApps.tick(), 60_000)).unref();
+  }
   app.addHook("onClose", async () => {
     for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
     sessionSidebar.stop();

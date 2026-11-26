@@ -105,6 +105,7 @@ const message = (error: unknown): string =>
  */
 export function Sessions() {
   const res = useResource<CmuxSessionsView>(RESOURCES.sessions);
+  const crewApps = useResource<{ id: string; name: string; running: boolean }[]>(RESOURCES.crewApps);
   const sidebar = useResource<{ on: boolean }>(RESOURCES.sessionsSidebar);
   const [writesOverride, setWritesOverride] = useState<boolean | null>(null);
   const tz = useTz();
@@ -165,6 +166,7 @@ export function Sessions() {
           New session
         </button>
       </div>
+      {crewApps.data && crewApps.data.length > 0 && <CrewApps apps={crewApps.data} />}
       {opening && <OpenForm onClose={() => setOpening(false)} />}
       {error && (
         <p className="sess-banner" role="alert">
@@ -187,6 +189,42 @@ export function Sessions() {
         Click a row or press Enter to open it in cmux. The hub never closes a session.
       </p>
     </section>
+  );
+}
+
+function CrewApps({ apps }: { apps: { id: string; name: string; running: boolean }[] }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const change = async (id: string, action: "start" | "stop") => {
+    setBusy(id);
+    try {
+      await apiPost(ACTIONS.crewApp(id, action));
+      hub.refetch(RESOURCES.crewApps.path);
+      hub.refetch(RESOURCES.sessions.path);
+    } catch (error) {
+      toast(message(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="sess-crew-apps" aria-label="Crew apps">
+      {apps.map((app) => (
+        <div className="sess-crew-app" key={app.id}>
+          <span>{app.name}</span>
+          <span className={`sess-ans ${app.running ? "ok" : "muted"}`}>
+            {app.running ? "Running" : "Stopped"}
+          </span>
+          <button
+            type="button"
+            className="ghost"
+            disabled={busy === app.id}
+            onClick={() => void change(app.id, app.running ? "stop" : "start")}
+          >
+            {app.running ? "Stop" : "Start"}
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
