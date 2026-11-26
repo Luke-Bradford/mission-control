@@ -426,6 +426,31 @@ describe("loadConfig", () => {
 });
 
 describe("parseConfig", () => {
+  it("maps an optional loop baseline and rejects invalid values", () => {
+    const source = readFileSync(EXAMPLE, "utf8");
+    const withBaseline = source.replace(
+      "    project: 2\n",
+      "    project: 2\n    loop_baseline: { merged_prs_per_week: 88, tokens_per_week: 1500000000 }\n",
+    );
+    expect(parseConfig(withBaseline, "baseline").repos[0]?.loopBaseline).toEqual({
+      mergedPrsPerWeek: 88,
+      tokensPerWeek: 1_500_000_000,
+    });
+    expect(parseConfig(source, "without baseline").repos[0]?.loopBaseline).toBeUndefined();
+    for (const value of [
+      "{ merged_prs_per_week: -1, tokens_per_week: 1 }",
+      "{ merged_prs_per_week: no, tokens_per_week: 1 }",
+      "{ merged_prs_per_week: 1 }",
+    ]) {
+      expect(() =>
+        parseConfig(
+          source.replace("    project: 2\n", `    project: 2\n    loop_baseline: ${value}\n`),
+          "bad baseline",
+        ),
+      ).toThrow(ConfigError);
+    }
+  });
+
   it("validates text exactly as loadConfig validates the file", () => {
     const text = readFileSync(EXAMPLE, "utf8");
     expect(parseConfig(text, "example")).toEqual(loadConfig(EXAMPLE));

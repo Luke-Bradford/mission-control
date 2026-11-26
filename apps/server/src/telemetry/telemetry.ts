@@ -975,7 +975,7 @@ export function telemetry(
   const weekStarts = Array.from({ length: 4 }, (_, index) =>
     startOfIsoWeek(currentWeek - (3 - index) * WEEK_MS + 12 * HOUR_MS, tz),
   );
-  const allRuns = store.runsOverlapping(0, now + 1).filter((run) => known.has(run.agentId));
+  const allRuns = store.runsOverlapping(0, now + 1);
   const allReviews = store.reviewsIn(["reported"]);
   const issuesByTicket = new Map<string, { startAt: number | null }>(
     store.flowIssues(0).map((issue) => [`${issue.repoId}#${issue.number}`, issue] as const),
@@ -984,9 +984,6 @@ export function telemetry(
     const repoPrs = store
       .pullRequests(repo.id)
       .filter((pr) => pr.mergedAt !== null && pr.mergedAt <= now);
-    const repoAgentIds = new Set(
-      agents.filter((agent) => agent.repoId === repo.id).map((agent) => agent.id),
-    );
     const repoMoves = store
       .flowColumnMoves()
       .filter((move) => move.repoId === repo.id && move.at <= now);
@@ -1001,9 +998,7 @@ export function telemetry(
       if (began === undefined && move.column === "Ready") readyAt.set(move.number, move.at);
     }
     for (const began of readyAt.values()) readyIntervals.push([began, now]);
-    const repoRuns = allRuns.filter(
-      (run) => run.repoId === repo.id && repoAgentIds.has(run.agentId),
-    );
+    const repoRuns = allRuns.filter((run) => run.repoId === repo.id);
     const noSeatWorkingHours = (from: number, to: number): number | null => {
       if (repoMoves.length === 0) return null;
       const boundaries = new Set([from, to]);
@@ -1051,7 +1046,8 @@ export function telemetry(
             config.accounts.find(
               (account) =>
                 account.id === agents.find((agent) => agent.id === run.agentId)?.accountId,
-            )?.vendor;
+            )?.vendor ??
+            "claude";
           if (vendor === "claude" || vendor === "codex") tokens[vendor] += ioTokens(run) * overlap;
         }
         const rounds = merged.flatMap((pr) => {

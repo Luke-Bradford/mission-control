@@ -26,6 +26,8 @@ import {
 } from "./github.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Four weekly repository telemetry rows need their earliest Ready evidence. */
+const REPOSITORY_TELEMETRY_DAYS = 4 * 7;
 
 /** The timeline field; a later page continues from the query's `$after` variable. */
 const timelineFields = (paged: boolean) => `timelineItems(first: ${FLOW_TIMELINE_PAGE_SIZE}${
@@ -207,11 +209,11 @@ function firstPushCi(node: unknown, required: readonly string[]): FlowPr["firstP
 
 /**
  * Hourly, read-only: for active flow work, issues that reached Done and PRs merged in the last
- * FLOW_DAYS, reads the Status-change timeline and the first commits' CI. Rows are replaced only when every batch
+ * FLOW_DAYS, plus enough history for four repository telemetry weeks, reads the Status-change timeline and the first commits' CI. Rows are replaced only when every batch
  * succeeded; a failure keeps the old rows, is recorded as the flow collector's status, never throws.
  */
 export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: number): Promise<void> {
-  const since = now - FLOW_DAYS * DAY_MS;
+  const since = now - Math.max(FLOW_DAYS, REPOSITORY_TELEMETRY_DAYS) * DAY_MS;
   try {
     const board = store.board(repo.id);
     const done = board.filter((i) => hudColumnOf(i) === "Done" && i.updatedAt >= since);

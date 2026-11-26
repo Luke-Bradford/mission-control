@@ -136,6 +136,40 @@ const since = NOW - FLOW_DAYS * DAY;
 const run = (gql: Gql) => collectFlow(repo, store, gql, NOW);
 
 describe("collectFlow issues", () => {
+  it("retains Ready evidence for the oldest repository telemetry week across a later refresh", async () => {
+    store.replaceBoard("shop-app", [board(1)]);
+    store.replacePullRequests(
+      "shop-app",
+      [pr(1, { ticket: "shop-app#1", mergedAt: NOW - DAY + 4 * 60 * 60 * 1000 })],
+      0,
+    );
+    const history = timeline(ev("Ready", 1), ev("Done", 1 - 4 / 24));
+    await run(stub({ 1: history }).gql);
+
+    await collectFlow(repo, store, stub({ 1: history }).gql, NOW + 14 * DAY);
+
+    const t = telemetry(
+      {
+        operator: { id: "operator", timezone: "UTC" },
+        accounts: [],
+        repos: [repo],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+      },
+      store,
+      "7d",
+      NOW + 14 * DAY,
+      { agent: null, account: null },
+    );
+    expect(t.repoWeeks?.[0]?.weeks).toContainEqual(
+      expect.objectContaining({
+        week: "2026-10-12",
+        medianReadyToMergeHours: 4,
+        noSeatWorkingHours: 4,
+      }),
+    );
+  });
+
   it("retains open Ready work with its state-entry time", async () => {
     store.replaceBoard("shop-app", [
       board(1, { status: "In Progress", state: "in progress", closed: false }),
@@ -488,11 +522,11 @@ describe("collectFlow issues", () => {
     const issueCalls = calls.filter((c) => c.q.includes("timelineItems"));
     const counts = issueCalls.map((c) => [...c.q.matchAll(/: issue\(number:/g)].length);
     expect(FLOW_BATCH).toBe(20);
-    expect(counts).toEqual([20, 20, 6]);
+    expect(counts).toEqual([20, 20, 7]);
     expect(issueCalls.every((c) => c.q.includes("PROJECT_V2_ITEM_STATUS_CHANGED_EVENT"))).toBe(
       true,
     );
-    expect(calls.some((c) => c.q.includes("(number: 100)"))).toBe(false);
+    expect(calls.some((c) => c.q.includes("(number: 100)"))).toBe(true);
     expect(calls.some((c) => c.q.includes("(number: 101)"))).toBe(true);
     expect(issueCalls[0]?.v).toEqual({ owner: "octo-org", name: "shop-app" });
   });
@@ -554,7 +588,7 @@ describe("collectFlow pull requests", () => {
     expect(store.flowPrs(since)[0]?.firstPushCi).toBe("passing");
   });
 
-  it("reads only PRs merged within FLOW_DAYS, 20 aliases per query", async () => {
+  it("reads PRs merged within repository telemetry history, 20 aliases per query", async () => {
     store.upsertPullRequests(
       "shop-app",
       [
@@ -571,7 +605,7 @@ describe("collectFlow pull requests", () => {
     await run(gql);
     const prCalls = calls.filter((c) => c.q.includes("statusCheckRollup"));
     expect(prCalls.map((c) => [...c.q.matchAll(/: pullRequest\(number:/g)].length)).toEqual([
-      20, 5,
+      20, 6,
     ]);
     expect(prCalls.some((c) => c.q.includes("first: 20"))).toBe(true);
     expect(store.flowPrs(0)).toHaveLength(25);

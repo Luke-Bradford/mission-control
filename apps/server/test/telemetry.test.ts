@@ -2381,6 +2381,76 @@ it.each([
 });
 
 describe("repository weekly telemetry", () => {
+  it("keeps former seats in historical token efficiency", () => {
+    const week = at("2026-10-12T00:00:00Z");
+    store.replacePullRequests("shop-app", [pr(1, week + HOUR), pr(2, week + 2 * HOUR)], 0);
+    store.upsertRun(
+      run({
+        id: "former-seat",
+        agentId: "former-seat",
+        startedAt: week + 3 * HOUR,
+        endedAt: week + 4 * HOUR,
+        vendor: "claude",
+        tokens: tok(58_000_000, 0),
+      }),
+    );
+
+    const row = tel("7d").repoWeeks?.find((value) => value.repoId === "shop-app");
+    expect(row?.weeks).toContainEqual(
+      expect.objectContaining({
+        week: "2026-10-12",
+        tokensPerMergedPr: { claude: 29_000_000, codex: 0 },
+      }),
+    );
+  });
+
+  it("reports mission-control's 19–26 November token efficiency", () => {
+    config.repos.push({
+      id: "mission-control",
+      github: "o/mission-control",
+      project: 4,
+      statusMap: {},
+      autonomy: "draft",
+    });
+    config.loops.push({
+      id: "mission-control-loop",
+      repoId: "mission-control",
+      kind: "ta-loop",
+      accountId: "claude-main",
+      stateDir: join(dir, "mc-loop"),
+      worktree: join(dir, "mc-worktree"),
+      launchdLabel: "mc-loop",
+    });
+    const mergedAt = at("2026-11-20T12:00:00Z");
+    store.replacePullRequests(
+      "mission-control",
+      [pr(1, mergedAt, "mission-control"), pr(2, mergedAt + HOUR, "mission-control")],
+      0,
+    );
+    store.upsertRun(
+      run({
+        id: "mc-week",
+        agentId: "mission-control-loop",
+        repoId: "mission-control",
+        vendor: "claude",
+        startedAt: at("2026-11-19T00:00:00Z"),
+        endedAt: at("2026-11-20T00:00:00Z"),
+        tokens: tok(58_000_000, 0),
+      }),
+    );
+
+    const row = telemetry(config, store, "7d", at("2026-11-26T12:00:00Z"), ALL).repoWeeks?.find(
+      (value) => value.repoId === "mission-control",
+    );
+    expect(row?.weeks).toContainEqual(
+      expect.objectContaining({
+        week: "2026-11-16",
+        mergedPrs: 2,
+        tokensPerMergedPr: { claude: 29_000_000, codex: 0 },
+      }),
+    );
+  });
+
   it("separates Claude and Codex tokens per merged PR and keeps the configured loop baseline", () => {
     (
       config.repos[0] as (typeof config.repos)[number] & {
