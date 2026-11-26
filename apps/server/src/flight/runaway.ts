@@ -31,6 +31,7 @@ export const FLIGHT_READ_TOOLS: ReadonlySet<string> = new Set([
   MC_TOOL_NAMES.listTickets,
   MC_TOOL_NAMES.ledger,
   MC_TOOL_NAMES.recall,
+  MC_TOOL_NAMES.cmuxSessions,
 ]);
 
 /** The setting that holds the write events of the last hour, as JSON. */

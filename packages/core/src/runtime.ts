@@ -101,6 +101,8 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.operator,
   MC_TOOL_NAMES.ghWrite,
   MC_TOOL_NAMES.crewTidy,
+  MC_TOOL_NAMES.cmuxSessions,
+  MC_TOOL_NAMES.cmuxSend,
 ];
 
 /**

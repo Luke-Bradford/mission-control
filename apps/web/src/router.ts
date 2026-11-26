@@ -64,6 +64,7 @@ export type Page =
   | "flight"
   | "board"
   | "agent"
+  | "sessions"
   | "comms"
   | "qa"
   | "planner"
@@ -88,6 +89,8 @@ export type Route =
   /** One ticket as Mission Control knows it (`/tickets/:repo/:number`); the Board tab stays lit. */
   | { page: "ticket"; repoId: string; number: number }
   | { page: "agent"; id: string | null }
+  /** Every cmux workspace on this Mac, the operator's and the crew's. */
+  | { page: "sessions" }
   | { page: "comms"; item: string | null; view: CommsView }
   | { page: "telemetry" }
   | { page: "qa" }
@@ -279,6 +282,7 @@ export function route(path: string, search = ""): Route | null {
   if (p === "/flight") return { page: "flight" };
   if (p === "/telemetry") return { page: "telemetry" };
   if (p === "/audit") return { page: "audit" };
+  if (p === PAGE_PATHS.sessions) return { page: "sessions" };
   if (p === "/qa") return { page: "qa" };
   if (p === PAGE_PATHS.planner) return { page: "planner" };
   const board = withId(path, "board");

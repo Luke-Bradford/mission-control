@@ -1,0 +1,367 @@
+/* Sessions: one full-width table of every cmux workspace beside the FLIGHT dock
+   (docs/mockups/sessions/sessions.html). */
+#page-sessions {
+  overflow: hidden;
+}
+
+.sess-head {
+  align-items: baseline;
+  gap: var(--sp-3);
+  text-transform: none;
+  letter-spacing: normal;
+  font-family: var(--sans);
+  font-size: var(--fs);
+  font-weight: 400;
+}
+
+.sess-head h1 {
+  margin: 0;
+  font: 600 var(--fs-title) / var(--lh-title) var(--sans);
+  color: var(--fg);
+}
+
+.sess-summary {
+  color: var(--fg-2);
+}
+
+.sess-summary b {
+  color: var(--fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sess-summary b.sess-w {
+  color: var(--warn);
+}
+
+.sess-read {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.sess-banner {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  color: var(--crit);
+  background: var(--crit-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+.sess-note {
+  margin: 0;
+  padding: var(--sp-4);
+  color: var(--fg-2);
+}
+
+.sess-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.sess-table {
+  table-layout: fixed;
+  font-size: var(--fs);
+}
+
+/* Fixed widths hold the words that must never clip: State fits "Waiting on you" whole, and App
+   fits "localhost:5173" over "Not answering" when narrow, side by side when wide. Session always
+   has room for the Yours or Crew tag and the unread button; the name gives way first. */
+.sess-table .c-name {
+  width: max(140px, 14%);
+}
+.sess-table .c-folder {
+  width: 14%;
+}
+.sess-table .c-state {
+  width: 152px;
+}
+.sess-table .c-for {
+  width: 52px;
+}
+.sess-table .c-status {
+  width: 11%;
+}
+.sess-table .c-app {
+  width: max(148px, 14%);
+}
+.sess-table .c-act {
+  width: 72px;
+}
+
+.sess-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.sess-table td {
+  padding: var(--table-cell-y) var(--sp-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.sess-table .num {
+  text-align: right;
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  font-variant-numeric: tabular-nums;
+}
+
+.sess-row {
+  cursor: pointer;
+}
+
+/* The waiting row carries a bar as well as its pill's word. */
+.sess-row.waiting td:first-child {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.sess-who {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.sess-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.sess-tags {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.sess-tag {
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-s);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--fg-2);
+}
+
+.sess-tag.crew {
+  color: var(--think);
+  border-color: color-mix(in srgb, var(--think) 40%, transparent);
+}
+
+.sess-inbox {
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+  color: var(--accent);
+}
+
+button.sess-inbox {
+  padding: 0 var(--sp-1);
+  background: transparent;
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+button.sess-inbox[aria-expanded="true"] {
+  background: var(--accent-soft);
+}
+
+.sess-msg td {
+  padding: var(--sp-1) var(--sp-3) var(--sp-2);
+  background: var(--surface-2);
+  color: var(--fg);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.sess-msg-label {
+  margin-right: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+
+.sess-folder {
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+}
+
+.sess-folder b {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.sess-last {
+  color: var(--fg-2);
+}
+
+.sess-dash {
+  color: var(--muted);
+}
+
+/* The address and its health wrap onto two lines rather than clip either. */
+.sess-appcell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--sp-2);
+  min-width: 0;
+}
+
+.sess-applink {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.sess-applink:hover {
+  text-decoration: underline;
+}
+
+.sess-ans {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  white-space: nowrap;
+}
+
+.sess-ans.ok {
+  color: var(--ok);
+}
+.sess-ans.crit {
+  color: var(--crit);
+}
+.sess-ans.muted {
+  color: var(--muted);
+}
+
+.sess-write {
+  font-size: var(--fs-s);
+  background: transparent;
+}
+
+.sess-composer td {
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  background: var(--surface-2);
+  white-space: normal;
+}
+
+.sess-compose {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.sess-compose input {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.sess-hint,
+.sess-err {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--muted);
+}
+
+.sess-err {
+  color: var(--crit);
+}
+
+.sess-foot {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+/* Below 2200 px (rows have no vertical padding there) the name sits over its tags, so a name,
+   its tag and the unread button all fit a 40 px row in the narrower Session column. */
+@media (max-width: 2199px) {
+  .sess-who {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+  /* Buttons keep their 24 px target, so the text line stacked with one (the name over its unread
+     button, the answer under the app link) overlaps it by a quarter step (1 px) so the row stays within 40 px. */
+  .sess-name {
+    max-width: 100%;
+    line-height: var(--lh-s);
+    margin-block-end: calc(var(--sp-1) / -4);
+  }
+  .sess-ans {
+    margin-block-start: calc(var(--sp-1) / -4);
+  }
+}
+
+/* 1280 to 1599 px: tighter cell padding and fixed columns cut to what their words need, so the
+   last line keeps a useful width beside the dock. */
+@media (max-width: 1599px) {
+  .sess-table th,
+  .sess-table td {
+    padding-inline: var(--sp-2);
+  }
+  .sess-table .c-folder {
+    width: 13%;
+  }
+  .sess-table .c-state {
+    width: 140px;
+  }
+  .sess-table .c-for {
+    width: 44px;
+  }
+  .sess-table .c-app {
+    width: 124px;
+  }
+  .sess-table .c-act {
+    width: 64px;
+  }
+}
+
+/* Row states last: they outrank the cell rules above. */
+.sess-row:hover td,
+.sess-row:focus-visible td {
+  background: var(--surface-2);
+}
+
+.sess-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Keyboard reaches every cut-short value: a focused row unwraps the name, folder and repo, last
+   line, status and app address. The name wraps beside or over its tags, which never shrink; the
+   address wraps above its answer word. Paths and addresses have no spaces, so they break anywhere. */
+.sess-row:focus-within .sess-last,
+.sess-row:focus-within .sess-status {
+  white-space: normal;
+}
+
+.sess-row:focus-within .sess-name,
+.sess-row:focus-within .sess-folder,
+.sess-row:focus-within .sess-applink {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.sess-row:focus-within .sess-applink {
+  text-align: left;
+}

@@ -75,6 +75,8 @@ export const MC_TOOL_NAMES = {
   operator: "operator",
   ghWrite: "gh_write",
   crewTidy: "crew_tidy",
+  cmuxSessions: "cmux_sessions",
+  cmuxSend: "cmux_send",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -152,6 +154,8 @@ export const MC_TOOLS = {
   operator: mcTool(MC_TOOL_NAMES.operator),
   ghWrite: mcTool(MC_TOOL_NAMES.ghWrite),
   crewTidy: mcTool(MC_TOOL_NAMES.crewTidy),
+  cmuxSessions: mcTool(MC_TOOL_NAMES.cmuxSessions),
+  cmuxSend: mcTool(MC_TOOL_NAMES.cmuxSend),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */

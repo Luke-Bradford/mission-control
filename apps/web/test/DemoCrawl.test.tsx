@@ -38,6 +38,7 @@ const PAGE_ROUTES: Record<Route["page"], readonly string[]> = {
   planner: ["/planner", "/planner?view=history"],
   telemetry: ["/telemetry"],
   audit: ["/audit"],
+  sessions: ["/sessions"],
   setup: SETUP_TABS.map((tab) => `/setup/${tab}`),
 };
 const ROUTES = Object.values(PAGE_ROUTES).flat();
