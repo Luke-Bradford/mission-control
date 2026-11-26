@@ -1741,7 +1741,7 @@ describe("Cost and tokens tab", () => {
     expect(p.textContent).toMatch(/Read \d\d:\d\d/);
   });
 
-  it("Spend by owner keeps a long week in a labelled, focusable scroll region with the total in view", async () => {
+  it("Spend by owner shows a long week whole, then the account total and the note, with nothing scrolling", async () => {
     const c = (tokens: number, costUsd: number) => ({ tokens, costUsd });
     const rows = Array.from({ length: 20 }, (_, i) => ({
       day: `2026-11-${String(25 - (i % 7)).padStart(2, "0")}`,
@@ -1767,12 +1767,16 @@ describe("Cost and tokens tab", () => {
       "table",
     );
     const p = panel("tSpendOwner");
-    const region = within(p).getByRole("region", { name: "Spend by owner rows" });
-    expect(region.tabIndex).toBe(0);
-    expect(region.querySelectorAll("tbody tr")).toHaveLength(20);
-    // the account total stays in view while the rows scroll
-    expect((p.querySelector("tfoot th") as HTMLElement).style.position).toBe("sticky");
-    expect(p.textContent).toContain("20 rows: scroll the table for the rest.");
+    const table = p.querySelector("table") as HTMLElement;
+    expect(table.querySelectorAll("tbody tr")).toHaveLength(20);
+    const wrap = table.parentElement as HTMLElement;
+    expect(wrap.style.maxHeight).toBe("");
+    expect(wrap.style.overflow).toBe("visible");
+    expect(wrap.tabIndex).toBe(-1);
+    expect((p.querySelector("tfoot th") as HTMLElement).style.position).toBe("");
+    expect(p.textContent).not.toContain("scroll the table");
+    // the note follows the table in normal flow
+    expect(wrap.nextElementSibling?.className).toBe("pnote");
     // its grid row grows to the panel's content, never capped at the grid's 240 px rows
     expect((p.parentElement as HTMLElement).style.gridTemplateRows).toBe(
       "minmax(min-content, auto)",

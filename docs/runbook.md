@@ -1675,7 +1675,7 @@ token counts at the API list prices in `packages/core/src/session-spend.ts` (`MO
 update that table when prices change. A model with no price there counts in tokens but not cost.
 The panel's "Read hh:mm" is the last pass that read every transcript; after a pass that missed
 some it reads "Last full read hh:mm" with what could not be read, as the totals may miss them.
-Past 8 rows the table scrolls inside the panel, with the Account total kept in view.
+The panel shows every row, then the Account total and the pricing note; it grows with its rows.
 
 The Sessions page's Today column shows each Claude session's ~cost from local midnight; hover or
 keyboard focus shows today and the last 7 days in cost and tokens. A session whose tokens all come
