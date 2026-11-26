@@ -7,6 +7,7 @@ export const ROLE_HEADINGS: Readonly<Record<string, readonly string[]>> = {
   FAO: ["What the plan holds", "How you work", "What you may not do"],
   FLIGHT: [
     "What this is for",
+    "Modes",
     "Close the ticket",
     "What the operator sees",
     "Each wake",
