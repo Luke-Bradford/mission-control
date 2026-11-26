@@ -352,7 +352,11 @@ export function answer(path: string): Response {
   if (path === "/api/sessions/roles")
     return json({
       roles: ["FIDO", "GUIDO", "INCO", "RETRO"],
-      folders: [...new Set(demoSessions().rows.map((r) => r.folder))].sort(),
+      folders: [
+        "/Users/demo/Dev/mission-control",
+        "/Users/demo/Dev/shop-app",
+        "/Users/demo/Dev/shop-app/api",
+      ],
     });
   if (path === "/api/settings/flight-mode") return json({ mode: "crew" });
   if (path === "/api/comms/traffic") return json(traffic());
