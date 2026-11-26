@@ -514,15 +514,12 @@ export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
 /** A launchd job label: it goes into a `launchctl print gui/<uid>/<label>` argument. */
 const LAUNCHD_LABEL = /^[A-Za-z0-9._-]+$/;
 const nonEmpty = z.string().min(1);
-const localService = z.string().refine(
-  (value) => {
-    const match = /^127\.0\.0\.1:(\d+)$/.exec(value);
-    if (match === null) return false;
-    const port = Number(match[1]);
-    return Number.isInteger(port) && port >= 1 && port <= 65535;
-  },
-  "must be 127.0.0.1 followed by a port",
-);
+const localService = z.string().refine((value) => {
+  const match = /^127\.0\.0\.1:(\d+)$/.exec(value);
+  if (match === null) return false;
+  const port = Number(match[1]);
+  return Number.isInteger(port) && port >= 1 && port <= 65535;
+}, "must be 127.0.0.1 followed by a port");
 /** The default seat commands as fresh arrays: what the hub's own repo uses when it sets no `commands`. */
 export const defaultSeatCommands = (): SeatCommands => ({
   writer: [...DEFAULT_SEAT_COMMANDS.writer],
@@ -1563,10 +1560,7 @@ export function parseConfig(
     (r.localServices ?? []).forEach((service, at) => {
       const port = Number(service.slice(service.lastIndexOf(":") + 1));
       if (port === portFromEnv(process.env.MC_PORT, process.env)) {
-        throw new ConfigError(
-          `repos[${i}].localServices[${at}]`,
-          "must not name the hub's port",
-        );
+        throw new ConfigError(`repos[${i}].localServices[${at}]`, "must not name the hub's port");
       }
     });
     if (r.autonomy === "merge" && !crewRepoIds.has(r.id)) {
