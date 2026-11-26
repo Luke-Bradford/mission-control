@@ -3292,6 +3292,16 @@ describe("GET /api/machine", () => {
       oldestAt: oldest,
     });
   });
+
+  it("reports crew cleanup-store sizes for the Machine panel", async () => {
+    const leftovers = (await get("/api/machine")).json().leftovers;
+    expect(leftovers).toEqual({
+      claudeProjectsBytes: expect.any(Number),
+      codexSessionsBytes: expect.any(Number),
+      browserProfilesBytes: expect.any(Number),
+      chromeTempBytes: expect.any(Number),
+    });
+  });
 });
 
 describe("local access", () => {

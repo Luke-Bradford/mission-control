@@ -1,0 +1,110 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, expect, it } from "vitest";
+import {
+  cleanupCrewLeftovers,
+  crewLeftoverFootprint,
+  crewProjectName,
+} from "../src/repo/crew-leftovers.ts";
+
+const HOUR = 60 * 60_000;
+const NOW = Date.parse("2026-11-26T12:00:00Z");
+let root = "";
+
+const old = (path: string, hours: number) => {
+  const at = new Date(NOW - hours * HOUR);
+  utimesSync(path, at, at);
+};
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "mc-crew-leftovers-"));
+});
+afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+it("retains live crew transcripts but compresses and deletes ended crew and browser leftovers", () => {
+  const worktrees = join(root, "worktrees");
+  const projects = join(root, "claude", "projects");
+  const codex = join(root, "codex", "sessions");
+  const tmp = join(root, "tmp");
+  const ended = join(projects, crewProjectName(join(worktrees, "mc", "old")));
+  const live = join(projects, crewProjectName(join(worktrees, "mc", "live")));
+  const operator = join(projects, crewProjectName(join(root, "operator-project")));
+  const profile = join(tmp, "playwright_chromiumdev_profile-old");
+  const chrome = join(tmp, "com.google.Chrome.old");
+  const busy = join(tmp, "playwright_chromiumdev_profile-busy");
+  for (const dir of [ended, live, operator, profile, chrome, busy])
+    mkdirSync(dir, { recursive: true });
+  writeFileSync(join(ended, "recent.jsonl"), "recent");
+  writeFileSync(join(ended, "expired.jsonl"), "expired");
+  writeFileSync(join(live, "live.jsonl"), "live");
+  writeFileSync(join(operator, "operator.jsonl"), "operator");
+  const codexOld = join(codex, "old.jsonl");
+  const codexLive = join(codex, "live.jsonl");
+  mkdirSync(codex, { recursive: true });
+  writeFileSync(codexOld, JSON.stringify({ cwd: join(worktrees, "mc", "old") }));
+  writeFileSync(codexLive, JSON.stringify({ cwd: join(worktrees, "mc", "live") }));
+  writeFileSync(join(profile, "cache"), "profile");
+  writeFileSync(join(chrome, "cache"), "chrome");
+  writeFileSync(join(busy, "cache"), "busy");
+  old(join(ended, "recent.jsonl"), 25);
+  old(join(ended, "expired.jsonl"), 15 * 24);
+  old(codexOld, 15 * 24);
+  old(codexLive, 15 * 24);
+  old(profile, 7);
+  old(chrome, 7);
+  old(busy, 7);
+
+  const result = cleanupCrewLeftovers({
+    now: NOW,
+    worktrees,
+    claudeProjects: projects,
+    codexSessions: codex,
+    tmp,
+    liveWorktrees: new Set([join(worktrees, "mc", "live")]),
+    processLines: [`123 chromium --user-data-dir=${busy}`],
+  });
+
+  expect(result).toEqual({ gzipped: 1, deleted: 2, browserRemoved: 2, skippedLive: 3 });
+  expect(existsSync(join(ended, "recent.jsonl"))).toBe(false);
+  expect(existsSync(join(ended, "recent.jsonl.gz"))).toBe(true);
+  expect(existsSync(join(ended, "expired.jsonl"))).toBe(false);
+  expect(existsSync(codexOld)).toBe(false);
+  expect(existsSync(codexLive)).toBe(true);
+  expect(existsSync(join(live, "live.jsonl"))).toBe(true);
+  expect(existsSync(join(operator, "operator.jsonl"))).toBe(true);
+  expect(existsSync(profile)).toBe(false);
+  expect(existsSync(chrome)).toBe(false);
+  expect(existsSync(busy)).toBe(true);
+});
+
+it("reports only the configured crew stores", () => {
+  const worktrees = join(root, "worktrees");
+  const projects = join(root, "claude", "projects");
+  const codex = join(root, "codex", "sessions");
+  const tmp = join(root, "tmp");
+  const crew = join(projects, crewProjectName(join(worktrees, "mc", "seat")));
+  const operator = join(projects, crewProjectName(join(root, "operator")));
+  mkdirSync(crew, { recursive: true });
+  mkdirSync(operator, { recursive: true });
+  mkdirSync(join(tmp, "playwright_chromiumdev_profile-seat"), { recursive: true });
+  mkdirSync(join(tmp, "com.google.Chrome.seat"), { recursive: true });
+  writeFileSync(join(crew, "transcript.jsonl"), Buffer.alloc(11));
+  writeFileSync(join(operator, "transcript.jsonl"), Buffer.alloc(13));
+  writeFileSync(join(tmp, "playwright_chromiumdev_profile-seat", "cache"), Buffer.alloc(17));
+  writeFileSync(join(tmp, "com.google.Chrome.seat", "cache"), Buffer.alloc(19));
+  mkdirSync(codex, { recursive: true });
+  writeFileSync(
+    join(codex, "crew.jsonl"),
+    `${JSON.stringify({ cwd: join(worktrees, "mc", "seat") })}\n${"x".repeat(23)}`,
+  );
+
+  expect(
+    crewLeftoverFootprint({ worktrees, claudeProjects: projects, codexSessions: codex, tmp }),
+  ).toEqual({
+    claudeProjectsBytes: 11,
+    codexSessionsBytes: 23 + JSON.stringify({ cwd: join(worktrees, "mc", "seat") }).length + 1,
+    browserProfilesBytes: 17,
+    chromeTempBytes: 19,
+  });
+});

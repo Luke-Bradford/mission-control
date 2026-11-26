@@ -4,6 +4,9 @@ import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 export const MACHINE_CAPACITY_KEY = "machine-capacity";
+/** One operator notice, separate from the lower admission floor, when cleanup needs attention. */
+export const DISK_LOW_NOTE_KEY = "disk-low";
+export const DISK_LOW_NOTICE_PCT = 10;
 export const DISK_PERCENTAGE_CLEAR_HEADROOM = 1;
 export const DISK_PERCENTAGE_CLEAR_AFTER_MIN = 10;
 /** Recovery needs readings this close together; a longer gap in collection restarts the wait. */

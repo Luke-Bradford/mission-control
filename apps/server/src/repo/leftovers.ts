@@ -1,7 +1,10 @@
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import { type BoardItem, liftPark } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { endedWorkOver, runSubjectGone } from "../hud/hud.ts";
 import type { Store } from "../store.ts";
+import { cleanupCrewLeftovers } from "./crew-leftovers.ts";
 
 /** How often the hub clears leftovers; the pass is idempotent, so a missed or repeated one is harmless. */
 export const LEFTOVERS_EVERY_MS = 60 * 60_000;
@@ -45,5 +48,22 @@ export function clearLeftovers(deps: { store: Store; config: CcConfig; now: numb
     if (loop.hold?.kind)
       record(`cleared the parked state on ended run ${run.id}: its work is over`);
   }
+  const browser = cleanupCrewLeftovers({
+    now,
+    worktrees: config.crew?.worktrees,
+    claudeProjects: join(homedir(), ".claude", "projects"),
+    codexSessions: join(homedir(), ".codex", "sessions"),
+    tmp: tmpdir(),
+    liveWorktrees: new Set(
+      store
+        .activeSeatSessions()
+        .map((seat) => seat.worktree)
+        .filter((path): path is string => path !== null),
+    ),
+  });
+  if (browser.gzipped || browser.deleted || browser.browserRemoved)
+    record(
+      `cleaned crew leftovers: ${browser.gzipped} transcripts gzipped, ${browser.deleted} deleted, ${browser.browserRemoved} browser entries removed`,
+    );
   return cleared;
 }

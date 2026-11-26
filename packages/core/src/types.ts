@@ -988,12 +988,22 @@ export interface MachineView {
   /** The most seats in any one session. */
   perSessionMax: number;
   transcripts: TranscriptFootprint | null;
+  /** Crew-owned files outside the hub data folder, retained and cleaned by the hourly leftovers pass. */
+  leftovers?: CrewLeftoverFootprint | null;
 }
 
 export interface TranscriptFootprint {
   totalBytes: number;
   seats: { seatId: string; bytes: number; files: number }[];
   oldestAt: number | null;
+}
+
+/** Byte counts for the crew-only stores the Machine panel can name and the hub can clean. */
+export interface CrewLeftoverFootprint {
+  claudeProjectsBytes: number;
+  codexSessionsBytes: number;
+  browserProfilesBytes: number;
+  chromeTempBytes: number;
 }
 
 /** One `/api/repos` row: a configured repo, without its status map. */
