@@ -4673,12 +4673,23 @@ describe("the engine runs reviews", () => {
   });
 
   it("uses an approved repository bot instead of starting a crew review", async () => {
-    config.repos[0]!.review = { kind: "repo-bot", check: "review", verdict: "check" };
+    const repo = config.repos[0];
+    if (repo === undefined) throw new Error("missing test repository");
+    repo.review = { kind: "repo-bot", check: "review", verdict: "check" };
     report();
     await h.engine.reconcileRun(RUN);
     setPr({
       ci: "passing",
-      checks: [{ name: "review", state: "passing", kind: "check", conclusion: "success", attempt: 1, url: null }],
+      checks: [
+        {
+          name: "review",
+          state: "passing",
+          kind: "check",
+          conclusion: "success",
+          attempt: 1,
+          url: null,
+        },
+      ],
     });
     await h.engine.reconcileRun(RUN);
     expect(reviewRows()).toMatchObject([{ seatId: "repo-bot", state: "reported", blocking: 0 }]);
@@ -4686,12 +4697,23 @@ describe("the engine runs reviews", () => {
   });
 
   it("sends a repository bot change request to the author as a finding", async () => {
-    config.repos[0]!.review = { kind: "repo-bot", check: "review", verdict: "check" };
+    const repo = config.repos[0];
+    if (repo === undefined) throw new Error("missing test repository");
+    repo.review = { kind: "repo-bot", check: "review", verdict: "check" };
     report();
     await h.engine.reconcileRun(RUN);
     setPr({
       ci: "passing",
-      checks: [{ name: "review", state: "failing", kind: "check", conclusion: "failure", attempt: 1, url: null }],
+      checks: [
+        {
+          name: "review",
+          state: "failing",
+          kind: "check",
+          conclusion: "failure",
+          attempt: 1,
+          url: null,
+        },
+      ],
     });
     await h.engine.reconcileRun(RUN);
     await h.engine.reconcileRun(RUN);

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { PullRequestView } from "@mc/core";
+import { describe, expect, it } from "vitest";
 import { repoBotVerdict } from "../src/review/repo-bot.ts";
 
 const policy = {

@@ -1815,7 +1815,10 @@ export function createEngine(deps: EngineDeps): Engine {
             },
           ];
           store.recordFindings(id, botRun, {
-            verdict: verdict === "approved" ? { spec: "pass", quality: "pass" } : { spec: "fail", quality: "pass" },
+            verdict:
+              verdict === "approved"
+                ? { spec: "pass", quality: "pass" }
+                : { spec: "fail", quality: "pass" },
             summary:
               verdict === "approved"
                 ? `${repo.review.check} approved this head.`
