@@ -35,9 +35,10 @@ will not stop ends the run instead, so two Claudes never work one worktree.
 - The hub binds the run to the workspace `cmux new-workspace` says it made (`OK workspace:<n>`),
   resolved to its id with `list-workspaces --id-format both`; never to one found by name, so an old
   workspace of the same name never gets the run's messages.
-- When the run ends or restarts, its workspace closes, even when Claude has already exited. If cmux
-  will not close it and still lists it, the hub keeps it saved, and the seat's next start closes it
-  first. While it stays open, that start is refused (`could not close the seat's earlier cmux
+- When the run ends or restarts, its workspace closes, even when Claude has already exited. cmux can
+  answer a close and still list the workspace for a few seconds, so a close counts only once cmux
+  stops listing it (the hub waits up to 15 s). If cmux will not close it, or still lists it after
+  that wait, the hub keeps it saved, and the seat's next start closes it first. While it stays open, that start is refused (`could not close the seat's earlier cmux
   workspace`), so a seat never has two workspaces.
 - It runs `claude` by name from a launcher script in the run's folder, so cmux's shim wraps it with
   its hooks. The launcher keeps cmux's shim folder first on PATH, ahead of the hub's node folder

@@ -8,6 +8,7 @@
 //   sent        [{ws, text, paste}]             every `send`
 //   keys        [{ws, key, force}]              every `send-key`
 //   closed      [ws]                            every `close-workspace`
+//   sameName    [ws]                            every listed workspace a `new-workspace` shared its name with
 //   screens     {ws: text}                      what `read-screen` prints
 //   calls       [[argv...]]                     every call that changes something
 //   statuses    {ws: {key: value}}              what `list-status` prints, one `key=value` a line
@@ -24,7 +25,8 @@
 // `workspaces` rows may carry `cwd`, and `sessions` rows `cwd`: both are printed as given.
 // Switches a test sets: `down` (no socket until `open` is run), `denied` (access denied), `busy`
 // (`send` refuses: a dialog is open), `noForce` (close-workspace refuses --force), `noClose` (close-workspace
-// refuses, the workspace stays), `hideWorkspaces`
+// refuses, the workspace stays), `linger` (ms a closed workspace is still listed, as real cmux's can be
+// for a few seconds), `hideWorkspaces`
 // (new-workspace makes none), `autoClaude` (new-workspace also starts a Claude: a session record for
 // the id after `--session-id` / `--resume` in the launcher it was given, its pid `claudePid`, its
 // transcript in `transcriptDir`).
@@ -112,6 +114,10 @@ if (cmd === "open") {
 }
 if (state.down) fail("No live cmux socket found. Tried:\n  /tmp/cmux.sock");
 if (state.denied && cmd !== "sessions") fail("Access denied");
+// a workspace closed under `linger` is listed until its `goneAt`
+state.workspaces = (state.workspaces ?? []).filter(
+  (w) => w.goneAt === undefined || Date.now() < w.goneAt,
+);
 
 switch (cmd) {
   case "ping":
@@ -131,6 +137,8 @@ switch (cmd) {
       cwd: flag("--cwd"),
       command: flag("--command"),
     };
+    const twins = state.workspaces.filter((w) => w.name === ws.name).map((w) => w.id);
+    state.sameName = [...(state.sameName ?? []), ...twins];
     if (!state.hideWorkspaces) state.workspaces.push(ws);
     if (state.autoClaude) {
       const script = readFileSync(
@@ -289,7 +297,11 @@ switch (cmd) {
     const id = flag("--workspace");
     state.closed ??= [];
     state.closed.push(id);
-    state.workspaces = (state.workspaces ?? []).filter((w) => w.id !== id);
+    if (state.linger)
+      for (const w of state.workspaces) {
+        if (w.id === id) w.goneAt ??= Date.now() + state.linger;
+      }
+    else state.workspaces = state.workspaces.filter((w) => w.id !== id);
     state.sessions = (state.sessions ?? []).filter((r) => r.workspace_id !== id);
     ok();
     break;

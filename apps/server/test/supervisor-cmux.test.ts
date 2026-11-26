@@ -40,7 +40,7 @@ import {
 skipTestsIf(await blockedHere("crew-run"));
 
 interface FakeCmux {
-  workspaces: { id: string; name: string; cwd: string; command: string }[];
+  workspaces: { id: string; name: string; cwd: string; command: string; goneAt?: number }[];
   sessions: { session_id: string; lifecycle: string; pid: number; workspace_id: string }[];
   sent: { text: string }[];
   keys: { key: string; force: boolean }[];
@@ -317,6 +317,25 @@ describe("a Claude run in cmux", () => {
     await until(() => expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull());
     claudeLines("3");
     await until(() => expect(copiedTs(runId)).toEqual(["1", "2", "3"]));
+  });
+
+  it("a restart starts its new workspace only once cmux stops listing the closed one", async () => {
+    const { runId } = await started();
+    const first = cmuxState().workspaces[0]?.id;
+    // cmux answers the close at once but lists the workspace a second longer
+    patch((s) => {
+      s.linger = 1000;
+      for (const r of s.sessions) r.pid = process.pid + 1;
+    });
+    await until(() => expect(cmuxState().closed).toEqual([first]));
+    await until(() =>
+      expect(cmuxState().workspaces.some((w) => w.id !== first && w.goneAt === undefined)).toBe(
+        true,
+      ),
+    );
+    // no new workspace was made while the old one of its name was still listed
+    expect(cmuxState().sameName ?? []).toEqual([]);
+    expect(store.run(runId)?.endedAt).toBeNull();
   });
 
   it("closes the workspace when the run ends", async () => {

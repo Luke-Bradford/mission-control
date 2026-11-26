@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Cmux, createCmux } from "../src/runtime/cmux.ts";
+import { type Cmux, type CmuxOptions, createCmux } from "../src/runtime/cmux.ts";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-cmux.mjs", import.meta.url));
 
@@ -42,12 +42,13 @@ export function fakeCmux(
   initial: FakeState,
   /** What brings cmux to the front; `true` by default, `false` for a failed activation. */
   activate: readonly string[] = ["/usr/bin/true"],
+  options: CmuxOptions = {},
 ): FakeCmux {
   const file = join(dir, "cmux-state.json");
   writeFileSync(file, JSON.stringify(initial));
   const state = (): FakeState => JSON.parse(readFileSync(file, "utf8"));
   return {
-    cmux: createCmux([process.execPath, FAKE, "--state", file], () => {}, { activate }),
+    cmux: createCmux([process.execPath, FAKE, "--state", file], () => {}, { ...options, activate }),
     state,
     patch(fn) {
       const s = state();

@@ -29,6 +29,9 @@ const PASTE_SETTLE_MS = 150;
 /** How long `newWorkspace` looks for the workspace it made, and how often. */
 const FIND_WAIT_MS = 5000;
 const FIND_RETRY_MS = 500;
+/** How long `close` waits for cmux to stop listing a workspace it closed, and how often it looks. */
+const CLOSE_WAIT_MS = 15_000;
+const CLOSE_RETRY_MS = 250;
 
 export interface CmuxAgent {
   sessionId: string;
@@ -333,6 +336,8 @@ export interface CmuxOptions {
   startWaitMs?: number;
   /** How long `newWorkspace` looks for the id of the workspace it made (default 5 s). */
   findWaitMs?: number;
+  /** How long `close` waits for cmux to stop listing the workspace (default 15 s). */
+  closeWaitMs?: number;
   /** The command that brings cmux to the front after `focus` (tests give a stand-in). */
   activate?: readonly string[];
 }
@@ -536,13 +541,31 @@ export function createCmux(
     },
     async close(ws) {
       const forced = await cmux(["close-workspace", "--workspace", ws, "--force"]);
-      if (forced.code === 0) return;
-      // an older cmux has no --force; a workspace already gone is as good as closed
-      const plain = await cmux(["close-workspace", "--workspace", ws]);
-      if (plain.code === 0) return;
-      if (!(await workspaces().catch(() => [{ id: ws, name: "" }])).some((w) => w.id === ws))
-        return;
-      throw failed("close-workspace", plain);
+      if (forced.code !== 0) {
+        // an older cmux has no --force; a workspace already gone is as good as closed
+        const plain = await cmux(["close-workspace", "--workspace", ws]);
+        if (plain.code !== 0) {
+          if (!(await workspaces().catch(() => [{ id: ws, name: "" }])).some((w) => w.id === ws))
+            return;
+          throw failed("close-workspace", plain);
+        }
+      }
+      // cmux answers OK and may list the workspace a few seconds more: it is closed once it is gone
+      const wait = options.closeWaitMs ?? CLOSE_WAIT_MS;
+      for (const t0 = Date.now(); ; ) {
+        let listed: boolean;
+        try {
+          listed = (await workspaces()).some((w) => w.id === ws);
+        } catch (e) {
+          throw new CmuxError(
+            `cmux closed workspace ${ws} but would not list its workspaces: ${e}`,
+          );
+        }
+        if (!listed) return;
+        if (Date.now() - t0 >= wait)
+          throw new CmuxError(`cmux still lists workspace ${ws} after closing it`);
+        await sleep(CLOSE_RETRY_MS);
+      }
     },
     async setStatus(ws, key, value) {
       const r = await cmux(["set-status", key, value, "--workspace", ws]);
