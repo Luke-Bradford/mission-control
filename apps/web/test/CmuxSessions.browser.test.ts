@@ -143,7 +143,7 @@ const metrics = (page: RenderedPage) =>
       const right = b.right - Number.parseFloat(cs.paddingRight) + 0.5;
       return (
         el.scrollWidth > el.clientWidth ||
-        el.firstElementChild?.getBoundingClientRect().right > right
+        (el.firstElementChild?.getBoundingClientRect().right ?? 0) > right
       );
     };
     return {
