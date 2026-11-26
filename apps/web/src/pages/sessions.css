@@ -470,7 +470,7 @@ button.sess-inbox[aria-expanded="true"] {
     width: 11%;
   }
   .sess-table .c-branch {
-    width: 8%;
+    width: 228px;
   }
   .sess-table .c-state {
     width: 140px;
@@ -482,7 +482,14 @@ button.sess-inbox[aria-expanded="true"] {
     width: 9%;
   }
   .sess-table .c-act {
-    width: 112px;
+    width: 128px;
+  }
+  .sess-prline {
+    gap: var(--sp-1);
+    white-space: nowrap;
+  }
+  .sess-prline .pill {
+    padding-inline: var(--sp-1);
   }
 }
 
@@ -497,7 +504,7 @@ button.sess-inbox[aria-expanded="true"] {
     width: 11%;
   }
   .sess-table .c-branch {
-    width: 8%;
+    width: 228px;
   }
   .sess-table .c-name {
     width: 160px;
@@ -522,6 +529,22 @@ button.sess-inbox[aria-expanded="true"] {
   }
   .sess-table .c-act {
     width: 112px;
+  }
+  .sess-prline {
+    gap: var(--sp-1);
+    white-space: nowrap;
+  }
+  .sess-prline .pill {
+    padding-inline: var(--sp-1);
+  }
+  .sess-table:has(.sess-row:focus-visible) .c-folder {
+    width: 220px;
+  }
+}
+
+@media (min-width: 2200px) {
+  .sess-table td.sess-branch {
+    padding-block: 3px;
   }
 }
 
@@ -551,6 +574,10 @@ button.sess-inbox[aria-expanded="true"] {
 .sess-row:is(:focus-visible, :has(:focus-visible)) .sess-applink {
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-folder {
+  overflow: visible;
 }
 
 .sess-row:is(:focus-visible, :has(:focus-visible)) .sess-applink {

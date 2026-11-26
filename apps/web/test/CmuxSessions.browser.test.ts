@@ -60,6 +60,15 @@ function row(i: number, long: boolean): CmuxSessionRow {
         : i === 1
           ? { state: "running", at: NOW - MIN, command: "pnpm test", why: "operator" }
           : null,
+    branch: `feature/${2262 + i}-cmux-sidebar-${"review-state-".repeat(3)}`,
+    ticket: { number: 2262 + i, repoId: crew ? "mission-control" : "shop-app" },
+    pr: {
+      number: 2258 + i,
+      url: `https://github.com/acme/${crew ? "mission-control" : "shop-app"}/pull/${2258 + i}`,
+      isDraft: false,
+      ci: i % 3 === 0 ? "pending" : i % 3 === 1 ? "passing" : "failing",
+      review: i % 3 === 0 ? "requested" : i % 3 === 1 ? "approved" : "changes",
+    },
   };
 }
 
@@ -152,6 +161,9 @@ const metrics = (page: RenderedPage) =>
             "#page-sessions .sess-applink",
             "#page-sessions .sess-tag",
             "#page-sessions .sess-inbox",
+            "#page-sessions .sess-prline > a",
+            "#page-sessions .sess-prline > span",
+            "#page-sessions .sess-acts button",
           ].join(", "),
         ),
       ]
