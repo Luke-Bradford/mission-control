@@ -3217,6 +3217,12 @@ describe("GET /api/machine", () => {
       seats: 0,
       perSessionMax: 0,
       transcripts: null,
+      leftovers: {
+        claudeProjectsBytes: 0,
+        codexSessionsBytes: 0,
+        browserProfilesBytes: 0,
+        chromeTempBytes: 0,
+      },
     });
     const latest: MachineSample = {
       at: NOW,
@@ -3238,6 +3244,12 @@ describe("GET /api/machine", () => {
       seats: 0,
       perSessionMax: 0,
       transcripts: null,
+      leftovers: {
+        claudeProjectsBytes: 0,
+        codexSessionsBytes: 0,
+        browserProfilesBytes: 0,
+        chromeTempBytes: 0,
+      },
     });
     await a.close();
   });

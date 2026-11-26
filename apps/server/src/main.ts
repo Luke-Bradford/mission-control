@@ -25,7 +25,7 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -1525,7 +1525,17 @@ export async function main(): Promise<void> {
   // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
   const leftovers = () => {
     try {
-      for (const text of clearLeftovers({ store, config, now: Date.now() }))
+      for (const text of clearLeftovers({
+        store,
+        config,
+        now: Date.now(),
+        crewLeftovers: {
+          worktrees: config.crew?.worktrees,
+          claudeProjects: join(homedir(), ".claude", "projects"),
+          codexSessions: join(homedir(), ".codex", "sessions"),
+          tmp: tmpdir(),
+        },
+      }))
         log(`leftovers: ${text}`);
     } catch (e) {
       log(`leftovers: pass failed: ${e instanceof Error ? e.message : String(e)}`);

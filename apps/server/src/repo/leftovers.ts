@@ -1,10 +1,8 @@
-import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
 import { type BoardItem, liftPark } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { endedWorkOver, runSubjectGone } from "../hud/hud.ts";
 import type { Store } from "../store.ts";
-import { cleanupCrewLeftovers } from "./crew-leftovers.ts";
+import { cleanupCrewLeftovers, type CrewLeftoverInput } from "./crew-leftovers.ts";
 
 /** How often the hub clears leftovers; the pass is idempotent, so a missed or repeated one is harmless. */
 export const LEFTOVERS_EVERY_MS = 60 * 60_000;
@@ -14,7 +12,13 @@ export const LEFTOVERS_EVERY_MS = 60 * 60_000;
  * parked state closed, each on an ended run whose work is over. Each gets a hub event. Local only:
  * no model run and no GitHub write. Returns the hub event texts, for the log.
  */
-export function clearLeftovers(deps: { store: Store; config: CcConfig; now: number }): string[] {
+export function clearLeftovers(deps: {
+  store: Store;
+  config: CcConfig;
+  now: number;
+  /** External paths are supplied by the hub entrypoint, never inferred by unit callers. */
+  crewLeftovers?: Omit<CrewLeftoverInput, "now" | "liveWorktrees">;
+}): string[] {
   const { store, config, now } = deps;
   const boards = new Map<string, BoardItem[]>();
   const boardOf = (repoId: string): BoardItem[] => {
@@ -48,22 +52,22 @@ export function clearLeftovers(deps: { store: Store; config: CcConfig; now: numb
     if (loop.hold?.kind)
       record(`cleared the parked state on ended run ${run.id}: its work is over`);
   }
-  const browser = cleanupCrewLeftovers({
-    now,
-    worktrees: config.crew?.worktrees,
-    claudeProjects: join(homedir(), ".claude", "projects"),
-    codexSessions: join(homedir(), ".codex", "sessions"),
-    tmp: tmpdir(),
-    liveWorktrees: new Set(
-      store
-        .activeSeatSessions()
-        .map((seat) => seat.worktree)
-        .filter((path): path is string => path !== null),
-    ),
-  });
-  if (browser.gzipped || browser.deleted || browser.browserRemoved)
-    record(
-      `cleaned crew leftovers: ${browser.gzipped} transcripts gzipped, ${browser.deleted} deleted, ${browser.browserRemoved} browser entries removed`,
-    );
+  if (deps.crewLeftovers) {
+    const browser = cleanupCrewLeftovers({
+      ...deps.crewLeftovers,
+      now,
+      worktrees: config.crew?.worktrees,
+      liveWorktrees: new Set(
+        store
+          .activeSeatSessions()
+          .map((seat) => seat.worktree)
+          .filter((path): path is string => path !== null),
+      ),
+    });
+    if (browser.gzipped || browser.deleted || browser.browserRemoved)
+      record(
+        `cleaned crew leftovers: ${browser.gzipped} transcripts gzipped, ${browser.deleted} deleted, ${browser.browserRemoved} browser entries removed`,
+      );
+  }
   return cleared;
 }
