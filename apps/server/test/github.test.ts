@@ -1846,6 +1846,56 @@ describe("collectGithub pull requests", () => {
     });
   });
 
+  it("classifies current-head bot comment verdict markers", async () => {
+    const head = "a".repeat(40);
+    const botRepo = {
+      ...repo,
+      review: {
+        kind: "repo-bot" as const,
+        check: "Claude Code Review",
+        verdict: "comment" as const,
+        actor: "claude[bot]",
+      },
+    };
+    const botComment = (number: number, body: string) =>
+      pull(number, {
+        commits: {
+          nodes: [
+            {
+              commit: {
+                oid: head,
+                statusCheckRollup: {
+                  state: "SUCCESS",
+                  contexts: { nodes: [checkRun("Claude Code Review", "SUCCESS")] },
+                },
+              },
+            },
+          ],
+        },
+        comments: { nodes: [{ author: { login: "claude[bot]" }, body: `${head}\n${body}` }] },
+      });
+    const { gql } = stub({
+      prPages: [
+        prPage([
+          botComment(10, "No issues found"),
+          botComment(11, "Approved"),
+          botComment(12, "Issues found"),
+          botComment(13, "Approved earlier, but changes requested"),
+        ]),
+      ],
+    });
+    await collectGithub(botRepo, store, gql, NOW);
+    const verdicts = new Map(prs().map((pr) => [pr.number, pr.repoBotReview?.verdict]));
+    expect(verdicts).toEqual(
+      new Map([
+        [10, "approved"],
+        [11, "approved"],
+        [12, "changes"],
+        [13, "changes"],
+      ]),
+    );
+  });
+
   it("reads whether each PR comes from a fork and stores it", async () => {
     const { gql, calls } = stub({
       prPages: [

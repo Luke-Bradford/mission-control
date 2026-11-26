@@ -1177,8 +1177,11 @@ function botFindings(
 
 function commentVerdict(body: string): "approved" | "changes" | null {
   const text = body.toLowerCase();
+  const rejectionText = text.replaceAll("no issues found", "").replaceAll("no findings", "");
   if (
-    /\b(not approved|changes? requested|request changes|issues? found|needs? changes)\b/.test(text)
+    /\b(not approved|changes? requested|request changes|issues? found|needs? changes)\b/.test(
+      rejectionText,
+    )
   ) {
     return "changes";
   }
