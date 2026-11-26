@@ -203,6 +203,7 @@ function SessionTable({
 }) {
   const named = new Set(repos.filter((r) => r.commands.length > 0).map((r) => r.repo));
   const [writing, setWriting] = useState<string | null>(null);
+  const [folderOpen, setFolderOpen] = useState<string | null>(null);
   // Which rows show their newest inbox message; by id, so a refresh keeps it open.
   const [reading, setReading] = useState<ReadonlySet<string>>(new Set());
   const toggleRead = (id: string) =>
@@ -220,7 +221,7 @@ function SessionTable({
         <col className="c-state" />
         <col className="c-for" />
         <col className="c-today" />
-        <col />
+        <col className="c-last" />
         <col className="c-status" />
         <col className="c-app" />
         <col className="c-check" />
@@ -265,6 +266,8 @@ function SessionTable({
             onWrite={(on) => setWriting(on ? r.id : null)}
             reading={reading.has(r.id)}
             onRead={() => toggleRead(r.id)}
+            folderOpen={folderOpen === r.id}
+            onFolder={(open) => setFolderOpen(open ? r.id : null)}
           />
         ))}
       </tbody>
@@ -291,6 +294,8 @@ function SessionRow({
   onWrite,
   reading,
   onRead,
+  folderOpen,
+  onFolder,
 }: {
   row: CmuxSessionRow;
   now: number;
@@ -300,6 +305,8 @@ function SessionRow({
   onWrite: (on: boolean) => void;
   reading: boolean;
   onRead: () => void;
+  folderOpen: boolean;
+  onFolder: (open: boolean) => void;
 }) {
   const msgId = `sess-msg-${r.id}`;
   const newest = r.inbox.unread > 0 ? r.inbox.newest : null;
@@ -346,14 +353,29 @@ function SessionRow({
             </span>
           </div>
         </td>
-        <td className="sess-folder" title={r.folder ?? undefined}>
-          {r.folder ? shortFolder(r.folder) : "—"}
-          {r.repo && (
-            <>
-              {" · "}
-              <b>{r.repo}</b>
-            </>
-          )}
+        <td className="sess-folder">
+          <button
+            type="button"
+            className="sess-folder-toggle"
+            aria-label={`Show folder for ${r.name}`}
+            aria-expanded={folderOpen}
+            aria-controls={folderOpen ? `sess-folder-${r.id}` : undefined}
+            title={r.folder ?? undefined}
+            onClick={(e) => {
+              e.stopPropagation();
+              onFolder(!folderOpen);
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+            onMouseDown={keepRowStill}
+          >
+            {r.folder ? shortFolder(r.folder) : "—"}
+            {r.repo && (
+              <>
+                {" · "}
+                <b>{r.repo}</b>
+              </>
+            )}
+          </button>
         </td>
         <td className="sess-branch">{r.branch ? <BranchCell row={r} /> : <Dash />}</td>
         <td>
@@ -418,6 +440,21 @@ function SessionRow({
         <tr className="sess-msg">
           <td colSpan={COLUMNS} id={msgId}>
             <span className="sess-msg-label">Newest message</span> {newest}
+          </td>
+        </tr>
+      )}
+      {folderOpen && (
+        <tr className="sess-folder-detail">
+          <td colSpan={COLUMNS} id={`sess-folder-${r.id}`}>
+            <div>
+              <b>Folder · repo</b> <code>{r.folder ? shortFolder(r.folder) : "—"}</code>
+              {r.repo && <code> · {r.repo}</code>}
+              {r.app && (
+                <>
+                  <b>App</b> <code>{shortUrl(r.app.url)}</code>
+                </>
+              )}
+            </div>
           </td>
         </tr>
       )}

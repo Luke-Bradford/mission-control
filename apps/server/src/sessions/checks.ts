@@ -377,7 +377,11 @@ export function createSessionChecks(deps: SessionChecksDeps): SessionChecks {
     }
     const notice = `Checks ${ending === "failed" ? "failed" : "timed out"} in cmux session "${job.name}": ${command}`;
     deps.notify(notice);
-    await deps.sidebarNotify?.(job.ws, notice);
+    try {
+      await deps.sidebarNotify?.(job.ws, notice);
+    } catch (e) {
+      log(`session checks: could not notify cmux workspace "${job.name}": ${String(e)}`);
+    }
     store.addHubEvent(notice, now());
   }
 

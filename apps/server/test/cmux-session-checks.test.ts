@@ -246,6 +246,28 @@ it("a failing check sends one message with the command and its last 40 lines, an
   expect(t.checks.lastResult(WS_A)).toMatchObject({ ok: false, command: PRINT_AND_FAIL });
 });
 
+it("keeps a failed check when its cmux notice cannot be sent", async () => {
+  const main = repo();
+  const sidebarNotify = vi.fn(async () => {
+    throw new Error("cmux unavailable");
+  });
+  const t = setup([{ id: WS_A, name: "pricing", cwd: main }], [agent(WS_A, main)], {
+    sidebarNotify,
+  });
+  await turnOn(t.checks, main, [PRINT_AND_FAIL]);
+  await t.checks.tick();
+  writeFileSync(join(main, "price.ts"), "export const p = 1;\n");
+  t.lifecycle(WS_A, "idle");
+  t.checks.start();
+  await vi.waitFor(() => expect(stateOf(t.checks, WS_A)).toBe("failed"), { timeout: 10_000 });
+  const notice = `Checks failed in cmux session "pricing": ${PRINT_AND_FAIL}`;
+  expect(t.state.messages).toHaveLength(1);
+  expect(t.notify).toHaveBeenCalledWith(notice);
+  expect(sidebarNotify).toHaveBeenCalledWith(WS_A, notice);
+  expect(t.store.hubEvents(0).map((e) => e.text)).toContain(notice);
+  expect(t.checks.lastResult(WS_A)).toMatchObject({ ok: false, command: PRINT_AND_FAIL });
+});
+
 it("a repo not turned on never runs a check by itself", async () => {
   const main = repo();
   const t = setup([{ id: WS_A, name: "pricing", cwd: main }], [agent(WS_A, main)]);
