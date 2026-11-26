@@ -837,7 +837,7 @@ const fileSchema = z
         ...(r.run_command === undefined ? {} : { runCommand: r.run_command }),
         requiredChecks: r.required_checks,
         ...(r.commands === undefined ? {} : { commands: r.commands }),
-        localServices: r.local_services,
+        ...(r.local_services.length === 0 ? {} : { localServices: r.local_services }),
         protectedFiles: r.protected,
         keepBranches: r.keep_branches,
         ...(r.rules === undefined ? {} : { rules: resolveRepoRules(r.rules) }),
