@@ -366,6 +366,8 @@ export function crewHudState(
       return now - Math.max(lastOutputAt ?? row.updatedAt, lockHeldSince ?? 0) >= STALL_MS
         ? "stalled"
         : "running";
+    case "needs-input":
+      return "blocked";
     case "idle":
       return "idle";
     case "parked":

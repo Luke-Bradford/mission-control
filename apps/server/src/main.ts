@@ -687,6 +687,8 @@ export async function main(): Promise<void> {
           log: (line) => log(line),
         });
   const supervisor = createSupervisor({
+    // every Claude seat runs as a cmux workspace the operator can see, type into and clear
+    cmuxCommand: [CMUX_COMMAND],
     auditPack: (seatId) =>
       buildAuditPack({ config, store, busy: supervisor.busy(), now: Date.now(), seatId }),
     flightEnvironment: async () => ({
