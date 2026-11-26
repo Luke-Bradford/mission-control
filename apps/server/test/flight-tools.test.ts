@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import {
   AWAY_PLANNER_REFUSED,
   AWAY_QUOTA_REFUSED,
@@ -59,6 +60,7 @@ import {
   FLIGHT_MEMORY_SOURCE_MAX,
   FLIGHT_MEMORY_TOPIC_MAX,
   FLIGHT_MEMORY_TOPICS_MAX,
+  FLIGHT_MODE_SETTING,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
@@ -135,7 +137,10 @@ import {
   runawayRefusedText,
   runawaySameReason,
   runawayWritesReason,
+  SESSION_NOT_ASKED_TEXT,
+  SESSION_OPEN_NOT_ON_CALL_TEXT,
   type SeatSessionRow,
+  seatStartNotCrewText,
   smallNoPlanText,
   startMissingNeedsText,
   type TestLockState,
@@ -190,7 +195,9 @@ import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
 import { stageReviewEvidence } from "../src/pr-evidence/review.ts";
 import { type PrEvidenceStore, prEvidenceStore } from "../src/pr-evidence/store.ts";
+import type { Cmux } from "../src/runtime/cmux.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
+import { createSessions } from "../src/sessions/sessions.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
 import { operatorDecisionFields } from "./brief-fixture.ts";
@@ -365,6 +372,16 @@ const args = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const CMUX_WS = "11111111-1111-4111-8111-111111111111";
+/** The hub's own role prompts. */
+const ROLES_DIR = fileURLToPath(new URL("../../../roles", import.meta.url));
+let cmuxStub: Cmux;
+let cmuxSent: { ws: string; text: string }[];
+let cmuxScreen: string;
+/** The workspaces the stub cmux has, and the new-workspace calls it took. */
+let cmuxWorkspaces: { id: string; name: string; cwd: string | null }[];
+let cmuxOpened: { name: string; cwd: string; command: string }[];
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mc-flight-tools-"));
   store = new Store(join(dir, "mc.sqlite"));
@@ -452,6 +469,36 @@ beforeEach(() => {
     pruneBranches: async () => ({ ok: true, text: "Pruned." }),
   };
   stateSeen.mockClear();
+  cmuxSent = [];
+  cmuxScreen = "";
+  cmuxWorkspaces = [{ id: CMUX_WS, name: "pricing", cwd: null }];
+  cmuxOpened = [];
+  cmuxStub = {
+    ensure: async () => {},
+    ping: async () => "up",
+    workspaces: async () => cmuxWorkspaces,
+    agents: async () => [],
+    focus: async () => {},
+    statuses: async () => ({}),
+    inbox: async () => [],
+    agentMessage: async () => {},
+    openBrowser: async () => {},
+    newWorkspace: async (i) => {
+      cmuxOpened.push({ name: i.name, cwd: i.cwd, command: i.command });
+      const id = `${String(cmuxOpened.length).padStart(8, "0")}-0000-4000-8000-000000000000`;
+      cmuxWorkspaces.push({ id, name: i.name, cwd: i.cwd });
+      return id;
+    },
+    send: async (ws, text) => {
+      cmuxSent.push({ ws, text });
+      return "sent";
+    },
+    sendKey: async () => {},
+    readScreen: async () => cmuxScreen,
+    close: async () => {
+      throw new Error("never closed");
+    },
+  };
   flightDeps = (): FlightToolsDeps => ({
     attentionMaterials: { attachStory: (key, story) => materialsImpl(key, story) as never },
     hubOrigin: "http://127.0.0.1:7420",
@@ -590,6 +637,14 @@ beforeEach(() => {
       pruneBranches: () => tidyImpl.pruneBranches(),
     },
     now: () => nowMs,
+    sessions: createSessions({
+      cmux: cmuxStub,
+      store,
+      seatIds: () => ["guido-1"],
+      probe: async () => true,
+      rolesDir: ROLES_DIR,
+      now: () => nowMs,
+    }),
   });
   tools = createFlightTools(flightDeps());
   const t = tools.find((candidate) => candidate.name === "log_decision");
@@ -1407,6 +1462,10 @@ describe("tool list", () => {
       "remember",
       "forget",
       "recall",
+      "cmux_sessions",
+      "cmux_send",
+      "cmux_open",
+      "set_flight_mode",
       "hold_item",
       "release_hold",
     ]);
@@ -2160,6 +2219,20 @@ describe("start_seat", () => {
     board(sc(7));
     fetchImpl = async (n) => ticket(n, { body: DONE });
   });
+
+  it.each(["watch", "on-call"] as const)(
+    "starts no seat in %s mode; crew mode starts it again",
+    async (mode) => {
+      store.setSetting(FLIGHT_MODE_SETTING, mode);
+      const held = await start();
+      expect(held.isError).toBe(true);
+      expect(held.text).toBe(seatStartNotCrewText(mode));
+      expect(startCalls).toEqual([]);
+      store.setSetting(FLIGHT_MODE_SETTING, "crew");
+      expect((await start()).isError).toBeUndefined();
+      expect(startCalls).toHaveLength(1);
+    },
+  );
 
   it("holds a start for the slow pace, naming it, and starts a ticket it names", async () => {
     store.setSetting(
@@ -12178,5 +12251,118 @@ describe("flight_state and the AUDIT report", () => {
     for (const s of [top.problem, top.evidence, top.cause, top.links[0].label])
       expect(s).toMatch(wrapped);
     expect(top.links[0].href).toBe("https://github.com/o/mc/pull/7");
+  });
+});
+
+describe("cmux sessions", () => {
+  const ask = (over: Partial<Parameters<Store["addComms"]>[0]> = {}) => {
+    const m = store.addComms({
+      at: nowMs,
+      from: "CAPCOM",
+      to: "flight-1",
+      ticket: null,
+      text: "Ask the pricing session where it got to",
+      senderKind: "operator",
+      ...over,
+    });
+    if (m === null) throw new Error("rate limited");
+    return m.id;
+  };
+
+  it("cmux_sessions reads a session's screen", async () => {
+    cmuxScreen = "Running migration\nDone: migrated 3 tables\n";
+    const all = await call("cmux_sessions", {});
+    expect(all.isError).toBeUndefined();
+    expect(JSON.parse(all.text).sessions[0]).toMatchObject({ name: "pricing", owner: "operator" });
+    const one = await call("cmux_sessions", { workspace: CMUX_WS, lines: 10 });
+    expect(JSON.parse(one.text).screen).toContain("Done: migrated 3 tables");
+    expect(isReadCall("cmux_sessions", { workspace: CMUX_WS })).toBe(true);
+    expect((await call("cmux_sessions", { workspace: "workspace:1" })).isError).toBe(true);
+    expect(cmuxSent).toEqual([]);
+  });
+
+  it("cmux_send needs the operator's asking message", async () => {
+    const send = (asked_by?: string) =>
+      call("cmux_send", {
+        workspace: CMUX_WS,
+        text: "Where did you get to?",
+        ...(asked_by === undefined ? {} : { asked_by }),
+      });
+    expect(await send()).toEqual(refused(SESSION_NOT_ASKED_TEXT));
+    const fromSeat = ask({ from: "guido-1", senderKind: "seat" });
+    expect(await send(fromSeat)).toEqual(refused(SESSION_NOT_ASKED_TEXT));
+    const old = ask({ at: nowMs - 25 * 60 * 60 * 1000, text: "An old ask" });
+    expect(await send(old)).toEqual(refused(SESSION_NOT_ASKED_TEXT));
+    const toOther = ask({ to: "guido-1", text: "Not to FLIGHT" });
+    expect(await send(toOther)).toEqual(refused(SESSION_NOT_ASKED_TEXT));
+    expect(cmuxSent).toEqual([]);
+
+    const fresh = ask();
+    expect((await send(fresh)).isError).toBeUndefined();
+    expect(cmuxSent).toEqual([{ ws: CMUX_WS, text: "Where did you get to?" }]);
+    expect(store.hubEvents(0).map((e) => e.text)).toContain(
+      `Wrote to cmux session "pricing" (21 characters), asked by FLIGHT for ${fresh}`,
+    );
+    expect(isReadCall("cmux_send", { workspace: CMUX_WS })).toBe(false);
+  });
+
+  it("cmux_open opens one session per call with its role and first message", async () => {
+    // each new Claude comes up at its input prompt
+    cmuxScreen = "│ ❯ │\n  ? for shortcuts\n";
+    const open = (role: string, message: string, asked_by?: string) =>
+      call("cmux_open", {
+        folder: dir,
+        role,
+        message,
+        ...(asked_by === undefined ? {} : { asked_by }),
+      });
+    const split = ask({ text: "Split this into a server session and a web session" });
+    // crew mode: refused, and so is a call with no asking message
+    expect(await open("GUIDO", "server work", split)).toEqual(
+      refused(SESSION_OPEN_NOT_ON_CALL_TEXT),
+    );
+    store.setSetting(FLIGHT_MODE_SETTING, "on-call");
+    expect(await open("GUIDO", "server work")).toEqual(refused(SESSION_NOT_ASKED_TEXT));
+    expect(cmuxOpened).toEqual([]);
+
+    expect((await open("GUIDO", "server work", split)).isError).toBeUndefined();
+    expect((await open("INCO", "web work", split)).isError).toBeUndefined();
+    expect(cmuxOpened.map((o) => o.name)).toEqual([
+      `${basename(dir)} (GUIDO)`,
+      `${basename(dir)} (INCO)`,
+    ]);
+    const roleText = (role: string) => readFileSync(join(ROLES_DIR, `${role}.md`), "utf8");
+    for (const [i, [role, message]] of [
+      ["GUIDO", "server work"],
+      ["INCO", "web work"],
+    ].entries()) {
+      const script = readFileSync(cmuxOpened[i]?.command.slice(1, -1) ?? "", "utf8");
+      expect(script).toContain("'--append-system-prompt'");
+      expect(script).toContain(roleText(role).slice(0, 200).replaceAll("'", "'\\''"));
+      expect(script).toContain(`'${message}'`);
+    }
+    expect(store.hubEvents(0).map((e) => e.text)).toContain(
+      `Opened cmux session "${basename(dir)} (INCO)" in ${dir} as INCO, asked by FLIGHT for ${split}`,
+    );
+    const view = await flightDeps().sessions?.view();
+    if (!view?.ok) throw new Error("no view");
+    expect(
+      view.sessions.filter((r) => r.name.startsWith(basename(dir))).map((r) => r.owner),
+    ).toEqual(["operator", "operator"]);
+    expect(isReadCall("cmux_open", {})).toBe(false);
+  });
+
+  it("set_flight_mode sets the mode when the operator asked", async () => {
+    const set = (mode: string, asked_by?: string) =>
+      call("set_flight_mode", { mode, ...(asked_by === undefined ? {} : { asked_by }) });
+    expect(await set("watch")).toEqual(refused(SESSION_NOT_ASKED_TEXT));
+    expect((await set("nap", ask())).isError).toBe(true);
+    expect(store.getSetting(FLIGHT_MODE_SETTING)).toBeNull();
+    const asked = ask({ text: "Switch to watch mode" });
+    expect((await set("watch", asked)).isError).toBeUndefined();
+    expect(store.getSetting(FLIGHT_MODE_SETTING)).toBe("watch");
+    expect(store.hubEvents(0).map((e) => e.text)).toContain(
+      `FLIGHT mode set to Watch by FLIGHT for ${asked}`,
+    );
   });
 });

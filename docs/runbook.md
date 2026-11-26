@@ -200,7 +200,7 @@ profiles:
 - **Snapshot.** Each build or planner start copies the chosen profile, with a sha256 hash, onto its run. Editing the file changes later starts only. The file is read afresh on every start.
 - **A file that cannot be loaded** refuses starts (502, or FLIGHT's refusal text) naming the problem; the hub keeps running. Fix the file and the next start works.
 - **Limits.** The `tries` and `rounds` of the snapshot replace the defaults (3 and 3). The engine still judges the PR's combined CI; `checks` is briefed, not enforced one by one.
-- **Dollar cap.** `budget_usd` is separate from the template's token `budget` and is passed to Claude as `--max-budget-usd`. Omit it to leave Claude uncapped. When Claude reaches it, the run uses the normal budget park and names the dollars used and cap. A working run parks at once; a run whose PR is already pushed keeps moving until the CLI ends. Unlike a token park, Resume refuses a dollar park: the Claude process keeps the cap it started with, so end the run and start the ticket again.
+- **Dollar cap.** `budget_usd` is separate from the template's token `budget`. Claude seats now run interactively in cmux (see `docs/runbooks/cmux-seats.md`), and the CLI has no spend cap outside print mode, so a Claude run in cmux is started without `--max-budget-usd`; one that runs on the keeper (cmux down, refusing, or a start that fell back) still gets it, less what the run's other sessions spent. The token budget still parks a run.
 - **Seen.** The crew row's loop carries the profile name and the step for the run's phase.
 
 ## Reviews of controller and personal PRs
@@ -1382,6 +1382,52 @@ seat's ticket.
 
 **Pace.** FLIGHT has no wake on a timer. It wakes for a changed fact, a seat's call or a deadline on one fact (a planned entry, the end of the 30-minute gap), and for the daily retrospective. The next wake time in `/api/flight` is the soonest such deadline, or none.
 
+### FLIGHT mode
+
+One hub setting, `flight.mode`, says how FLIGHT works. The FLIGHT page shows it and changes it
+(`GET`/`POST /api/settings/flight-mode` with `{ mode }`, operator only; a seat's token gets 403), and
+FLIGHT can change it with `set_flight_mode` when the operator asks in Comms. The hub reads it on every
+use, so a change applies at once, with no restart. Each change adds the hub event
+`FLIGHT mode set to <Label> by <who>`.
+
+| Mode | Seats take Ready tickets | What wakes FLIGHT |
+|---|---|---|
+| `crew` (default) | yes | everything above |
+| `watch` | no | only an operator message |
+| `on-call` | no | only an operator message |
+
+Outside crew mode, runs already under way carry on; no seat takes a new ticket (`seatMayTake` and
+`takeNext`), and FLIGHT's `start_seat` refuses every start. The wake facts are cut to `operator`, `owed` and `breaker`, and a FLIGHT that is not
+running starts only for an unread operator message. A seat's Comms message to FLIGHT stays unread
+until the operator's next message wakes it. A missing or unreadable setting reads as `crew`.
+
+**Watch mode's notices.** Hub code, not an agent, reads the Sessions view every 3 seconds
+(`SESSION_WATCH_MS`) while the mode is `watch`. A session that moves to "waiting on you" raises
+`cmux session "<name>" is waiting on you.`; one that goes from working to idle raises
+`cmux session "<name>" finished: it was working and is now idle.` Each is one Needs-you note, keyed
+`cmux-session:<workspace id>`, and it is the operator's at once, never FLIGHT's to triage. A state
+that has not changed raises nothing, and nor does the first sight of a session (after a hub restart
+too). A note lasts only while it holds: "waiting on you" while the session waits, "finished" while
+it is idle. Any other change (an answer, Claude exiting, the session gone) clears it, and so does
+every read of a note an earlier hub left that no longer holds; leaving watch mode clears them all.
+
+**Opening a session.** In on-call mode FLIGHT's `cmux_open` opens a new cmux session, and so does the
+Sessions page's New session button: a plain Claude session under the operator's account, with no
+seat environment and no sandbox. It runs in an existing absolute folder, or with "Fresh worktree" in
+`<repo>-sessions/<role>-<YYYYMMDD-HHmmss>` beside the repo's top folder, on a new
+`session/<role>-<YYYYMMDD-HHmmss>` branch from `origin/HEAD` (no fetch first). The role is a file in
+`roles/`, passed with `--append-system-prompt`; the first message is Claude's opening prompt, after `--`, so a
+message that starts with `-` is never read as an option. The name
+defaults to `<folder name> (<ROLE>)` and never holds a seat's ` · `, so the Sessions page lists it as
+the operator's. The hub event `Opened cmux session "<name>" in <folder> as <ROLE>, asked by <who>`
+logs each one; the message is not logged. The open waits (up to a minute) for Claude to reach its
+input prompt, answering its folder-trust prompt on the way (a fresh worktree always shows it; the
+cursor opens on "No, exit", and the hub moves it to "Yes" before Enter). A bad folder or role, or a
+git failure, is a 400. A cmux failure, or a Claude that quits at the trust prompt or is not up in
+time, is a 503, and the workspace this open made is closed (a same-named older one never is).
+Opens take turns from listing the workspaces to finding the new one, so two at once with the same
+name each get their own.
+
 ### FLIGHT adds a controller check to a ticket
 
 Seats have no tool to edit an issue body, so FLIGHT puts a check under a ticket's `## Controller check`
@@ -1659,9 +1705,27 @@ started before the set was recorded rotates on its wake count as before.
 | `flow:<repo>` | Flow history: cycle time and first-push CI over the last 14 days (read-only GraphQL) | hourly, first 7 min after start (after the first PR sweep) |
 | `machine` | This Mac: CPU, memory, disk, Claude/Codex processes (`os`, `vm_stat`, `statfs`, `ps`); a sample is kept each minute; the spawned commands run only with a browser or crew work open (see `runbooks/machine-capacity.md`) | 2 s (status rewritten at most once a minute while unchanged) |
 | `maintenance` | No source and no status row: deletes run digests of runs started over 30 days ago | hourly |
+| `sessionSpend` | Every Claude transcript on this Mac (`~/.claude/projects/**/*.jsonl`, subagents included), read on from where the last pass stopped; the first read of a file starts at the local day 6 days ago. Keeps token counts and ~cost per file, session, local day and model (`session_spend`), never transcript text; rows are kept 90 days. A file that shrank is read again and replaces its rows. The pass fails (status row) when the folder or a transcript cannot be read. No process, model call or wake. | 30 s, first 18 s after start |
 
 Pages are described under "The HUD" below. Run cost is shown as `~$2.47`: it is the
 API-equivalent price of the run's tokens, not a bill.
+
+Telemetry › Cost and tokens › Table has a "Spend by owner" panel: every Claude session on this Mac
+over the last 7 local days, by day and repo, split into the operator's own sessions, the crew and
+FLIGHT, with the account total underneath. A session is FLIGHT's or the crew's when a run or seat
+recorded its session id (a `watch` seat is FLIGHT), or the crew's when it ran under
+`crew.worktrees` or a session checkout; every other session is the operator's. Owner and repo are decided when the lines are read and
+kept, so a later config change does not move earlier spend. The repo is the run's,
+or the folder name of the git checkout the session ran in. Cost is priced from the transcripts'
+token counts at the API list prices in `packages/core/src/session-spend.ts` (`MODEL_PRICES`, dated);
+update that table when prices change. A model with no price there counts in tokens but not cost.
+The panel's "Read hh:mm" is the last pass that read every transcript; after a pass that missed
+some it reads "Last full read hh:mm" with what could not be read, as the totals may miss them.
+The panel shows every row, then the Account total and the pricing note; it grows with its rows.
+
+The Sessions page's Today column shows each Claude session's ~cost from local midnight; hover or
+keyboard focus shows today and the last 7 days in cost and tokens. A session whose tokens all come
+from models without a price shows "No price", and one with some shows its priced cost with a `+`.
 
 ### Agent state rules
 

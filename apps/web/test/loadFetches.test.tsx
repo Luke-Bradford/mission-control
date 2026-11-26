@@ -1,4 +1,4 @@
-import { TOPICS } from "@mc/core";
+import { OPERATOR_BOOTSTRAP_PATH, TOPICS } from "@mc/core";
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
@@ -10,6 +10,7 @@ import "../src/pages/BoardPage.tsx";
 import "../src/pages/Comms.tsx";
 import "../src/pages/Flight.tsx";
 import "../src/pages/Needs.tsx";
+import "../src/pages/Sessions.tsx";
 import "../src/pages/Overview.tsx";
 import "../src/pages/Planner.tsx";
 import "../src/pages/QaReadiness.tsx";
@@ -94,7 +95,17 @@ function open(path: string, routes: Record<string, unknown> = {}) {
   };
 }
 
-const repeated = (counts: Map<string, number>) => [...counts].filter(([, n]) => n > 1);
+const repeated = (counts: Map<string, number>, polled: readonly string[] = []) =>
+  [...counts].filter(([url, n]) => n > 1 && !polled.includes(url));
+
+/**
+ * Reads a page repeats on its own timer by design, not because the stream drove them. Sessions
+ * reads cmux every few seconds; each protected read asks the token bootstrap again while the
+ * stub hub gives no token.
+ */
+const POLLED: Partial<Record<string, readonly string[]>> = {
+  [PAGE_PATHS.sessions]: [RESOURCES.sessions.path, OPERATOR_BOOTSTRAP_PATH],
+};
 
 describe("load-time fetches", () => {
   beforeEach(() => {
@@ -117,7 +128,7 @@ describe("load-time fetches", () => {
       const counts = gets(page.fetch, page.at, t0, t0 + OPENING_MS);
       page.close();
       expect(counts.size).toBeGreaterThan(0);
-      expect(repeated(counts)).toEqual([]);
+      expect(repeated(counts, POLLED[path])).toEqual([]);
     },
   );
 

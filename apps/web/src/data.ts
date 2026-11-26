@@ -79,6 +79,10 @@ export const RESOURCES = {
     topic: ["agents", "boards", "attention", "flight"],
   },
   prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
+  /** Every cmux workspace on this Mac, read from cmux; the Sessions page polls it, no topic. */
+  sessions: { path: "/api/sessions", topic: null },
+  /** The New session form's choices: role files and the folders sessions are open in. */
+  sessionRoles: { path: "/api/sessions/roles", topic: null },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).
@@ -163,6 +167,8 @@ export const RESOURCES = {
     topic: "settings",
   }),
   crewPause: { path: "/api/settings/crew-pause", topic: ["settings", "agents"] },
+  /** How FLIGHT works: `{ mode }`, crew, watch or on-call. */
+  flightMode: { path: "/api/settings/flight-mode", topic: ["settings", "agents"] },
   away: { path: "/api/settings/away", topic: "settings" },
   /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
   telemetry: (range: string, agent = "", account = "", ticket = ""): ResourceRef => ({
@@ -346,6 +352,18 @@ export const RESOURCES = {
 
 /** Mutation endpoints. */
 export const ACTIONS = {
+  /** Body `{}`; brings the cmux workspace to the front. */
+  sessionFocus: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/focus`,
+  /** Body `{ text }`; pastes it into the workspace, then Enter. 409 while it has a question open. */
+  sessionSend: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/send`,
+  /** Body `{}`; opens the session's app in that workspace's cmux browser. */
+  sessionApp: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/app`,
+  /** Body: an OpenSessionInput; answers 201 `{ id, name }`. */
+  sessionOpen: RESOURCES.sessions.path,
+  /** Body `{}`; queues the session's repo checks. 400 with the reason when it has none or is a crew seat. */
+  sessionChecks: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/checks`,
+  /** Body `{ repo, on?, commands? }`; turns a repo's checks on or off, or sets the page's own list. */
+  sessionRepoChecks: `${RESOURCES.sessions.path}/checks`,
   saveInstruction: (seatId: string | null) =>
     seatId === null ? "/api/flight/orders" : `/api/seats/${enc(seatId)}/instructions`,
   revokeInstruction: (seatId: string | null, id: number) =>
@@ -388,6 +406,8 @@ export const ACTIONS = {
   handled: (key: string) => `/api/attention/${enc(key)}/handled`,
   /** Body: the whole AwaySettings. */
   crewPause: RESOURCES.crewPause.path,
+  /** Body `{ mode }`. */
+  flightMode: RESOURCES.flightMode.path,
   away: RESOURCES.away.path,
   /** Body `{ github, project }`; answers a RepoPreview and writes nothing. */
   previewRepo: "/api/repos/preview",
@@ -534,9 +554,11 @@ const VISIT_REUSE_MS = 2000;
 
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 
-/** Only PR flow needs a protected JSON read. */
+/** Protected JSON reads: PR flow, dependencies, attention materials, cmux sessions and session roles. */
 const readResource = async <T>(path: string): Promise<T> =>
   path === RESOURCES.prFlow.path ||
+  path === RESOURCES.sessions.path ||
+  path === RESOURCES.sessionRoles.path ||
   path === RESOURCES.dependencies.path ||
   /^\/api\/attention\/[^/]+\/materials$/.test(path)
     ? apiOperatorGet<T>(path)

@@ -102,6 +102,7 @@ it("accepts complete setup contracts while legacy records omit additions", () =>
       capcom: false,
       awayDigest: true,
       quota: false,
+      checks: true,
     },
     quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
     softChime: true,

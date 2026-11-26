@@ -33,6 +33,7 @@ import {
   FLIGHT_MAX_WAKES,
   FLIGHT_MERGE_STALL_MS,
   FLIGHT_MIN_WAKE_GAP_MS,
+  FLIGHT_MODE_SETTING,
   FLIGHT_NOTE_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RETROSPECTIVE_SETTING,
@@ -109,7 +110,7 @@ import {
   flightToolsDigest,
 } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud/hud.ts";
-import { foldTranscript } from "../src/run/streamjson.ts";
+import { CMUX_CLEAR_MARK, foldTranscript } from "../src/run/streamjson.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { weeklyProjection } from "../src/spend/projection.ts";
@@ -2876,6 +2877,37 @@ describe("the FLIGHT watcher", () => {
       expect(endCalls).toEqual(["r-flight"]);
       await watch.check();
       expect(startCalls).toHaveLength(1);
+    });
+
+    it("an operator's /clear in cmux is no handover: the cleared context is not read as the new session's", async () => {
+      liveCrew();
+      watch.start();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS - FLIGHT_CONTEXT_GROWTH_TOKENS);
+      await watch.check();
+      // the run's transcript as the cmux driver writes it: the full session, the /clear, the new prompt
+      const full = JSON.stringify({
+        type: "assistant",
+        message: {
+          id: "m1",
+          content: [{ type: "text", text: "working" }],
+          usage: { input_tokens: FLIGHT_CONTEXT_ROTATE_TOKENS + 1000 },
+        },
+      });
+      const clear = JSON.stringify({
+        type: "system",
+        subtype: "init",
+        session_id: "s2",
+        [CMUX_CLEAR_MARK]: true,
+      });
+      const user = JSON.stringify({ type: "user", message: { content: "hello" } });
+      store.setDigest("r-flight", foldTranscript(null, [full, clear, user], nowMs).digest);
+      for (let k = 0; k < 3; k++) {
+        nowMs += MIN;
+        idle();
+        await watch.check();
+      }
+      expect(sendCalls.map((c) => c.text)).not.toContain(FLIGHT_HANDOVER_ASK);
+      expect(endCalls).toEqual([]);
     });
 
     it("keeps first-turn context for at most 200 sessions: an older one starts over", async () => {
@@ -6265,5 +6297,57 @@ describe("question fact watch (#1532)", () => {
     expect(after.filter((s) => s.key.endsWith(":closed"))).toHaveLength(1);
     nowMs += MIN;
     expect(changed()).toHaveLength(before + 1);
+  });
+});
+
+describe("FLIGHT's mode", () => {
+  it.each(["watch", "on-call"] as const)(
+    "outside crew mode only an operator message wakes FLIGHT (%s)",
+    async (mode) => {
+      store.setSetting(FLIGHT_MODE_SETTING, mode);
+      liveCrew();
+      await watch.check();
+      const tick = async () => {
+        nowMs += 5 * MIN;
+        vi.setSystemTime(nowMs);
+        await watch.check();
+      };
+      ask();
+      await tick();
+      recordSeatCall(store, "mc", { seat: "guido-1", reason: "blocked", ref: "mc#7", at: nowMs });
+      await tick();
+      idleCrew();
+      store.setSeatSession({ ...row("guido-1", null), updatedAt: nowMs - FLIGHT_IDLE_MS });
+      await tick();
+      store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+      while (nowMs < T0 + HOUR) await tick();
+      expect(sendCalls).toEqual([]);
+      expect(startCalls).toEqual([]);
+
+      store.addComms({ at: nowMs, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "Hi" });
+      await tick();
+      await tick();
+      expect(sendCalls).toHaveLength(1);
+      expect(sendCalls[0]?.text).toContain("operator");
+    },
+  );
+
+  it("outside crew mode an operator message alone starts a FLIGHT that is not running", async () => {
+    store.setSetting(FLIGHT_MODE_SETTING, "on-call");
+    ask();
+    await watch.check();
+    expect(startCalls).toEqual([]);
+    store.addComms({ at: nowMs, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "Hi" });
+    await watch.check();
+    expect(startCalls.map((c) => c.seatId)).toEqual(["flight-1"]);
+  });
+
+  it("crew mode wakes FLIGHT for a seat's question as before", async () => {
+    liveCrew();
+    await watch.check();
+    ask();
+    nowMs += 5 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
   });
 });

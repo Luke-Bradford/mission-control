@@ -42,6 +42,7 @@ export const EVERYWHERE: LinkRule[] = [
   rule(/^Planner$/, /^\/planner$/, "Header tab."),
   rule(/^Telemetry$/, /^\/telemetry$/, "Header tab."),
   rule(/^Audit$/, /^\/audit$/, "Header tab."),
+  rule(/^Sessions$/, /^\/sessions$/, "Header tab."),
   rule(/^Open FLIGHT's full view$/, /^\/flight$/, "The dock's summary leads to the FLIGHT page."),
   rule(
     /on GitHub$|^Open in GitHub|^View on GitHub|^PR #\d+$/,
@@ -271,6 +272,7 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
       rule(/^Machine$/, /^\/telemetry\?tab=machine$/, "A tab is in the URL, so it can be linked."),
     ],
   },
+  sessions: { routes: ["/sessions"], rules: [] },
   audit: {
     routes: ["/audit"],
     rules: [
@@ -292,7 +294,7 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
     ),
     rules: [
       rule(
-        /^(Hub|Accounts|Repos & seats|Loops|Roles & guards|Sources|Safety|Sessions)$/,
+        /^(Hub|Accounts|Repos & seats|Loops|Roles & guards|Sources|Safety)$/,
         /^\/setup\/\w+$/,
         "A Setup tab.",
       ),

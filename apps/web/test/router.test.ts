@@ -55,6 +55,7 @@ describe("route()", () => {
     ],
     ["/telemetry", { page: "telemetry" }],
     ["/audit", { page: "audit" }],
+    ["/sessions", { page: "sessions" }],
     ["/setup", { page: "setup", tab: "accounts" }],
     ["/setup/repos", { page: "setup", tab: "repos" }],
     ["/setup/sources", { page: "setup", tab: "sources" }],
@@ -182,6 +183,7 @@ describe("path helpers", () => {
       telemetry: "/telemetry",
       audit: "/audit",
       setup: "/setup",
+      sessions: "/sessions",
     });
   });
 });

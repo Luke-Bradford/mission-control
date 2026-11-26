@@ -66,6 +66,7 @@ import {
   ENGINE_TICK_MS,
   type FileDiff,
   FLIGHT_APPROVAL_RULES,
+  FLIGHT_MODES,
   FLIGHT_RUNAWAY_NOTE_KEY,
   fixesSent,
   flightShellBreakerWrite,
@@ -324,6 +325,7 @@ import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
+import { readFlightMode, writeFlightMode } from "./flight/mode.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER } from "./flight/operator-call.ts";
 import { liftRunaway, noteFlightWrite } from "./flight/runaway.ts";
 import {
@@ -449,6 +451,9 @@ import { type CodexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
+import { registerSessionRoutes } from "./sessions/api.ts";
+import type { SessionChecks } from "./sessions/checks.ts";
+import type { SessionsService } from "./sessions/sessions.ts";
 import { weeklyProjection } from "./spend/projection.ts";
 import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
@@ -571,6 +576,12 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  /** Every cmux workspace on this Mac (the Sessions page); absent: its routes answer 503. */
+  sessions?: SessionsService;
+  /** Each cmux session's repo checks (the Sessions page's Run checks and Repo checks); absent: 503. */
+  sessionChecks?: SessionChecks;
+  /** The hub's local notifications, shared with services that raise their own (session checks); absent: built here. */
+  notifications?: LocalNotifications;
   attentionMaterials?: AttentionMaterialsService;
   qaReports?: QaReportService;
   /** Moves a card on the board: approving a held plan moves its ticket to Ready; absent: the card stays. */
@@ -725,6 +736,9 @@ export function crewGuardDeps(
     runGrants: (who) => runSeatGrants(config, store, who),
   };
 }
+
+/** `POST /api/settings/flight-mode`: how FLIGHT works. */
+const FlightModeBody = z.strictObject({ mode: z.enum(FLIGHT_MODES) });
 
 /** `POST /api/seats/:id/start`: a GitHub issue number. */
 const StartBody = z.strictObject({
@@ -1270,6 +1284,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       path === "/api/flight/runaway/lift" ||
       path === "/api/hub/restart" ||
       path === "/api/config/settings" ||
+      path === "/api/settings/flight-mode" ||
       path.startsWith("/api/attention/")
     )
       return reply.code(403).send({ error: SEAT_REFUSED });
@@ -1515,7 +1530,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       item: (key) => attentionWithHeld().find((item) => item.key === key) ?? null,
       now,
     });
-  const notifications = new LocalNotifications(store, config, bus, now);
+  const notifications = deps.notifications ?? new LocalNotifications(store, config, bus, now);
   const reconcileNotifications = () => {
     const items = sharedAttention(true);
     // The overview's need history is written here, so GET /overview stays a pure read.
@@ -4396,6 +4411,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       registerInstructionRoutes(api, deps);
+      registerSessionRoutes(api, deps);
 
       // Reader: apps/web/src/pages/Agent.tsx (Queue move-up approval item)
       api.post<{ Params: { id: string } }>("/seats/:id/queue/reorder", async (req, reply) => {
@@ -6715,6 +6731,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("settings");
         bus.emit("agents");
         return pause;
+      });
+
+      // Reader: docs/runbook.md#flight-mode (the FLIGHT page sets it)
+      api.get("/settings/flight-mode", async () => ({ mode: readFlightMode(store) }));
+
+      // Reader: docs/runbook.md#flight-mode (the FLIGHT page sets it)
+      api.post("/settings/flight-mode", async (req, reply) => {
+        const body = FlightModeBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        writeFlightMode(store, body.data.mode, "operator", now());
+        bus.emit("settings");
+        bus.emit("agents");
+        return { mode: body.data.mode };
       });
 
       api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));

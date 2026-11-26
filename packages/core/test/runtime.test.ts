@@ -167,14 +167,10 @@ describe("crewCliArgs", () => {
 
   it("starts a new writer session with isolation, the allow and deny lists, and --session-id", () => {
     const a = crewCliArgs(base);
-    expect(a.slice(0, 6)).toEqual([
-      "-p",
-      "--input-format",
-      "stream-json",
-      "--output-format",
-      "stream-json",
-      "--verbose",
-    ]);
+    // interactive, in a cmux workspace: no print mode, stream formats or per-run dollar cap
+    for (const gone of ["-p", "--input-format", "--output-format", "--verbose", "--max-budget-usd"])
+      expect(a).not.toContain(gone);
+    expect(a[0]).toBe("--model");
     expect(a[a.indexOf("--model") + 1]).toBe("sonnet");
     const joined = a.join("\u0000");
     expect(joined).toContain(CREW_ISOLATION_FLAGS.join("\u0000"));
@@ -254,11 +250,26 @@ describe("crewCliArgs", () => {
     expect(crewCliArgs({ ...base, effort: null })).not.toContain("--effort");
   });
 
-  it("passes a per-run dollar cap when one is supplied", () => {
-    const a = crewCliArgs({ ...base, maxBudgetUsd: 12.5 });
+  it("starts in print mode for a keeper when asked", () => {
+    const a = crewCliArgs({ ...base, print: true });
+    expect(a.slice(0, 6)).toEqual([
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+    ]);
+    expect(a).not.toContain("--max-budget-usd");
+  });
+
+  it("passes a per-run dollar cap in print mode only", () => {
+    const a = crewCliArgs({ ...base, print: true, maxBudgetUsd: 12.5 });
     expect(count(a, "--max-budget-usd")).toBe(1);
     expect(a[a.indexOf("--max-budget-usd") + 1]).toBe("12.5");
-    expect(crewCliArgs(base)).not.toContain("--max-budget-usd");
+    expect(crewCliArgs({ ...base, print: true })).not.toContain("--max-budget-usd");
+    // an interactive Claude has no cap to pass
+    expect(crewCliArgs({ ...base, maxBudgetUsd: 12.5 })).not.toContain("--max-budget-usd");
   });
 
   it("resumes with --resume instead of --session-id", () => {
@@ -406,6 +417,10 @@ describe("the allowlist in phase 2b", () => {
       operator: "mcp__mc__operator",
       ghWrite: "mcp__mc__gh_write",
       crewTidy: "mcp__mc__crew_tidy",
+      cmuxSessions: "mcp__mc__cmux_sessions",
+      cmuxSend: "mcp__mc__cmux_send",
+      cmuxOpen: "mcp__mc__cmux_open",
+      setFlightMode: "mcp__mc__set_flight_mode",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit, MC_TOOLS.syncMain]);
   });
@@ -780,6 +795,10 @@ describe("crew constants", () => {
           "operator",
           "gh_write",
           "crew_tidy",
+          "cmux_sessions",
+          "cmux_send",
+          "cmux_open",
+          "set_flight_mode",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -792,7 +811,15 @@ describe("crew constants", () => {
   it("keeps the timeouts and seat states", () => {
     expect(CONTROL_TIMEOUT_MS).toBe(10_000);
     expect(STOP_GRACE_MS).toBe(10_000);
-    expect(SEAT_STATES).toEqual(["idle", "starting", "running", "parked", "stopped", "error"]);
+    expect(SEAT_STATES).toEqual([
+      "idle",
+      "starting",
+      "running",
+      "needs-input",
+      "parked",
+      "stopped",
+      "error",
+    ]);
   });
 });
 
@@ -932,6 +959,10 @@ describe("mc tool grants", () => {
       "operator",
       "gh_write",
       "crew_tidy",
+      "cmux_sessions",
+      "cmux_send",
+      "cmux_open",
+      "set_flight_mode",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual([
       "report_plan",

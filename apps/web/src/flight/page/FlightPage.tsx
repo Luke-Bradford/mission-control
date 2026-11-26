@@ -10,6 +10,7 @@ import { BlockersList } from "./BlockersPanel.tsx";
 import { buildBlockers } from "./blockers.ts";
 import { ControlRoom } from "./ControlRoom.tsx";
 import { DoingNowList, doingLines } from "./DoingNow.tsx";
+import { FlightModeControl } from "./FlightMode.tsx";
 import { StandingOrders } from "./StandingOrders.tsx";
 import { StatusBand } from "./StatusBand.tsx";
 import { MemoryTab, PeopleTab, PlanTab, WatchingTab } from "./Tabs.tsx";
@@ -119,6 +120,7 @@ export function FlightPage() {
         >
           Records
         </a>
+        <FlightModeControl />
         <StandingOrders />
       </div>
       <div className="flight-tabs" role="tablist" aria-label="Flight views">

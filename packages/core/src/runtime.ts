@@ -1,6 +1,7 @@
 import type { CrewMode, LoopKind } from "./runtime-model.ts";
 
 export {
+  CMUX_NEEDS_INPUT_TEXT,
   CODEX_SHELL,
   CREW_MODES,
   type CrewMode,
@@ -101,6 +102,10 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.operator,
   MC_TOOL_NAMES.ghWrite,
   MC_TOOL_NAMES.crewTidy,
+  MC_TOOL_NAMES.cmuxSessions,
+  MC_TOOL_NAMES.cmuxSend,
+  MC_TOOL_NAMES.cmuxOpen,
+  MC_TOOL_NAMES.setFlightMode,
 ];
 
 /**
@@ -1250,7 +1255,9 @@ export interface CrewCliInput {
   sessionId: string;
   /** Passed as `--effort`; absent or null: the CLI's own default. */
   effort?: CrewEffort | null;
-  /** Per-run Claude spend cap, passed as `--max-budget-usd`; absent: no CLI cap. */
+  /** Print mode (`claude -p`, stream-json both ways) for a keeper; absent: interactive, as in cmux. */
+  print?: boolean;
+  /** Per-run Claude spend cap, passed as `--max-budget-usd` in print mode only; absent: no CLI cap. */
   maxBudgetUsd?: number | null;
   /** true: reattach to `sessionId` with `--resume`; false: start it with `--session-id`. */
   resume: boolean;
@@ -1357,16 +1364,13 @@ export function crewCliArgs(i: CrewCliInput): string[] {
   allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
   const profile = i.profile ?? "standard";
   const args = [
-    "-p",
-    "--input-format",
-    "stream-json",
-    "--output-format",
-    "stream-json",
-    "--verbose",
+    ...(i.print
+      ? ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
+      : []),
     "--model",
     i.model,
     ...(i.effort ? ["--effort", i.effort] : []),
-    ...(i.maxBudgetUsd == null ? [] : ["--max-budget-usd", String(i.maxBudgetUsd)]),
+    ...(!i.print || i.maxBudgetUsd == null ? [] : ["--max-budget-usd", String(i.maxBudgetUsd)]),
     ...CREW_ISOLATION_FLAGS.filter((flag) => profile !== "flight-full" || flag !== "--restricted"),
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
     "--settings",
@@ -1441,6 +1445,8 @@ export function crewCliArgs(i: CrewCliInput): string[] {
 export type SessionEvent =
   | { kind: "init"; sessionId: string; model: string | null }
   | { kind: "turn-start" }
+  /** The Claude in cmux waits on the operator: a question or a permission dialog is open. */
+  | { kind: "needs-input" }
   /** A rejected request is not evidence that any executing turn has ended. */
   | { kind: "turn-refused"; active: boolean }
   | { kind: "result"; isError: boolean; stopReason: string | null }
@@ -1468,6 +1474,8 @@ export type SessionEvent =
       reason?: string;
       /** The run did not end on its own (its keeper was lost, or a reattach could not confirm the CLI in time): the supervisor takes it back once instead of failing it. */
       retake?: true;
+      /** A Claude in cmux never came up (or quit before it did) and is gone: the run goes on under a keeper. */
+      startFailed?: true;
     }
   /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
   | { kind: "attached"; awaiting: boolean };

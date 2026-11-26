@@ -26,6 +26,8 @@ export const NotificationPreferencesBody = z.strictObject({
     capcom: z.boolean(),
     awayDigest: z.boolean(),
     quota: z.boolean(),
+    // added after the others: a client or saved choice from before it takes its default (on)
+    checks: z.boolean().default(true),
   }),
   quietHours: z.strictObject({
     start: clockTime,
@@ -63,6 +65,7 @@ const defaultNotificationPreferences = (timezone: string): NotificationPreferenc
     capcom: false,
     awayDigest: true,
     quota: false,
+    checks: true,
   },
   quietHours: { start: "19:00", end: "08:00", timezone, stallsBypass: true },
   softChime: true,
@@ -258,6 +261,11 @@ export class LocalNotifications {
       this.publishing = false;
     }
     return event;
+  }
+
+  /** One notice the hub raises itself (not from an attention item), e.g. a session's failed checks. */
+  notice(category: NotificationCategory, text: string): NotificationEvent | null {
+    return this.emit(category, text);
   }
 
   test(): NotificationEvent {

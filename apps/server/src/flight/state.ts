@@ -129,6 +129,7 @@ import {
   flightWakeWaits,
 } from "./cost.ts";
 import { linkedMemory } from "./memory.ts";
+import { readFlightMode } from "./mode.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
 import { crewSeatIds, flightSeat } from "./seat.ts";
@@ -1486,6 +1487,7 @@ export function flightState(i: {
 
   const planned = flightScheduleView(config, store, now).entries;
   const pace = paceView(store, config, now);
+  const mode = readFlightMode(store);
   // a PR the digest lists already shows a change to its state or head; the pointer is read with the wake, not repeated
   const listedPrs = new Set(prs.map((p) => `${session.repoId}#${p.pr}`));
   const covered = movedAll.filter(
@@ -1520,6 +1522,7 @@ export function flightState(i: {
       now,
     }),
     ...(pace ? { pace } : {}),
+    ...(mode === "crew" ? {} : { mode }),
     instructionRevision: store.instructions.revision(),
     memory: store.flightMemoryTitles(session.repoId),
     retrospective: pendingRetrospective(store, session.repoId, now, tz),

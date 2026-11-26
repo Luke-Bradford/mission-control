@@ -30,12 +30,20 @@ export function stateWord(seat: FlightSeat): string {
     case "running":
     case "starting":
       return "working";
+    case "needs-input":
+      return "needs your input in cmux";
     case "parked":
       return "rate-limited";
     case "error":
       return "error";
-    default:
+    case "stopped":
+    case null:
       return "stopped";
+    default: {
+      // A new SeatState fails the typecheck here rather than reading as stopped.
+      const unhandled: never = seat.state;
+      return unhandled;
+    }
   }
 }
 

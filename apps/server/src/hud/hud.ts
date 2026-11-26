@@ -75,6 +75,7 @@ import {
   type Run,
   type RunDigest,
   runawayTriageDetail,
+  SESSION_NOTE_PREFIX,
   type SeatSessionRow,
   STALL_TEXT,
   seatCallSign,
@@ -279,7 +280,9 @@ function loopViews(
               ? "working"
               : hud === "waiting"
                 ? "waiting-agent"
-                : "idle",
+                : hud === "blocked"
+                  ? "waiting-you"
+                  : "idle",
         stateSince: seatRow?.updatedAt ?? (latest ? (latest.endedAt ?? latest.startedAt) : 0),
         currentRun: latest ? runSummary(latest) : null,
         paused: false,
@@ -1000,12 +1003,17 @@ export const FLIGHT_ASKED_AGAIN =
  */
 export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
+  if (sessionNote(item)) return true;
   // hub alerts the hub puts right itself and tells the operator about: machine capacity, the CLI
   if (HUB_STOP_KEYS.some((k) => item.key === k || item.key.startsWith(`${k}:`))) return true;
   if (item.kind !== "blocked") return false;
   const park = noteParkOf(item, store);
   return park === "budget" || park === "account";
 }
+
+/** Watch mode's note on a cmux session: the operator's own session, so his, never FLIGHT's to triage. */
+const sessionNote = (item: Pick<AttentionItem, "key">): boolean =>
+  item.key.startsWith(`${NOTE_KEY}${SESSION_NOTE_PREFIX}`);
 
 /**
  * Hub alerts that are news about something the hub is putting right, by note key or key prefix:
@@ -1626,6 +1634,7 @@ function buildAttentionItems(
       return { ...item, owner: OWNER_OPERATOR };
     // An Update only a person can run reaches the operator at once, with its reason
     if (i.key === `${NOTE_KEY}${HUB_UPDATE_PERSON_KEY}`) return item;
+    if (sessionNote(i)) return item;
     // The held Update (#1834): FLIGHT's to run in a quiet gap. FLIGHT may hold it on purpose (a
     // seat mid-check, a fix about to merge), so no timer hands it on: it stays FLIGHT's while
     // FLIGHT is triaging, and is the operator's as itself only when FLIGHT is not.

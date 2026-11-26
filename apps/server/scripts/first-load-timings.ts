@@ -27,8 +27,12 @@ import { ChangeBus } from "../src/bus.ts";
 import { type CcConfig, loadConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 
-/** Routes that do not answer once and end: the event stream, and the live update log. */
-const SKIP = new Set(["/api/stream", "/api/update/log"]);
+/**
+ * Routes left out: the event stream and the live update log do not answer once and end, and the
+ * Sessions page's list and its New session form's roles and folders read cmux and roles/ live with
+ * the operator's token, not the database.
+ */
+const SKIP = new Set(["/api/stream", "/api/update/log", "/api/sessions", "/api/sessions/roles"]);
 /** Routes that read config.yaml itself: timed only when --config names one. */
 const CONFIG_FILE_ROUTES = new Set(["/api/config/settings"]);
 /** A request still running after this long is reported, not waited for. */

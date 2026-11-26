@@ -34,9 +34,11 @@ import {
   LOOPBACK_HOST,
   QA_RETENTION_DAYS,
   type RepoId,
+  ROLE_PROMPT_DIR,
   type Run,
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
+import { LocalNotifications } from "./attention/local-notifications.ts";
 import { releaseWaitingOperator } from "./attention/needs-you-actions.ts";
 import { buildAuditPack } from "./audit/pack.ts";
 import { AUDIT_TICK_MS, auditTick } from "./audit/timer.ts";
@@ -91,6 +93,7 @@ import { flightConflicts } from "./flight/conflicts.ts";
 import { renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
 import { MergeConflicts } from "./flight/merge-conflicts.ts";
+import { deliversToFlight, readFlightMode } from "./flight/mode.ts";
 import { operatorCall } from "./flight/operator-call.ts";
 import { createCrewTidy } from "./flight/tidy.ts";
 import { createFlightTools } from "./flight/tools.ts";
@@ -150,12 +153,16 @@ import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
 import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./run/rotating-log.ts";
+import { CMUX_COMMAND, createCmux } from "./runtime/cmux.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { watchPreviewParent } from "./runtime/preview-parent.ts";
 import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
+import { createSessionChecks } from "./sessions/checks.ts";
+import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
+import { createSessionWatch } from "./sessions/watch.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
 import { Store } from "./store.ts";
@@ -680,6 +687,8 @@ export async function main(): Promise<void> {
           log: (line) => log(line),
         });
   const supervisor = createSupervisor({
+    // every Claude seat runs as a cmux workspace the operator can see, type into and clear
+    cmuxCommand: [CMUX_COMMAND],
     auditPack: (seatId) =>
       buildAuditPack({ config, store, busy: supervisor.busy(), now: Date.now(), seatId }),
     flightEnvironment: async () => ({
@@ -791,7 +800,9 @@ export async function main(): Promise<void> {
 
   // The mc tools: commit and push run in the session clone's queue, the one the supervisor's
   // checkouts use. The push and PR scans read the GitHub token afresh for each call.
-  const deliverComms = (seatId: string, _text: string, _from: string): void => {
+  const deliverComms = (seatId: string, _text: string, from: string): void => {
+    // outside crew mode FLIGHT takes only the operator's messages; the rest wait for his next one
+    if (!deliversToFlight(store, config, seatId, from)) return;
     void messageUnpausedSeat(store, supervisor, seatId, "", {
       interrupt: false,
       questions: "none",
@@ -1024,8 +1035,55 @@ export async function main(): Promise<void> {
   // set once the app exists: `mc operator` calls its routes in process
   let hubApp: ReturnType<typeof buildApp> | null = null;
 
+  // Every cmux workspace on this Mac (the Sessions page, and FLIGHT's cmux_sessions and cmux_send).
+  // A preview hub reads them but never tells a session its app stopped.
+  const cmux = createCmux([CMUX_COMMAND], (m) => log(m));
+  const seatIds = () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];
+  const notifications = new LocalNotifications(store, config, bus, Date.now);
+  // An operator session's repo checks when it finishes a piece of work, in a repo he turned on.
+  const sessionChecks = createSessionChecks({
+    cmux,
+    store,
+    seatIds,
+    crewRoots: () => [
+      dirname(dbPath),
+      ...(config.crew === undefined
+        ? []
+        : [
+            config.crew.worktrees,
+            `${config.crew.worktrees}-sessions`,
+            ...config.crew.sessions.map((s) => s.checkout),
+          ]),
+    ],
+    configuredChecks: (github) => [
+      ...(config.repos.find((r) => r.github.toLowerCase() === github.toLowerCase())?.rules
+        ?.checks ?? []),
+    ],
+    notify: (text) => notifications.notice("checks", text),
+    log: (m) => log(m),
+  });
+  const sessions = createSessions({
+    cmux,
+    store,
+    seatIds,
+    checks: sessionChecks,
+    timeZone: () => config.operator.timezone,
+    tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
+    rolesDir: hubRoot === null ? undefined : join(hubRoot, ROLE_PROMPT_DIR),
+    log: (m) => log(m),
+  });
+  // watch mode: the operator is told when a cmux session waits on him or finishes (read live)
+  const sessionWatch = createSessionWatch({
+    sessions,
+    store,
+    bus,
+    mode: () => readFlightMode(store),
+    log: (m) => log(m),
+  });
+
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
+    sessions,
     operator: operatorCall(() => hubApp, operatorToken),
     tidy: crewTidy,
     hudShots,
@@ -1143,6 +1201,9 @@ export async function main(): Promise<void> {
   void flushInstructionNotices({ config, store, bus, supervisor });
 
   const app = buildApp({
+    sessions,
+    sessionChecks,
+    notifications,
     diskUse: hubDiskUse,
     qaReports,
     previews,
@@ -1212,6 +1273,14 @@ export async function main(): Promise<void> {
     return timer;
   };
   if (previewParentTimer !== undefined) trackTimer(previewParentTimer);
+  // a session that names its app is told when it stops answering, whether or not the page is open
+  if (process.env.MC_NO_LOOP_WRITES !== "1")
+    trackTimer(setInterval(() => void sessions.view(), SESSIONS_APP_WATCH_MS)).unref();
+  sessionWatch.start();
+  app.addHook("onClose", async () => sessionWatch.stop());
+  // a preview hub never runs a repo's commands by itself
+  if (process.env.MC_NO_LOOP_WRITES !== "1") sessionChecks.start();
+  app.addHook("onClose", async () => sessionChecks.stop());
   app.addHook("onClose", async () => {
     for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
   });
@@ -1235,6 +1304,7 @@ export async function main(): Promise<void> {
       stopFocusRetry();
       offInstructionNotices();
       flightWatch.stop();
+      sessionWatch.stop();
       engine.stop();
       await scheduler.stop();
     },
