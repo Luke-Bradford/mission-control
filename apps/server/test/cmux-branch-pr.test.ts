@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +16,10 @@ describe("branch pull requests", () => {
     folders.push(folder);
     mkdirSync(join(folder, ".git"));
     writeFileSync(join(folder, ".git", "HEAD"), "ref: refs/heads/feature/2262-cmux-sidebar\n");
-    writeFileSync(join(folder, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:Acme/App.git\n');
+    writeFileSync(
+      join(folder, ".git", "config"),
+      '[remote "origin"]\n\turl = git@github.com:Acme/App.git\n',
+    );
     await expect(gitPlace(folder)).resolves.toEqual({
       branch: "feature/2262-cmux-sidebar",
       github: "acme/app",
@@ -34,7 +37,10 @@ describe("branch pull requests", () => {
     mkdirSync(join(folder, "gitdir"));
     writeFileSync(join(folder, "gitdir", "HEAD"), "f00ba4\n");
     writeFileSync(join(folder, "gitdir", "commondir"), "../common\n");
-    writeFileSync(join(common, "config"), '[remote "origin"]\n\turl = https://github.com/acme/app.git\n');
+    writeFileSync(
+      join(common, "config"),
+      '[remote "origin"]\n\turl = https://github.com/acme/app.git\n',
+    );
     await expect(gitPlace(worktree)).resolves.toEqual({ branch: null, github: "acme/app" });
   });
   it("uses a configured repository's stored open PR without gh", async () => {

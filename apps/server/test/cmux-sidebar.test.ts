@@ -40,7 +40,11 @@ describe("cmux sidebar", () => {
         }),
       }));
       const changed = vi.fn();
-      const events = startCmuxEvents({ cmux: { events: starts }, cursorFile: "/tmp/cursor", onChange: changed });
+      const events = startCmuxEvents({
+        cmux: { events: starts },
+        cursorFile: "/tmp/cursor",
+        onChange: changed,
+      });
       expect(starts).toHaveBeenCalledTimes(1);
       const firstLine = starts.mock.calls[0]?.[1] as (line: string) => void;
       firstLine('{"type":"workspace.created","workspace_id":"new"}');
