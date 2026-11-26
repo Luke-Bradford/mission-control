@@ -1307,7 +1307,6 @@ export async function main(): Promise<void> {
   if (process.env.MC_NO_LOOP_WRITES !== "1")
     trackTimer(setInterval(() => void sessions.view(), SESSIONS_APP_WATCH_MS)).unref();
   if (process.env.MC_NO_LOOP_WRITES !== "1") sessionSidebar.start();
-  if (process.env.MC_NO_LOOP_WRITES !== "1") sessionSidebar.start();
   sessionWatch.start();
   app.addHook("onClose", async () => sessionWatch.stop());
   // a preview hub never runs a repo's commands by itself
