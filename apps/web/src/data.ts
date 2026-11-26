@@ -564,6 +564,7 @@ const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 const readResource = async <T>(path: string): Promise<T> =>
   path === RESOURCES.prFlow.path ||
   path === RESOURCES.sessions.path ||
+  path === RESOURCES.crewApps.path ||
   path === RESOURCES.sessionRoles.path ||
   path === RESOURCES.dependencies.path ||
   /^\/api\/attention\/[^/]+\/materials$/.test(path)
