@@ -74,8 +74,9 @@ export function createSessionSidebar(deps: Deps) {
         }
         const previousState = states.get(row.id);
         const previousAnswer = appAnswers.get(row.id);
+        const app = row.app;
         states.set(row.id, row.state);
-        appAnswers.set(row.id, row.app?.answers ?? null);
+        appAnswers.set(row.id, app?.answers ?? null);
         if (row.owner === "operator" && previousState !== undefined) {
           if (row.state === "waiting" && previousState !== "waiting")
             await mutate(() => deps.cmux.notify(
@@ -89,11 +90,11 @@ export function createSessionSidebar(deps: Deps) {
               SESSION_NOTICE_TITLE.finished,
               `"${row.name}" finished and is idle.`,
             ));
-          else if (previousAnswer === true && row.app?.answers === false)
+          else if (previousAnswer === true && app?.answers === false)
             await mutate(() => deps.cmux.notify(
               row.id,
               SESSION_NOTICE_TITLE.appStopped,
-              `Its app at ${row.app.url} stopped answering.`,
+              `Its app at ${app.url} stopped answering.`,
             ));
         }
         const url = row.pr?.url ?? null;
