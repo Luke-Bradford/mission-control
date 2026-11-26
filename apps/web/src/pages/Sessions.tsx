@@ -194,8 +194,7 @@ function SessionTable({
         <col className="c-folder" />
         <col className="c-state" />
         <col className="c-for" />
-        {/* sessions.css has no rule for it: "~$12.34" in tabular figures plus the cell padding */}
-        <col style={{ width: "clamp(72px, 5.5%, 84px)" }} />
+        <col className="c-today" />
         <col />
         <col className="c-status" />
         <col className="c-app" />
