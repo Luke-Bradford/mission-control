@@ -123,7 +123,9 @@ switch (cmd) {
     };
     state.workspaces ??= [];
     if (!state.hideWorkspaces) state.workspaces.push(ws);
-    if (state.autoClaude) {
+    // Seat workspaces start a shell and become Claude launchers only when a run begins. The
+    // per-run driver passes its generated launcher as a quoted path; do not try to read `zsh`.
+    if (state.autoClaude && ws.command.startsWith("'")) {
       const script = readFileSync(
         ws.command.replace(/^'|'$/g, "").replaceAll("'\\''", "'"),
         "utf8",
