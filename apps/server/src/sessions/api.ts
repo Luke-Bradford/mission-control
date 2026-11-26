@@ -1,20 +1,36 @@
 import {
+  CMUX_WORKSPACE_ID,
   OPERATOR_HEADER,
   SESSION_BUSY_TEXT,
+  SESSION_CHECK_COMMAND_MAX,
+  SESSION_CHECK_COMMANDS_MAX,
+  SESSION_CREW_CHECKS_TEXT,
+  SESSION_NO_CHECKS_TEXT,
   SESSION_TEXT_MAX,
+  SESSION_UNKNOWN_TEXT,
   SESSIONS_CMUX_WRITES_SETTING,
   SESSIONS_OFF_TEXT,
 } from "@mc/core";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppDeps } from "../api.ts";
+import { checkCommand } from "../engine/rule-config.ts";
 import { operatorTokenMatches } from "../operator.ts";
 import { CmuxError } from "../runtime/cmux.ts";
+import { type SessionChecks, SessionChecksError } from "./checks.ts";
 import { SessionError, type SessionsService } from "./sessions.ts";
 
 const SendInput = z.strictObject({ text: z.string().min(1).max(SESSION_TEXT_MAX) });
 const SidebarInput = z.strictObject({ on: z.boolean() });
 const noBody = z.strictObject({}).optional();
+const RepoChecksInput = z.strictObject({
+  repo: z.string().min(1).max(4096),
+  on: z.boolean().optional(),
+  commands: z
+    .array(checkCommand.pipe(z.string().max(SESSION_CHECK_COMMAND_MAX)))
+    .max(SESSION_CHECK_COMMANDS_MAX)
+    .optional(),
+});
 /** Who a write from the page is logged as asked by. */
 const PAGE_ASKER = "operator";
 
@@ -35,8 +51,13 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
     if (!deps.sessions) return reply.code(503).send({ error: SESSIONS_OFF_TEXT });
   };
   const sessions = () => deps.sessions as SessionsService;
+  const checks = (reply: FastifyReply): SessionChecks | null => {
+    if (deps.sessionChecks) return deps.sessionChecks;
+    reply.code(503).send({ error: SESSIONS_OFF_TEXT });
+    return null;
+  };
   const failure = (error: unknown, reply: FastifyReply) => {
-    if (error instanceof SessionError)
+    if (error instanceof SessionError || error instanceof SessionChecksError)
       return reply.code(error.status).send({ error: error.message });
     if (error instanceof CmuxError) return reply.code(503).send({ error: error.message });
     throw error;
@@ -108,4 +129,42 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
       }
     },
   );
+  // Reader: docs/runbooks/cmux-sessions.md#repo-checks (the row's Run checks)
+  api.post<{ Params: { id: string } }>(
+    "/sessions/:id/checks",
+    { preHandler: auth },
+    async (req, reply) => {
+      if (!noBody.safeParse(req.body).success)
+        return reply.code(400).send({ error: "Send an empty object." });
+      if (!CMUX_WORKSPACE_ID.test(req.params.id))
+        return reply.code(404).send({ error: SESSION_UNKNOWN_TEXT });
+      const service = checks(reply);
+      if (service === null) return reply;
+      try {
+        const ran = await service.run(req.params.id);
+        if (ran === "no-checks") return reply.code(400).send({ error: SESSION_NO_CHECKS_TEXT });
+        if (ran === "crew") return reply.code(400).send({ error: SESSION_CREW_CHECKS_TEXT });
+        return { ok: true };
+      } catch (error) {
+        return failure(error, reply);
+      }
+    },
+  );
+  // Reader: docs/runbooks/cmux-sessions.md#repo-checks (a repo's switch and its page commands)
+  api.post("/sessions/checks", { preHandler: auth }, async (req, reply) => {
+    const body = RepoChecksInput.safeParse(req.body);
+    if (!body.success)
+      return reply.code(400).send({
+        error: `Send { repo, on?, commands? }: at most ${SESSION_CHECK_COMMANDS_MAX} commands, each one plain command (no &&, |, ; or line break) of at most ${SESSION_CHECK_COMMAND_MAX} characters.`,
+      });
+    const service = checks(reply);
+    if (service === null) return reply;
+    try {
+      const { repo, ...change } = body.data;
+      service.setRepo(repo, change, PAGE_ASKER);
+      return { ok: true };
+    } catch (error) {
+      return failure(error, reply);
+    }
+  });
 }

@@ -4,8 +4,14 @@ import {
   type CmuxSessionState,
   type CmuxSessionsView,
   type PillTone,
+  SESSION_CHECK_SOURCE_LABEL,
+  SESSION_CHECK_STATE_LABEL,
+  SESSION_NO_CHECKS_TEXT,
   SESSION_TEXT_MAX,
   SESSIONS_REFRESH_MS,
+  type SessionCheck,
+  type SessionCheckState,
+  type SessionRepoChecks,
   sortSessions,
 } from "@mc/core";
 import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useState } from "react";
@@ -25,6 +31,15 @@ const STATE_TONE: Record<CmuxSessionState, PillTone> = {
   working: "ok",
   idle: "neutral",
   "no-agent": "plain",
+};
+
+const CHECK_TONE: Record<SessionCheckState, PillTone> = {
+  passed: "ok",
+  failed: "crit",
+  "timed-out": "warn",
+  running: "neutral",
+  queued: "neutral",
+  stopped: "plain",
 };
 
 const COLUMNS = 9;
@@ -66,6 +81,7 @@ export function Sessions() {
   }, [view]);
   const shown = view?.ok ? view : good;
   const rows = useMemo(() => (shown ? sortSessions(shown.sessions) : []), [shown]);
+  const repos = shown?.repos ?? [];
   const error = view && !view.ok ? view.error : res.error ? res.error.message : null;
   const time = (at: number) => (tz ? clockTime(at, tz) : "—");
   const writesOn = writesOverride ?? sidebar.data?.on ?? true;
@@ -114,9 +130,10 @@ export function Sessions() {
         <p className="sess-note">No cmux workspaces are open.</p>
       ) : (
         <div className="sess-scroll">
-          <SessionTable rows={rows} now={shown.at} />
+          <SessionTable rows={rows} repos={repos} now={shown.at} time={time} />
         </div>
       )}
+      {repos.length > 0 && <RepoChecks repos={repos} />}
       <p className="sess-foot">
         Click a row or press Enter to open it in cmux. The hub never closes a session.
       </p>
@@ -136,7 +153,18 @@ function Summary({ rows }: { rows: readonly CmuxSessionRow[] }) {
   );
 }
 
-function SessionTable({ rows, now }: { rows: readonly CmuxSessionRow[]; now: number }) {
+function SessionTable({
+  rows,
+  repos,
+  now,
+  time,
+}: {
+  rows: readonly CmuxSessionRow[];
+  repos: readonly SessionRepoChecks[];
+  now: number;
+  time: (at: number) => string;
+}) {
+  const named = new Set(repos.filter((r) => r.commands.length > 0).map((r) => r.repo));
   const [writing, setWriting] = useState<string | null>(null);
   // Which rows show their newest inbox message; by id, so a refresh keeps it open.
   const [reading, setReading] = useState<ReadonlySet<string>>(new Set());
@@ -157,6 +185,7 @@ function SessionTable({ rows, now }: { rows: readonly CmuxSessionRow[]; now: num
         <col />
         <col className="c-status" />
         <col className="c-app" />
+        <col className="c-check" />
         <col className="c-act" />
       </colgroup>
       <thead>
@@ -173,8 +202,9 @@ function SessionTable({ rows, now }: { rows: readonly CmuxSessionRow[]; now: num
           <th scope="col">Last line</th>
           <th scope="col">Status</th>
           <th scope="col">App</th>
+          <th scope="col">Checks</th>
           <th scope="col">
-            <span className="sr-only">Write</span>
+            <span className="sr-only">Actions</span>
           </th>
         </tr>
       </thead>
@@ -184,6 +214,8 @@ function SessionTable({ rows, now }: { rows: readonly CmuxSessionRow[]; now: num
             key={r.id}
             row={r}
             now={now}
+            time={time}
+            hasChecks={r.repoKey !== null && named.has(r.repoKey)}
             writing={writing === r.id}
             onWrite={(on) => setWriting(on ? r.id : null)}
             reading={reading.has(r.id)}
@@ -208,6 +240,8 @@ async function post(path: string, body: unknown = {}): Promise<boolean> {
 function SessionRow({
   row: r,
   now,
+  time,
+  hasChecks,
   writing,
   onWrite,
   reading,
@@ -215,6 +249,8 @@ function SessionRow({
 }: {
   row: CmuxSessionRow;
   now: number;
+  time: (at: number) => string;
+  hasChecks: boolean;
   writing: boolean;
   onWrite: (on: boolean) => void;
   reading: boolean;
@@ -287,7 +323,10 @@ function SessionRow({
           {r.status ?? <span className="sess-dash">—</span>}
         </td>
         <td className="sess-app">{r.app ? <AppCell id={r.id} app={r.app} /> : <Dash />}</td>
-        <td>
+        <td className="sess-check">
+          {r.check ? <CheckCell check={r.check} time={time} /> : <Dash />}
+        </td>
+        <td className="sess-acts">
           <button
             type="button"
             className="sess-write"
@@ -301,6 +340,24 @@ function SessionRow({
           >
             Write
           </button>
+          {r.owner === "operator" && (
+            <button
+              type="button"
+              className="sess-run"
+              aria-label={`Run checks for ${r.name}`}
+              title={hasChecks ? "Run this repo's checks now" : SESSION_NO_CHECKS_TEXT}
+              disabled={!hasChecks}
+              onClick={(e) => {
+                e.stopPropagation();
+                void post(ACTIONS.sessionChecks(r.id)).then(
+                  (ok) => ok && toast(`Checks queued for ${r.name}.`),
+                );
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              Run<span className="sess-run-more"> checks</span>
+            </button>
+          )}
         </td>
       </tr>
       {reading && newest && (
@@ -361,6 +418,120 @@ function BranchCell({ row }: { row: CmuxSessionRow }) {
 }
 
 const Dash = () => <span className="sess-dash">—</span>;
+
+function CheckCell({ check, time }: { check: SessionCheck; time: (at: number) => string }) {
+  const title = [check.command, time(check.at)].filter((t) => t !== null && t !== "—").join(" · ");
+  // The detail shows, in full, while the row has keyboard focus; a pointer reads the title.
+  return (
+    <span title={title || undefined}>
+      <Pill tone={CHECK_TONE[check.state]}>{SESSION_CHECK_STATE_LABEL[check.state]}</Pill>
+      {title && <span className="sess-check-detail">{title}</span>}
+    </span>
+  );
+}
+
+/** One line per repo a session of the operator's is in: its switch, its checks and where they come from. */
+function RepoChecks({ repos }: { repos: readonly SessionRepoChecks[] }) {
+  return (
+    <section className="sess-repos" aria-labelledby="sess-repos-title">
+      <h2 id="sess-repos-title">Repo checks</h2>
+      <ul>
+        {repos.map((r) => (
+          <RepoLine key={r.repo} repo={r} />
+        ))}
+      </ul>
+      <p className="sess-hint">
+        Checks run one at a time, at low priority, and stop after 15 minutes. A failure goes to the
+        session and to you.
+      </p>
+    </section>
+  );
+}
+
+function RepoLine({ repo: r }: { repo: SessionRepoChecks }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const editable = r.source === "page" || r.source === null;
+  const commands = r.commands.join(" · ");
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const list = text
+      .split("\n")
+      .map((c) => c.trim())
+      .filter((c) => c !== "");
+    try {
+      await apiPost(ACTIONS.sessionRepoChecks, { repo: r.repo, commands: list });
+      setEditing(false);
+      hub.refetch(RESOURCES.sessions.path);
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <li className="sess-repo">
+      <label className="sess-repo-on">
+        <input
+          type="checkbox"
+          checked={r.on}
+          aria-label={`Run checks when a session finishes in ${r.name}`}
+          onChange={(e) =>
+            void post(ACTIONS.sessionRepoChecks, { repo: r.repo, on: e.target.checked }).then(() =>
+              hub.refetch(RESOURCES.sessions.path),
+            )
+          }
+        />
+        Run checks when a session finishes
+      </label>
+      <b className="sess-repo-name" title={r.repo}>
+        {r.name}
+      </b>
+      <code className="sess-repo-cmds" title={commands || undefined}>
+        {commands || "—"}
+      </code>
+      <span className="sess-repo-src">{SESSION_CHECK_SOURCE_LABEL[r.source ?? "none"]}</span>
+      {editable && !editing && (
+        <button
+          type="button"
+          className="ghost"
+          aria-label={`Edit checks for ${r.name}`}
+          onClick={() => {
+            setText(r.pageCommands.join("\n"));
+            setError(null);
+            setEditing(true);
+          }}
+        >
+          Edit
+        </button>
+      )}
+      {editing && (
+        <form className="sess-repo-edit" onSubmit={(e) => void save(e)}>
+          <textarea
+            // biome-ignore lint/a11y/noAutofocus: the operator just asked to edit here
+            autoFocus
+            rows={3}
+            aria-label={`Checks for ${r.name}, one command a line`}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <button type="submit" className="primary" disabled={busy}>
+            Save
+          </button>
+          <button type="button" className="ghost" onClick={() => setEditing(false)}>
+            Cancel
+          </button>
+          {error && <p className="sess-err">{error}</p>}
+        </form>
+      )}
+    </li>
+  );
+}
 
 function AppCell({ id, app }: { id: string; app: NonNullable<CmuxSessionRow["app"]> }) {
   const [word, tone] =

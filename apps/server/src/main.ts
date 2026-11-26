@@ -37,6 +37,7 @@ import {
   type Run,
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
+import { LocalNotifications } from "./attention/local-notifications.ts";
 import { releaseWaitingOperator } from "./attention/needs-you-actions.ts";
 import { buildAuditPack } from "./audit/pack.ts";
 import { AUDIT_TICK_MS, auditTick } from "./audit/timer.ts";
@@ -157,6 +158,7 @@ import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
+import { createSessionChecks } from "./sessions/checks.ts";
 import { startCmuxEvents } from "./sessions/events.ts";
 import { createBranchPrs } from "./sessions/pr.ts";
 import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
@@ -1032,11 +1034,36 @@ export async function main(): Promise<void> {
   // Every cmux workspace on this Mac (the Sessions page, and FLIGHT's cmux_sessions and cmux_send).
   // A preview hub reads them but never tells a session its app stopped.
   const cmux = createCmux([CMUX_COMMAND], (m) => log(m));
+  const seatIds = () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];
   const branchPrs = createBranchPrs({ store, repos: () => config.repos, gh });
+  const notifications = new LocalNotifications(store, config, bus, Date.now);
+  // An operator session's repo checks when it finishes a piece of work, in a repo he turned on.
+  const sessionChecks = createSessionChecks({
+    cmux,
+    store,
+    seatIds,
+    crewRoots: () => [
+      dirname(dbPath),
+      ...(config.crew === undefined
+        ? []
+        : [
+            config.crew.worktrees,
+            `${config.crew.worktrees}-sessions`,
+            ...config.crew.sessions.map((s) => s.checkout),
+          ]),
+    ],
+    configuredChecks: (github) => [
+      ...(config.repos.find((r) => r.github.toLowerCase() === github.toLowerCase())?.rules
+        ?.checks ?? []),
+    ],
+    notify: (text) => notifications.notice("checks", text),
+    log: (m) => log(m),
+  });
   const sessions = createSessions({
     cmux,
     store,
-    seatIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
+    seatIds,
+    checks: sessionChecks,
     repos: () => config.repos.map((repo) => ({ id: repo.id, github: repo.github })),
     prs: branchPrs,
     tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
@@ -1184,6 +1211,8 @@ export async function main(): Promise<void> {
     onSessionSidebarChange: (on) => {
       if (on) sessionSidebar.reset();
     },
+    sessionChecks,
+    notifications,
     diskUse: hubDiskUse,
     qaReports,
     previews,
@@ -1256,9 +1285,10 @@ export async function main(): Promise<void> {
   // a session that names its app is told when it stops answering, whether or not the page is open
   if (process.env.MC_NO_LOOP_WRITES !== "1")
     trackTimer(setInterval(() => void sessions.view(), SESSIONS_APP_WATCH_MS)).unref();
-  if (process.env.MC_NO_LOOP_WRITES !== "1") {
-    sessionSidebar.start();
-  }
+  if (process.env.MC_NO_LOOP_WRITES !== "1") sessionSidebar.start();
+  // a preview hub never runs a repo's commands by itself
+  if (process.env.MC_NO_LOOP_WRITES !== "1") sessionChecks.start();
+  app.addHook("onClose", async () => sessionChecks.stop());
   app.addHook("onClose", async () => {
     for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
     sessionSidebar.stop();

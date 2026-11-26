@@ -2,6 +2,7 @@
  * The Sessions page: every cmux workspace on this Mac, the operator's own and the crew's, read from
  * cmux with no agent. The hub lists, reads, focuses and writes to them; it never closes one.
  */
+import type { SessionCheck, SessionRepoChecks } from "./session-checks.ts";
 
 /** What a workspace's agent is doing; `no-agent` is a plain shell (or an agent cmux does not know). */
 export const CMUX_SESSION_STATES = ["working", "idle", "waiting", "no-agent"] as const;
@@ -33,6 +34,8 @@ export interface CmuxSessionRow {
   folder: string | null;
   /** The main checkout's folder name of the nearest git repo above `folder`. */
   repo: string | null;
+  /** That repo's main checkout path: the key of its Repo checks line; null outside a repo. */
+  repoKey: string | null;
   state: CmuxSessionState;
   /** When this hub first saw the workspace in `state` (ms). */
   since: number;
@@ -47,10 +50,12 @@ export interface CmuxSessionRow {
   branch?: string | null;
   ticket?: { number: number; repoId: string | null } | null;
   pr?: SessionPr | null;
+  /** The workspace's latest repo check (queued, running or how it ended); null: none this hub run. */
+  check: SessionCheck | null;
 }
 
 export type CmuxSessionsView =
-  | { ok: true; at: number; sessions: CmuxSessionRow[] }
+  | { ok: true; at: number; sessions: CmuxSessionRow[]; repos: SessionRepoChecks[] }
   | { ok: false; at: number; error: string };
 
 /** The status key a session sets to name the app it looks after. */
@@ -95,12 +100,6 @@ export const SESSION_NOTICE_TITLE = {
   checkFailed: "Check failed",
 } as const;
 export type SessionNoticeKind = keyof typeof SESSION_NOTICE_TITLE;
-export interface SessionCheckResult {
-  ok: boolean;
-  command: string | null;
-  at: number;
-}
-
 /** The page's order: waiting, working, idle, no agent; the longest in its state first. */
 const SESSION_ORDER: readonly CmuxSessionState[] = ["waiting", "working", "idle", "no-agent"];
 export function sortSessions(rows: readonly CmuxSessionRow[]): CmuxSessionRow[] {

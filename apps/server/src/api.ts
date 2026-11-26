@@ -450,6 +450,7 @@ import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import { registerSessionRoutes } from "./sessions/api.ts";
+import type { SessionChecks } from "./sessions/checks.ts";
 import type { SessionsService } from "./sessions/sessions.ts";
 import { weeklyProjection } from "./spend/projection.ts";
 import { wasteReport } from "./spend/waste.ts";
@@ -577,6 +578,10 @@ export interface AppDeps {
   sessions?: SessionsService;
   /** Drops remembered cmux sidebar fields after the operator turns their writes back on. */
   onSessionSidebarChange?: (on: boolean) => void;
+  /** Each cmux session's repo checks (the Sessions page's Run checks and Repo checks); absent: 503. */
+  sessionChecks?: SessionChecks;
+  /** The hub's local notifications, shared with services that raise their own (session checks); absent: built here. */
+  notifications?: LocalNotifications;
   attentionMaterials?: AttentionMaterialsService;
   qaReports?: QaReportService;
   /** Moves a card on the board: approving a held plan moves its ticket to Ready; absent: the card stays. */
@@ -1521,7 +1526,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       item: (key) => attentionWithHeld().find((item) => item.key === key) ?? null,
       now,
     });
-  const notifications = new LocalNotifications(store, config, bus, now);
+  const notifications = deps.notifications ?? new LocalNotifications(store, config, bus, now);
   const reconcileNotifications = () => {
     const items = sharedAttention(true);
     // The overview's need history is written here, so GET /overview stays a pure read.

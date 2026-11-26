@@ -2,7 +2,9 @@ import {
   type CmuxSessionRow,
   type CmuxSessionsView,
   SESSION_BUSY_TEXT,
+  SESSION_NO_CHECKS_TEXT,
   SESSIONS_REFRESH_MS,
+  type SessionRepoChecks,
 } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +17,9 @@ const NOW = Date.UTC(2026, 10, 25, 14, 32);
 const MIN = 60_000;
 const PATH = "/api/sessions";
 const SIDEBAR_PATH = "/api/sessions/sidebar";
+
+const SHOP = "/Users/op/Dev/shop-app";
+const MC = "/Users/op/Dev/mission-control";
 
 const ID = {
   pricing: "11111111-1111-4111-8111-111111111111",
@@ -29,12 +34,14 @@ const row = (
   owner: "operator",
   folder: "/Users/op/Dev/shop-app",
   repo: "shop-app",
+  repoKey: SHOP,
   state: "idle",
   since: NOW - 10 * MIN,
   lastLine: null,
   status: null,
   app: null,
   inbox: { unread: 0, newest: null },
+  check: null,
   ...over,
 });
 
@@ -65,6 +72,7 @@ const ROWS: CmuxSessionRow[] = [
     since: NOW - 8 * MIN,
     folder: "/Users/op/Dev/mc-crew/worktrees/mission-control/guido-1-2235",
     repo: "mission-control",
+    repoKey: MC,
     lastLine: "Running the sessions route tests",
   }),
   row({
@@ -74,9 +82,18 @@ const ROWS: CmuxSessionRow[] = [
     since: NOW - 4 * MIN,
     lastLine: "Allow the migration to drop the old price_rules table?",
     status: "Moving prices",
+    check: { state: "failed", at: NOW - 2 * MIN, command: "pnpm -s lint", why: "idle" },
   }),
 ];
-const VIEW: CmuxSessionsView = { ok: true, at: NOW, sessions: ROWS };
+const SHOP_CHECKS: SessionRepoChecks = {
+  repo: SHOP,
+  name: "shop-app",
+  on: false,
+  source: "repo",
+  commands: ["pnpm -s lint", "pnpm -s test"],
+  pageCommands: [],
+};
+const VIEW: CmuxSessionsView = { ok: true, at: NOW, sessions: ROWS, repos: [SHOP_CHECKS] };
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -246,7 +263,7 @@ describe("Sessions page", () => {
   });
 
   it("says when no workspace is open", async () => {
-    const fetch = stubFetch({ [PATH]: { ok: true, at: NOW, sessions: [] } });
+    const fetch = stubFetch({ [PATH]: { ok: true, at: NOW, sessions: [], repos: [] } });
     render(<Sessions />);
     await settled(fetch, PATH);
     expect(screen.getByText("No cmux workspaces are open.")).toBeTruthy();
@@ -285,5 +302,97 @@ describe("Sessions page", () => {
     view.unmount();
     await act(async () => vi.advanceTimersByTime(SESSIONS_REFRESH_MS * 3));
     expect(reads()).toBe(2);
+  });
+
+  it("shows each row's check in words, with its command and time in the title", async () => {
+    const fetch = stubFetch({ [PATH]: VIEW, "/api/config": { operator: { timezone: "UTC" } } });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    await settled(fetch, "/api/config");
+    const failed = within(bodyRows()[0] as HTMLElement).getByText("Failed");
+    expect(failed.closest("[title]")?.getAttribute("title")).toBe("pnpm -s lint · 14:30:00");
+    // no check yet reads as a dash
+    expect(within(bodyRows()[1] as HTMLElement).queryByText("Passed")).toBeNull();
+  });
+
+  it("runs a row's checks from its button, and offers none for a crew row or a repo with none", async () => {
+    const run = vi.fn((_init: RequestInit | undefined) => ({ status: 200, body: { ok: true } }));
+    const none = {
+      ...SHOP_CHECKS,
+      repo: "/Users/op/Dev/empty",
+      name: "empty",
+      source: null,
+      commands: [],
+    };
+    const view: CmuxSessionsView = {
+      ...VIEW,
+      sessions: [
+        ...ROWS,
+        row({
+          id: "55555555-5555-4555-8555-555555555555",
+          name: "notes",
+          repo: "empty",
+          repoKey: none.repo,
+        }),
+      ],
+      repos: [SHOP_CHECKS, none],
+    };
+    const fetch = stubFetch({ [PATH]: view, [`POST ${PATH}/${ID.pricing}/checks`]: run });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    fireEvent.click(screen.getByRole("button", { name: "Run checks for pricing" }));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(run.mock.calls[0]?.[0]?.body))).toEqual({});
+    expect(fetch).not.toHaveBeenCalledWith(`${PATH}/${ID.pricing}/focus`, expect.anything());
+    expect(screen.queryByRole("button", { name: "Run checks for GUIDO-1 · #2235" })).toBeNull();
+    const off = screen.getByRole("button", { name: "Run checks for notes" });
+    expect(off).toHaveProperty("disabled", true);
+    expect(off.getAttribute("title")).toBe(SESSION_NO_CHECKS_TEXT);
+  });
+
+  it("switches a repo's checks on from the Repo checks list, and edits a page list", async () => {
+    let saved: unknown[] = [];
+    const set = vi.fn((init: RequestInit | undefined) => {
+      const body = JSON.parse(String(init?.body));
+      saved = [...saved, body];
+      return body.commands?.includes("a && b")
+        ? { status: 400, body: { error: "One plain command a line." } }
+        : { status: 200, body: { ok: true } };
+    });
+    const page: SessionRepoChecks = {
+      repo: "/Users/op/Dev/notes",
+      name: "notes",
+      on: false,
+      source: null,
+      commands: [],
+      pageCommands: [],
+    };
+    const fetch = stubFetch({
+      [PATH]: { ...VIEW, repos: [SHOP_CHECKS, page] },
+      [`POST ${PATH}/checks`]: set,
+    });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    const list = screen.getByRole("region", { name: "Repo checks" });
+    expect(within(list).getByText("From the repo's Mission Control block")).toBeTruthy();
+    expect(within(list).getByText("No checks named")).toBeTruthy();
+    // the repo's own block is not edited here
+    expect(within(list).getAllByRole("button", { name: /^Edit/ })).toHaveLength(1);
+    fireEvent.click(
+      within(list).getByRole("checkbox", {
+        name: "Run checks when a session finishes in shop-app",
+      }),
+    );
+    await waitFor(() => expect(set).toHaveBeenCalledTimes(1));
+    expect(saved[0]).toEqual({ repo: SHOP, on: true });
+    fireEvent.click(within(list).getByRole("button", { name: "Edit checks for notes" }));
+    const box = within(list).getByRole("textbox", { name: "Checks for notes, one command a line" });
+    fireEvent.change(box, { target: { value: "a && b" } });
+    fireEvent.click(within(list).getByRole("button", { name: "Save" }));
+    expect(await within(list).findByText("One plain command a line.")).toBeTruthy();
+    fireEvent.change(box, { target: { value: "npm test\n\n  npm run lint  \n" } });
+    fireEvent.click(within(list).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(set).toHaveBeenCalledTimes(3));
+    expect(saved[2]).toEqual({ repo: page.repo, commands: ["npm test", "npm run lint"] });
   });
 });

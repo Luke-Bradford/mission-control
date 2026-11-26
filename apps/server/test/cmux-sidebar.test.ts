@@ -7,12 +7,14 @@ const row = (over: Record<string, unknown> = {}) => ({
   owner: "operator" as const,
   folder: null,
   repo: null,
+  repoKey: null,
   state: "working" as const,
   since: 0,
   lastLine: null,
   status: null,
   app: null,
   inbox: { unread: 0, newest: null },
+  check: null,
   branch: "feature/2262-cmux-sidebar",
   ticket: { number: 2262, repoId: "mc" },
   pr: {
@@ -36,7 +38,7 @@ describe("cmux sidebar", () => {
       notify: vi.fn(async () => {}),
     };
     const sidebar = createSessionSidebar({
-      sessions: { view: async () => ({ ok: true as const, at: 0, sessions: current }) },
+      sessions: { view: async () => ({ ok: true as const, at: 0, sessions: current, repos: [] }) },
       cmux,
       store: { getSetting: () => null },
     });
@@ -57,7 +59,7 @@ describe("cmux sidebar", () => {
       notify: vi.fn(),
     };
     const sidebar = createSessionSidebar({
-      sessions: { view: async () => ({ ok: true as const, at: 0, sessions: [row()] }) },
+      sessions: { view: async () => ({ ok: true as const, at: 0, sessions: [row()], repos: [] }) },
       cmux,
       store: { getSetting: () => "off" },
     });
@@ -75,7 +77,9 @@ describe("cmux sidebar", () => {
       notify: vi.fn(async () => {}),
     };
     const sidebar = createSessionSidebar({
-      sessions: { view: async () => ({ ok: true as const, at: 0, sessions: [row({ pr: null })] }) },
+      sessions: {
+        view: async () => ({ ok: true as const, at: 0, sessions: [row({ pr: null })], repos: [] }),
+      },
       cmux,
       store: { getSetting: () => null },
     });
@@ -94,7 +98,12 @@ describe("cmux sidebar", () => {
     };
     const sidebar = createSessionSidebar({
       sessions: {
-        view: async () => ({ ok: true as const, at: 0, sessions: [row({ state: "waiting" })] }),
+        view: async () => ({
+          ok: true as const,
+          at: 0,
+          sessions: [row({ state: "waiting" })],
+          repos: [],
+        }),
       },
       cmux,
       store: { getSetting: () => null },
@@ -117,7 +126,7 @@ describe("cmux sidebar", () => {
       notify: vi.fn(async () => {}),
     };
     const sidebar = createSessionSidebar({
-      sessions: { view: async () => ({ ok: true as const, at: 0, sessions: current }) },
+      sessions: { view: async () => ({ ok: true as const, at: 0, sessions: current, repos: [] }) },
       cmux,
       store: { getSetting: () => null },
       costToday: () => 1.24,
