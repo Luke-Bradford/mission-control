@@ -268,6 +268,7 @@ import {
   claudeConfigDir,
   claudeTranscript,
   cmuxKeeperKey,
+  CMUX_WORKSPACE_PREFIX,
   cmuxSourceKey,
   cmuxWorkspaceKey,
   startCmuxSession,
@@ -353,8 +354,6 @@ const RESUMED = "resumed after a restart; send a message to continue";
 const RESUME_FAILED = "could not resume the session";
 /** How long `stopAll` waits for a Stop's `close` line to reach its keeper's socket. */
 const CLOSE_SENT_WAIT_MS = 1000;
-/** How many of a seat's latest runs a cmux start checks for a workspace still open. */
-const SEAT_WORKSPACE_RUNS = 10;
 const RESUME_MODE_CHANGED = "could not resume: the seat's mode changed";
 /**
  * A resumed process that exits this soon after its spawn failed to resume. The real CLI prints
@@ -994,7 +993,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * ended). False when one is still open: the seat starts nothing beside it.
    */
   async function closeSeatWorkspaces(seatId: string, runId: string): Promise<boolean> {
-    for (const earlier of store.runs(seatId, SEAT_WORKSPACE_RUNS)) {
+    for (const earlier of store.runsWithSettingPrefix(seatId, CMUX_WORKSPACE_PREFIX)) {
       if (earlier.id !== runId && !(await closeWorkspace(earlier.id))) return false;
     }
     return true;

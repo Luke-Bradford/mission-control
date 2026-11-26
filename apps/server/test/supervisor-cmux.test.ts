@@ -412,6 +412,38 @@ describe("a Claude run in cmux", () => {
     expect(store.getSetting(cmuxWorkspaceKey(runId))).toBeNull();
   });
 
+  it("keeps an older saved workspace before opening another one", async () => {
+    const claude = spawn("sleep", ["60"], { stdio: "ignore" });
+    fakeCmux({ claudePid: claude.pid });
+    const { sup } = make({ cmuxState: stateFile() });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(cmuxState().sent).toHaveLength(1));
+    patch((s) => {
+      s.noClose = true;
+      s.claudePid = process.pid;
+    });
+    claude.kill("SIGKILL");
+    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
+
+    // Ten newer keeper runs must not hide the old workspace from a later cmux start.
+    patch((s) => {
+      s.down = true;
+    });
+    for (let n = 0; n < 10; n++) {
+      await sup.startRun("guido-1", 42);
+      await sup.endRun("guido-1");
+    }
+    patch((s) => {
+      s.down = false;
+    });
+
+    await expect(sup.startRun("guido-1", 42)).rejects.toThrow(/earlier cmux workspace/);
+    expect(cmuxState().workspaces).toHaveLength(1);
+    expect(cmuxState().sameName ?? []).toEqual([]);
+  }, 20_000);
+
   it.each([
     ["refuses the hub", { denied: true }],
     ["is down", { down: true }],

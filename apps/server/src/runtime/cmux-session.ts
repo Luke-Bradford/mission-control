@@ -32,7 +32,8 @@ import { pidAlive } from "./keeper.ts";
 import { type CrewSession, SessionControlError } from "./session.ts";
 
 /** The hub's record of a run's workspace: `{"workspace": uuid, "pid": n | null}`. */
-export const cmuxWorkspaceKey = (runId: string) => `cmux.workspace:${runId}`;
+export const CMUX_WORKSPACE_PREFIX = "cmux.workspace:";
+export const cmuxWorkspaceKey = (runId: string) => `${CMUX_WORKSPACE_PREFIX}${runId}`;
 /** How far the hub has read Claude's transcript for a run, kept after its workspace closes (a resume needs it). */
 export const cmuxSourceKey = (runId: string) => `cmux.source:${runId}`;
 /** Set while a Claude run is on the keeper because cmux was down or refused the hub at its start. */
