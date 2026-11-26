@@ -33,6 +33,9 @@ from an existing one.
 
 ## Install
 
+For a Mac that only needs its own cmux sessions (no GitHub, repositories, loops or crew), follow
+`docs/runbooks/work-mac.md` instead.
+
 Requires Node 26 or later and pnpm. Run these from the repo root:
 
 ```sh

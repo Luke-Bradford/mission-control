@@ -1,4 +1,13 @@
-import type { AttentionItem, ConfigView, Crew } from "@mc/core";
+import {
+  type AttentionItem,
+  type ConfigView,
+  type Crew,
+  homePath,
+  needsRepo,
+  REPO_REQUIRED_LINK,
+  REPO_REQUIRED_TEXT,
+  type RepoView,
+} from "@mc/core";
 import {
   lazy,
   Profiler,
@@ -28,6 +37,7 @@ import {
   PAGE_PATHS,
   type Route,
   route,
+  setupPath,
   tabOf,
   usePath,
   useSearch,
@@ -143,6 +153,15 @@ function Shell({
   useEffect(() => {
     if (moved) navigate(moved, { replace: true });
   }, [moved]);
+  // A hub with no repository (sessions only) opens on Sessions: the Overview is the crew's.
+  const repoCount = useResource<RepoView[]>(RESOURCES.repos).data?.length;
+  const home =
+    r?.page === "overview" && repoCount !== undefined && homePath(repoCount) !== path
+      ? homePath(repoCount)
+      : null;
+  useEffect(() => {
+    if (home) navigate(home, { replace: true });
+  }, [home]);
   const shown: Route = r ?? { page: "overview" };
   const notFound = r === null && moved === null;
   useShellKeys(shown, popout);
@@ -282,6 +301,28 @@ function titleFor(current: Route): string {
   return PAGE_TITLES[current.page];
 }
 
+/** A page that reads a repository's board, on a hub with none set up (a sessions-only hub). */
+function RepoRequired({ title }: { title: string }) {
+  const [lead] = REPO_REQUIRED_TEXT.split(REPO_REQUIRED_LINK);
+  const to = setupPath("repos");
+  return (
+    <section id="page-repo-required" className="panel" aria-labelledby="repo-required-heading">
+      <div className="ph">
+        <h1 id="repo-required-heading">{title}</h1>
+      </div>
+      <div className="pb">
+        <p>
+          {lead}
+          <a href={to} onClick={(e) => followLink(e, to)}>
+            {REPO_REQUIRED_LINK}
+          </a>
+          .
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function NotFound() {
   return (
     <section id="page-not-found" className="panel" aria-labelledby="not-found-heading">
@@ -355,6 +396,8 @@ function useItemUrl(popout: boolean) {
 }
 
 function PageView({ route: r }: { route: Route }) {
+  const repos = useResource<RepoView[]>(RESOURCES.repos).data;
+  if (repos?.length === 0 && needsRepo(tabOf(r))) return <RepoRequired title={titleFor(r)} />;
   let page: ReactNode;
   switch (r.page) {
     case "overview":

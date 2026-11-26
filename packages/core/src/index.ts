@@ -38,6 +38,7 @@ export * from "./prompt-cost.ts";
 export * from "./qa-flow.ts";
 export * from "./qa-history.ts";
 export * from "./qa-report.ts";
+export * from "./repo-pages.ts";
 export * from "./repo-rules.ts";
 export * from "./repo-rules-view.ts";
 export * from "./repos.ts";
