@@ -140,6 +140,7 @@ import {
   SESSION_NOT_ASKED_TEXT,
   SESSION_OPEN_NOT_ON_CALL_TEXT,
   type SeatSessionRow,
+  seatStartNotCrewText,
   smallNoPlanText,
   startMissingNeedsText,
   type TestLockState,
@@ -2218,6 +2219,20 @@ describe("start_seat", () => {
     board(sc(7));
     fetchImpl = async (n) => ticket(n, { body: DONE });
   });
+
+  it.each(["watch", "on-call"] as const)(
+    "starts no seat in %s mode; crew mode starts it again",
+    async (mode) => {
+      store.setSetting(FLIGHT_MODE_SETTING, mode);
+      const held = await start();
+      expect(held.isError).toBe(true);
+      expect(held.text).toBe(seatStartNotCrewText(mode));
+      expect(startCalls).toEqual([]);
+      store.setSetting(FLIGHT_MODE_SETTING, "crew");
+      expect((await start()).isError).toBeUndefined();
+      expect(startCalls).toHaveLength(1);
+    },
+  );
 
   it("holds a start for the slow pace, naming it, and starts a ticket it names", async () => {
     store.setSetting(

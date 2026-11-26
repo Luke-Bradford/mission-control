@@ -64,13 +64,29 @@ describe("opening a session", () => {
     writeFileSync(join(dir, "s.zsh"), script);
     // the script is POSIX: /bin/sh runs it on CI's Linux, which has no zsh
     const printed = execFileSync("/bin/sh", [join(dir, "s.zsh")]).toString();
-    expect(printed.split("\n").slice(0, 3)).toEqual([
+    expect(printed.split("\n").slice(0, 4)).toEqual([
       "--append-system-prompt",
       "role 'r'",
+      "--",
       message,
     ]);
     expect(existsSync(join(dir, "x"))).toBe(false);
     expect(Number(readFileSync(join(dir, "pid"), "utf8"))).toBeGreaterThan(0);
+  });
+
+  it("a first message that looks like an option comes after --, so Claude reads it as the prompt", () => {
+    const script = sessionScript({
+      rolePrompt: "r",
+      message: "--version",
+      pidFile: join(dir, "pid"),
+    }).replace(/^exec 'claude'/m, `exec printf '%s\\n'`);
+    writeFileSync(join(dir, "s.zsh"), script);
+    const printed = execFileSync("/bin/sh", [join(dir, "s.zsh")])
+      .toString()
+      .split("\n");
+    // everything after the first -- is positional: the message is the prompt, never a flag
+    expect(printed.slice(0, 4)).toEqual(["--append-system-prompt", "r", "--", "--version"]);
+    expect(printed.indexOf("--")).toBe(2);
   });
 
   it("opens a workspace in the folder with the role's prompt and the first message", async () => {
@@ -84,7 +100,7 @@ describe("opening a session", () => {
     expect(opened[0]?.cwd).toBe(dir);
     expect(opened[0]?.name).not.toContain(" · ");
     const script = scriptOf(opened[0]?.command ?? "");
-    expect(script).toContain("'--append-system-prompt' 'You are GUIDO.' 'Fix the login test'");
+    expect(script).toContain("'--append-system-prompt' 'You are GUIDO.' '--' 'Fix the login test'");
     expect(store.hubEvents(0).map((e) => e.text)).toEqual([
       `Opened cmux session "${r.name}" in ${dir} as GUIDO, asked by operator`,
     ]);

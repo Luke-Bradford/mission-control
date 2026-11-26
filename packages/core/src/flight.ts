@@ -141,6 +141,9 @@ export interface OpenSessionInput {
   /** Default `<folder name> (<ROLE>)`. */
   name?: string;
 }
+/** start_seat outside crew mode: the operator chose a mode where no seat takes work. */
+export const seatStartNotCrewText = (mode: FlightMode): string =>
+  `No seat starts in ${FLIGHT_MODE_LABEL[mode]} mode; only Crew mode starts seats.`;
 export const SESSION_OPEN_NOT_ON_CALL_TEXT = "FLIGHT opens sessions only in on-call mode.";
 export const SESSION_FOLDER_TEXT = "folder must be an existing absolute folder.";
 export const SESSION_ROLE_TEXT = "role must name a file in roles/.";

@@ -1397,7 +1397,7 @@ use, so a change applies at once, with no restart. Each change adds the hub even
 | `on-call` | no | only an operator message |
 
 Outside crew mode, runs already under way carry on; no seat takes a new ticket (`seatMayTake` and
-`takeNext`). The wake facts are cut to `operator`, `owed` and `breaker`, and a FLIGHT that is not
+`takeNext`), and FLIGHT's `start_seat` refuses every start. The wake facts are cut to `operator`, `owed` and `breaker`, and a FLIGHT that is not
 running starts only for an unread operator message. A seat's Comms message to FLIGHT stays unread
 until the operator's next message wakes it. A missing or unreadable setting reads as `crew`.
 
@@ -1414,7 +1414,8 @@ Sessions page's New session button: a plain Claude session under the operator's 
 seat environment and no sandbox. It runs in an existing absolute folder, or with "Fresh worktree" in
 `<repo>-sessions/<role>-<YYYYMMDD-HHmmss>` beside the repo's top folder, on a new
 `session/<role>-<YYYYMMDD-HHmmss>` branch from `origin/HEAD` (no fetch first). The role is a file in
-`roles/`, passed with `--append-system-prompt`; the first message is Claude's opening prompt. The name
+`roles/`, passed with `--append-system-prompt`; the first message is Claude's opening prompt, after `--`, so a
+message that starts with `-` is never read as an option. The name
 defaults to `<folder name> (<ROLE>)` and never holds a seat's ` · `, so the Sessions page lists it as
 the operator's. The hub event `Opened cmux session "<name>" in <folder> as <ROLE>, asked by <who>`
 logs each one; the message is not logged. A bad folder or role, or a git failure, is a 400; a cmux

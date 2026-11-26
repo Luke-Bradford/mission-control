@@ -285,6 +285,7 @@ import {
   seatCallSign,
   seatDef,
   seatHasRunText,
+  seatStartNotCrewText,
   sentText,
   smallNoPlanText,
   startedDecision,
@@ -1597,6 +1598,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const c = flightCall(deps, ctx, StartSeatArgs, args);
     if (!c.ok) return c.result;
     const { seat, issue, basis } = c.args;
+    // watch and on-call: no seat takes new work; runs under way carry on
+    const mode = readFlightMode(store);
+    if (mode !== "crew") return fail(seatStartNotCrewText(mode));
     const override: ProfileOverride | undefined =
       c.args.profile !== undefined && c.args.profile_reason !== undefined
         ? { profile: c.args.profile, reason: c.args.profile_reason, by: "FLIGHT" }

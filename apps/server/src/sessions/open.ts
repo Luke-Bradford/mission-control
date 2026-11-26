@@ -61,7 +61,8 @@ const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
 /**
  * The script the workspace runs: cmux's shim stays first on PATH, so it wraps `claude` with its
  * hooks; the script's pid, which the exec makes Claude's, goes to `pidFile`. Every argument is
- * quoted, so the role and message reach Claude as they are.
+ * quoted, so the role and message reach Claude as they are; `--` ends the options, so a message
+ * that starts with `-` is still the prompt.
  */
 export function sessionScript(i: {
   rolePrompt: string;
@@ -74,7 +75,7 @@ export function sessionScript(i: {
     "#!/bin/zsh",
     `export PATH="\${CMUX_CLAUDE_WRAPPER_SHIM_ROOT:+$CMUX_CLAUDE_WRAPPER_SHIM_ROOT:}"${quote(nodeDir)}":$PATH"`,
     `echo $$ > ${quote(i.pidFile)}`,
-    `exec ${["claude", "--append-system-prompt", i.rolePrompt, i.message].map(quote).join(" ")}`,
+    `exec ${["claude", "--append-system-prompt", i.rolePrompt, "--", i.message].map(quote).join(" ")}`,
     "",
   ].join("\n");
 }
