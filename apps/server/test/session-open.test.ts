@@ -62,7 +62,8 @@ describe("opening a session", () => {
       // print each argument on its own line in place of running claude
       .replace(/^exec 'claude'/m, `exec printf '%s\\n'`);
     writeFileSync(join(dir, "s.zsh"), script);
-    const printed = execFileSync("/bin/zsh", [join(dir, "s.zsh")]).toString();
+    // the script is POSIX: /bin/sh runs it on CI's Linux, which has no zsh
+    const printed = execFileSync("/bin/sh", [join(dir, "s.zsh")]).toString();
     expect(printed.split("\n").slice(0, 3)).toEqual([
       "--append-system-prompt",
       "role 'r'",
