@@ -171,7 +171,6 @@ const metrics = (page: RenderedPage) =>
           [
             "#page-sessions tr.sess-row .pill",
             "#page-sessions .sess-ans",
-            "#page-sessions .sess-applink",
             "#page-sessions .sess-tag",
             "#page-sessions .sess-inbox",
             "#page-sessions .sess-prline > a",
@@ -455,6 +454,7 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
               answerClipped: clipped(row.querySelector<HTMLElement>(".sess-ans") as HTMLElement),
               detailText: detail?.textContent ?? "",
               detailHeight: detail?.firstElementChild?.getBoundingClientRect().height ?? 0,
+              rowHeight: row.getBoundingClientRect().height,
             };
           }, LONG_REPO);
         try {
@@ -472,12 +472,12 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
           m = await cells();
           await capture(page, `sessions-1280x800-${scheme}-long-folder-app-focused`);
           expect(m.linkText).toBe(LONG_URL.replace("http://", ""));
-          expect(m.linkClipped).toBe(false);
           expect(m.answerClipped).toBe(false);
           expect(m.detailText).toContain(LONG_FOLDER.replace("/Users/op", "~"));
           expect(m.detailText).toContain(LONG_REPO);
           expect(m.detailText).toContain(LONG_URL.replace("http://", ""));
           expect(m.detailHeight).toBeLessThanOrEqual(96);
+          expect(m.rowHeight).toBeLessThanOrEqual(40);
           const layout = await metrics(page);
           expect(layout.clippedHeadings).toEqual([]);
           expect(layout.clippedLabels).toEqual([]);

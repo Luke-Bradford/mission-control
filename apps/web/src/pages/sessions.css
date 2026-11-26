@@ -600,27 +600,24 @@ button.sess-inbox[aria-expanded="true"] {
   outline-offset: -2px;
 }
 
-/* Keyboard reaches every cut-short value: a row focused from the keyboard unwraps the name, folder
-   and repo, last line, status and app address. The name wraps beside or over its tags, which never
-   shrink; the address wraps above its answer word. Paths and addresses have no spaces, so they
-   break anywhere. Keyboard focus only: a mouse press on Write would otherwise grow the row under
-   the pointer, and the click would land on the row instead. */
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-last,
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-status {
+/* Keyboard focus on the row itself reveals cut-short text. A focused row control keeps the row
+   compact; its own disclosure supplies any long detail. */
+.sess-row:focus-visible .sess-last,
+.sess-row:focus-visible .sess-status {
   white-space: normal;
 }
 
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-name,
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-applink {
+.sess-row:focus-visible .sess-name,
+.sess-row:focus-visible .sess-applink {
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-applink {
+.sess-row:focus-visible .sess-applink {
   text-align: left;
 }
 
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-check-detail {
+.sess-row:focus-visible .sess-check-detail {
   display: block;
   white-space: normal;
   overflow-wrap: anywhere;
