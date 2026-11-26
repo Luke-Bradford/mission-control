@@ -82,11 +82,15 @@ describe("cmux sidebar", () => {
     await view();
     open = true;
     applyCmuxSessionEvent({ sessions: { invalidate }, bus, sidebar });
-    await vi.waitFor(async () => expect((await view()).sessions).toHaveLength(1), { timeout: 2000 });
+    await vi.waitFor(async () => expect((await view()).sessions).toHaveLength(1), {
+      timeout: 2000,
+    });
     expect(emitted).toHaveBeenCalledWith("sessions");
     open = false;
     applyCmuxSessionEvent({ sessions: { invalidate }, bus, sidebar });
-    await vi.waitFor(async () => expect((await view()).sessions).toHaveLength(0), { timeout: 2000 });
+    await vi.waitFor(async () => expect((await view()).sessions).toHaveLength(0), {
+      timeout: 2000,
+    });
   });
 
   it("writes a pull request and only changed CI state", async () => {
