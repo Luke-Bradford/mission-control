@@ -8,7 +8,14 @@ import {
   SESSIONS_REFRESH_MS,
   sortSessions,
 } from "@mc/core";
-import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
@@ -243,6 +250,7 @@ function SessionRow({
                       onRead();
                     }}
                     onKeyDown={(e) => e.stopPropagation()}
+                    onMouseDown={keepRowStill}
                   >
                     {r.inbox.unread} unread
                   </button>
@@ -300,6 +308,7 @@ function SessionRow({
               onWrite(!writing);
             }}
             onKeyDown={(e) => e.stopPropagation()}
+            onMouseDown={keepRowStill}
           >
             Write
           </button>
@@ -316,6 +325,12 @@ function SessionRow({
     </>
   );
 }
+
+/**
+ * A row's button takes no focus from the mouse: a focused row wraps its last line and grows, which
+ * would move the button between press and release and turn the click into a click on the row.
+ */
+const keepRowStill = (e: MouseEvent) => e.preventDefault();
 
 const Dash = () => <span className="sess-dash">—</span>;
 
@@ -338,6 +353,7 @@ function AppCell({ id, app }: { id: string; app: NonNullable<CmuxSessionRow["app
           void post(ACTIONS.sessionApp(id));
         }}
         onKeyDown={(e) => e.stopPropagation()}
+        onMouseDown={keepRowStill}
       >
         {shortUrl(app.url)}
       </button>

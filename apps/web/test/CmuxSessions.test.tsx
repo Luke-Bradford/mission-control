@@ -168,9 +168,12 @@ describe("Sessions page", () => {
     const fetch = stubFetch({ [PATH]: VIEW, [`POST ${PATH}/${ID.pricing}/send`]: send });
     render(<Sessions />);
     await settled(fetch, PATH);
-    fireEvent.click(
-      within(bodyRows()[0] as HTMLElement).getByRole("button", { name: "Write to pricing" }),
-    );
+    const write = within(bodyRows()[0] as HTMLElement).getByRole("button", {
+      name: "Write to pricing",
+    });
+    // A press takes no focus, so the row never grows and moves the button before the release.
+    expect(fireEvent.mouseDown(write)).toBe(false);
+    fireEvent.click(write);
     const box = screen.getByRole("textbox", { name: "Write to pricing" });
     fireEvent.change(box, { target: { value: "yes" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
