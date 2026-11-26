@@ -172,6 +172,7 @@ import { crewDir } from "./store/crew-paths.ts";
 import { Store } from "./store.ts";
 import { hubFileServiceRestart } from "./telemetry/file-service-restart.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
+import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import {
   commitsOf,
   createAutoUpdate,
@@ -1235,6 +1236,7 @@ export async function main(): Promise<void> {
     tmp: tmpdir(),
   };
   let leftoverFootprint: ReturnType<typeof crewLeftoverFootprint> | null = null;
+  let crewTranscriptFootprint: ReturnType<typeof transcriptFootprint> = null;
   const app = buildApp({
     sessions,
     onSessionSidebarChange: (on) => {
@@ -1244,6 +1246,7 @@ export async function main(): Promise<void> {
     notifications,
     diskUse: hubDiskUse,
     leftoverFootprint: () => leftoverFootprint,
+    transcriptFootprint: () => crewTranscriptFootprint,
     qaReports,
     previews,
     previewRepoId,
@@ -1541,6 +1544,7 @@ export async function main(): Promise<void> {
         crewLeftovers: crewLeftoverPaths,
       }))
         log(`leftovers: ${text}`);
+      crewTranscriptFootprint = transcriptFootprint(store);
       leftoverFootprint = crewLeftoverFootprint(crewLeftoverPaths);
       const previewsClosed = await closeFinishedPreviews({ previews, store, config });
       if (previewsClosed > 0) log(`leftovers: removed ${previewsClosed} finished preview(s)`);

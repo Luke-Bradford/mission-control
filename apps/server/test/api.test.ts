@@ -3269,7 +3269,7 @@ describe("GET /api/machine", () => {
     expect(r.json()).toMatchObject({ maxSeats: 8, seats: 4, perSessionMax: 3 });
   });
 
-  it("carries the crew folder transcript footprint", async () => {
+  it("returns a supplied transcript footprint without reading transcript files", async () => {
     const crew = join(dir, "crew");
     mkdirSync(crew);
     const path = (id: string, suffix = ".jsonl") => join(crew, `${id}${suffix}`);
@@ -3285,7 +3285,20 @@ describe("GET /api/machine", () => {
     writeFileSync(join(crew, "r3.prompt.md"), Buffer.alloc(7));
     const oldest = NOW - 5 * DAY;
     utimesSync(path("r3"), new Date(oldest), new Date(oldest));
-    expect((await get("/api/machine")).json().transcripts).toEqual({
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      transcriptFootprint: () => ({
+        totalBytes: 157,
+        seats: [
+          { seatId: "a-1", bytes: 140, files: 2 },
+          { seatId: "b-1", bytes: 10, files: 1 },
+        ],
+        oldestAt: oldest,
+      }),
+    });
+    expect((await a.inject("/api/machine")).json().transcripts).toEqual({
       totalBytes: 157,
       seats: [
         { seatId: "a-1", bytes: 140, files: 2 },
@@ -3293,6 +3306,17 @@ describe("GET /api/machine", () => {
       ],
       oldestAt: oldest,
     });
+    await a.close();
+  });
+
+  it("does not read transcript files on a Machine request without a snapshot", async () => {
+    const crew = join(dir, "crew");
+    mkdirSync(crew);
+    const path = join(crew, "r1.jsonl");
+    store.upsertRun(run({ id: "r1", agentId: "a-1", transcriptPath: path, endedAt: NOW, status: "ok" }));
+    writeFileSync(path, Buffer.alloc(100));
+
+    expect((await get("/api/machine")).json().transcripts).toBeNull();
   });
 
   it("returns the scheduled cleanup-store snapshot without measuring files", async () => {

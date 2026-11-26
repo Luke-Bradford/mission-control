@@ -463,7 +463,6 @@ import { metricsView } from "./telemetry/metrics.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./telemetry/pace.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry/telemetry.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
-import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import {
   CREW_STATE_UNREADABLE,
   createHeldUpdateNote,
@@ -608,6 +607,8 @@ export interface AppDeps {
   reviewShots?: HudShotStore;
   /** A scheduled snapshot of crew cleanup stores; it is never measured while answering a request. */
   leftoverFootprint?: () => MachineView["leftovers"];
+  /** A scheduled snapshot of crew transcript storage; it is never measured while answering a request. */
+  transcriptFootprint?: () => MachineView["transcripts"];
   queueReorder?: QueueReorderDeps;
   config: CcConfig;
   /** Cached Codex model catalogs, isolated by each account's CLI binding. */
@@ -1027,10 +1028,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       now: deps.now,
     });
   const now = deps.now ?? Date.now;
-  let transcriptFootprintCache: {
-    at: number;
-    value: ReturnType<typeof transcriptFootprint>;
-  } | null = null;
   /** Audit views by range: served while younger than AUDIT_CACHE_MS, then refreshed behind the reply. */
   const auditCache = new Map<
     string,
@@ -4244,15 +4241,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: docs/runbook.md#spend-report (spend per merged change and the building share; the Audit page reads it)
       api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));
       api.get("/machine", async (): Promise<MachineView> => {
-        const cached = transcriptFootprintCache;
-        const footprint =
-          cached !== null && now() - cached.at < 60_000
-            ? cached.value
-            : (() => {
-                const value = transcriptFootprint(store);
-                transcriptFootprintCache = { at: now(), value };
-                return value;
-              })();
         const sessions = config.crew?.sessions ?? [];
         const counts = sessions.map((s) => s.seats.length);
         const latest = machine();
@@ -4264,7 +4252,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           maxSeats: config.crew?.maxSeats ?? DEFAULT_MAX_SEATS,
           seats: counts.reduce((a, b) => a + b, 0),
           perSessionMax: Math.max(0, ...counts),
-          transcripts: footprint,
+          transcripts: deps.transcriptFootprint?.() ?? null,
           leftovers: deps.leftoverFootprint?.() ?? null,
         };
       });
