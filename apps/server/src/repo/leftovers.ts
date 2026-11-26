@@ -2,7 +2,7 @@ import { type BoardItem, liftPark } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { endedWorkOver, runSubjectGone } from "../hud/hud.ts";
 import type { Store } from "../store.ts";
-import { cleanupCrewLeftovers, type CrewLeftoverInput } from "./crew-leftovers.ts";
+import { type CrewLeftoverInput, cleanupCrewLeftovers } from "./crew-leftovers.ts";
 
 /** How often the hub clears leftovers; the pass is idempotent, so a missed or repeated one is harmless. */
 export const LEFTOVERS_EVERY_MS = 60 * 60_000;
