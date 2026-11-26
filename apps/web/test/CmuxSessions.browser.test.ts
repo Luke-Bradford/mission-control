@@ -60,6 +60,15 @@ function row(i: number, long: boolean): CmuxSessionRow {
         : i === 1
           ? { state: "running", at: NOW - MIN, command: "pnpm test", why: "operator" }
           : null,
+    branch: `feature/${2262 + i}-cmux-sidebar-${"review-state-".repeat(3)}`,
+    ticket: { number: 2262 + i, repoId: crew ? "mission-control" : "shop-app" },
+    pr: {
+      number: 2258 + i,
+      url: `https://github.com/acme/${crew ? "mission-control" : "shop-app"}/pull/${2258 + i}`,
+      isDraft: false,
+      ci: i % 3 === 0 ? "pending" : i % 3 === 1 ? "passing" : "failing",
+      review: i % 3 === 0 ? "requested" : i % 3 === 1 ? "approved" : "changes",
+    },
   };
 }
 
@@ -120,7 +129,7 @@ const metrics = (page: RenderedPage) =>
     const visible = rows.filter((r) => r.getBoundingClientRect().bottom <= innerHeight);
     const small = [
       ...document.querySelectorAll<HTMLElement>(
-        "#page-sessions button, #page-sessions tr.sess-row",
+        "#page-sessions button, #page-sessions tr.sess-row, #page-sessions .sess-sidebar-toggle",
       ),
     ]
       .map((e) => e.getBoundingClientRect())
@@ -128,6 +137,15 @@ const metrics = (page: RenderedPage) =>
     const last = document.querySelector<HTMLElement>("#page-sessions .sess-last");
     const page = document.querySelector<HTMLElement>("#page-sessions") as HTMLElement;
     const dock = document.querySelector<HTMLElement>("#dock");
+    const clipped = (el: HTMLElement) => {
+      const cs = getComputedStyle(el);
+      const b = el.getBoundingClientRect();
+      const right = b.right - Number.parseFloat(cs.paddingRight) + 0.5;
+      return (
+        el.scrollWidth > el.clientWidth ||
+        (el.firstElementChild?.getBoundingClientRect().right ?? 0) > right
+      );
+    };
     return {
       docWidth: document.documentElement.scrollWidth,
       docHeight: document.documentElement.scrollHeight,
@@ -141,6 +159,15 @@ const metrics = (page: RenderedPage) =>
       pageBottom: page.getBoundingClientRect().bottom,
       dockLeft: dock?.getBoundingClientRect().left ?? null,
       pageRight: page.getBoundingClientRect().right,
+      clippedHeadings: [...document.querySelectorAll<HTMLElement>("#page-sessions th")]
+        .filter((el) => !el.querySelector(".sr-only"))
+        .filter(clipped)
+        .map((el) => el.textContent),
+      clippedAges: [
+        ...document.querySelectorAll<HTMLElement>("#page-sessions tr.sess-row td.num[title]"),
+      ]
+        .filter((el) => el.scrollWidth > el.clientWidth)
+        .map((el) => el.textContent),
       // Words that must read whole: each state pill, owner tag, unread control and each app's
       // address and health, inside
       // their own box and inside their cell's content box.
@@ -149,9 +176,11 @@ const metrics = (page: RenderedPage) =>
           [
             "#page-sessions tr.sess-row .pill",
             "#page-sessions .sess-ans",
-            "#page-sessions .sess-applink",
             "#page-sessions .sess-tag",
             "#page-sessions .sess-inbox",
+            "#page-sessions .sess-prline > a",
+            "#page-sessions .sess-prline > span",
+            "#page-sessions .sess-acts button",
           ].join(", "),
         ),
       ]
@@ -255,6 +284,8 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
             // The question's answer: every one of six sessions on the first screen.
             if (height >= 900) expect(m.firstScreen).toBe(6);
             for (const h of m.rowHeights) expect(h).toBeLessThanOrEqual(40);
+            expect(m.clippedHeadings).toEqual([]);
+            expect(m.clippedAges).toEqual([]);
             expect(m.clippedLabels).toEqual([]);
             expect(m.small).toBe(0);
             // The long last line is cut with an ellipsis and its full text stays in the title.
@@ -269,6 +300,53 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
         },
         BROWSER_TEST_TIMEOUT_MS,
       );
+
+  for (const scheme of ["light", "dark"] as const)
+    it(
+      `reads a long branch in full from the keyboard at 1280×800 in ${scheme}`,
+      async () => {
+        const page = await open(1280, 800, scheme, view(6, true));
+        try {
+          const branch = await page.evaluate(() => {
+            const button = document.querySelector<HTMLElement>(
+              ".sess-branch-toggle",
+            ) as HTMLElement;
+            return button.textContent ?? "";
+          }, undefined);
+          let open = false;
+          for (let i = 0; i < 80 && !open; i++) {
+            await page.press("Tab");
+            open = await page.evaluate(
+              () => document.activeElement?.classList.contains("sess-branch-toggle") ?? false,
+              undefined,
+            );
+          }
+          expect(open).toBe(true);
+          await page.press("Enter");
+          const detail = await page.evaluate(() => {
+            const button = document.activeElement as HTMLElement;
+            const panel = document.getElementById(button.getAttribute("aria-controls") ?? "");
+            const row = button.closest("tr") as HTMLElement;
+            return {
+              expanded: button.getAttribute("aria-expanded"),
+              text: panel?.textContent ?? "",
+              onScreen: (panel?.getBoundingClientRect().height ?? 0) > 0,
+              rowHeight: row.getBoundingClientRect().height,
+            };
+          }, undefined);
+          expect(detail.expanded).toBe("true");
+          expect(detail.text).toContain(branch);
+          expect(detail.onScreen).toBe(true);
+          expect(detail.rowHeight).toBeLessThanOrEqual(40);
+          const layout = await metrics(page);
+          expect(layout.clippedHeadings).toEqual([]);
+          expect(layout.clippedLabels).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
 
   for (const scheme of ["light", "dark"] as const)
     it(
@@ -404,8 +482,11 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
               r.textContent?.includes(repo),
             ) as HTMLElement;
             const scroll = document.querySelector<HTMLElement>(".sess-scroll") as HTMLElement;
-            const folder = row.querySelector<HTMLElement>(".sess-folder") as HTMLElement;
+            const folder = row.querySelector<HTMLElement>(".sess-folder-toggle") as HTMLElement;
             const link = row.querySelector<HTMLElement>(".sess-applink") as HTMLElement;
+            const detail = row.nextElementSibling?.classList.contains("sess-folder-detail")
+              ? row.nextElementSibling
+              : null;
             const clipped = (el: HTMLElement) => {
               const c = (el.closest("td") as HTMLElement).getBoundingClientRect();
               const b = el.getBoundingClientRect();
@@ -418,12 +499,15 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
               );
             };
             return {
-              focused: document.activeElement === row || row.contains(document.activeElement),
+              folderFocused: document.activeElement === folder,
               folderText: folder.textContent,
               linkText: link.textContent,
               folderClipped: clipped(folder),
               linkClipped: clipped(link),
               answerClipped: clipped(row.querySelector<HTMLElement>(".sess-ans") as HTMLElement),
+              detailText: detail?.textContent ?? "",
+              detailHeight: detail?.firstElementChild?.getBoundingClientRect().height ?? 0,
+              rowHeight: row.getBoundingClientRect().height,
             };
           }, LONG_REPO);
         try {
@@ -432,17 +516,24 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
           expect(before.folderClipped).toBe(true);
           expect(before.linkClipped).toBe(true);
           let m = before;
-          for (let i = 0; i < 80 && !m.focused; i++) {
+          for (let i = 0; i < 80 && !m.folderFocused; i++) {
             await page.press("Tab");
             m = await cells();
           }
-          expect(m.focused).toBe(true);
+          expect(m.folderFocused).toBe(true);
+          await page.press("Enter");
+          m = await cells();
           await capture(page, `sessions-1280x800-${scheme}-long-folder-app-focused`);
-          expect(m.folderText).toBe(`${LONG_FOLDER.replace("/Users/op", "~")} · ${LONG_REPO}`);
           expect(m.linkText).toBe(LONG_URL.replace("http://", ""));
-          expect(m.folderClipped).toBe(false);
-          expect(m.linkClipped).toBe(false);
           expect(m.answerClipped).toBe(false);
+          expect(m.detailText).toContain(LONG_FOLDER.replace("/Users/op", "~"));
+          expect(m.detailText).toContain(LONG_REPO);
+          expect(m.detailText).toContain(LONG_URL.replace("http://", ""));
+          expect(m.detailHeight).toBeLessThanOrEqual(96);
+          expect(m.rowHeight).toBeLessThanOrEqual(40);
+          const layout = await metrics(page);
+          expect(layout.clippedHeadings).toEqual([]);
+          expect(layout.clippedLabels).toEqual([]);
         } finally {
           await page.close();
         }

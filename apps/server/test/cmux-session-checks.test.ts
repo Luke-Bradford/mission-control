@@ -102,6 +102,7 @@ function setup(
   const store = new Store(join(dir, "store.sqlite"));
   const fake = fakeCmux(workspaces, agents);
   const notify = vi.fn();
+  const sidebarNotify = vi.fn(async () => {});
   const checks = createSessionChecks({
     cmux: fake.cmux,
     store,
@@ -109,6 +110,7 @@ function setup(
     crewRoots: () => [],
     configuredChecks: () => [],
     notify,
+    sidebarNotify,
     lowPriority: [],
     load: () => 0,
     cores: () => 8,
@@ -116,7 +118,7 @@ function setup(
     ...over,
   });
   running.push(checks);
-  return { ...fake, store, notify, checks };
+  return { ...fake, store, notify, sidebarNotify, checks };
 }
 
 /** Turns the repo on with these page commands, as the Sessions page does. */
@@ -233,10 +235,36 @@ it("a failing check sends one message with the command and its last 40 lines, an
   expect(t.notify).toHaveBeenCalledWith(
     `Checks failed in cmux session "pricing": ${PRINT_AND_FAIL}`,
   );
+  expect(t.sidebarNotify).toHaveBeenCalledWith(
+    WS_A,
+    `Checks failed in cmux session "pricing": ${PRINT_AND_FAIL}`,
+  );
   expect(t.store.hubEvents(0).map((e) => e.text)).toContain(
     `Checks failed in cmux session "pricing": ${PRINT_AND_FAIL}`,
   );
   expect(t.checks.checkOf(WS_A)).toMatchObject({ command: PRINT_AND_FAIL, why: "idle" });
+  expect(t.checks.lastResult(WS_A)).toMatchObject({ ok: false, command: PRINT_AND_FAIL });
+});
+
+it("keeps a failed check when its cmux notice cannot be sent", async () => {
+  const main = repo();
+  const sidebarNotify = vi.fn(async () => {
+    throw new Error("cmux unavailable");
+  });
+  const t = setup([{ id: WS_A, name: "pricing", cwd: main }], [agent(WS_A, main)], {
+    sidebarNotify,
+  });
+  await turnOn(t.checks, main, [PRINT_AND_FAIL]);
+  await t.checks.tick();
+  writeFileSync(join(main, "price.ts"), "export const p = 1;\n");
+  t.lifecycle(WS_A, "idle");
+  t.checks.start();
+  await vi.waitFor(() => expect(stateOf(t.checks, WS_A)).toBe("failed"), { timeout: 10_000 });
+  const notice = `Checks failed in cmux session "pricing": ${PRINT_AND_FAIL}`;
+  expect(t.state.messages).toHaveLength(1);
+  expect(t.notify).toHaveBeenCalledWith(notice);
+  expect(sidebarNotify).toHaveBeenCalledWith(WS_A, notice);
+  expect(t.store.hubEvents(0).map((e) => e.text)).toContain(notice);
   expect(t.checks.lastResult(WS_A)).toMatchObject({ ok: false, command: PRINT_AND_FAIL });
 });
 
@@ -479,7 +507,7 @@ it("finds a folder's checkout and main checkout, a worktree's included", async (
   mkdirSync(join(wt, "src"));
   expect(await checkoutOf(join(wt, "src"))).toEqual({ top: wt, main });
   expect(await checkoutOf(main)).toEqual({ top: main, main });
-  expect(await checkoutOf(tmpdir())).toBeNull();
+  expect(await checkoutOf("/dev")).toBeNull();
 });
 
 it("reads a workspace's live agent: the most pressing one not known dead", () => {

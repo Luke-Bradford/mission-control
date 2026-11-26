@@ -19,6 +19,7 @@ import { settled, stubFetch } from "./fetchStub.ts";
 const NOW = Date.UTC(2026, 10, 25, 14, 32);
 const MIN = 60_000;
 const PATH = "/api/sessions";
+const SIDEBAR_PATH = "/api/sessions/sidebar";
 
 const SHOP = "/Users/op/Dev/shop-app";
 const MC = "/Users/op/Dev/mission-control";
@@ -111,7 +112,7 @@ const bodyRows = () => screen.getAllByRole("row").slice(1);
 
 describe("Sessions page", () => {
   it("lists every workspace, waiting first, with state words, age, last line and app", async () => {
-    const fetch = stubFetch({ [PATH]: VIEW });
+    const fetch = stubFetch({ [PATH]: VIEW, [SIDEBAR_PATH]: { on: true } });
     render(<Sessions />);
     await settled(fetch, PATH);
     const names = bodyRows().map((r) => within(r).getAllByRole("cell")[0]?.textContent);
@@ -135,6 +136,58 @@ describe("Sessions page", () => {
     expect(screen.getByText("Not answering")).toBeTruthy();
     // An unknown status reads as a dash, never blank.
     expect(within(bodyRows()[3] as HTMLElement).getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("shows a branch's ticket and PR, and turns cmux writes off", async () => {
+    const sidebar = vi.fn((_init: RequestInit | undefined) => ({
+      status: 200,
+      body: { on: false },
+    }));
+    const fetch = stubFetch({
+      [PATH]: {
+        ...VIEW,
+        sessions: [
+          row({
+            id: ID.pricing,
+            name: "pricing",
+            branch: "feature/2262-cmux-sidebar",
+            ticket: { number: 2262, repoId: "mission-control" },
+            pr: {
+              number: 2269,
+              url: "https://github.com/Luke-Bradford/mission-control/pull/2269",
+              isDraft: false,
+              ci: "passing",
+              review: "approved",
+            },
+          }),
+        ],
+      },
+      [SIDEBAR_PATH]: { on: true },
+      [`POST ${SIDEBAR_PATH}`]: sidebar,
+    });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    expect(screen.getByRole("link", { name: "#2262" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "PR 2269" })).toBeTruthy();
+    expect(screen.getByText("CI passing")).toBeTruthy();
+    expect(screen.getByText("Approved")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Write to cmux" }));
+    await waitFor(() => expect(sidebar).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(sidebar.mock.calls[0]?.[0]?.body))).toEqual({ on: false });
+    await waitFor(() => expect(screen.getByText(/cmux writes off/)).toBeTruthy());
+  });
+
+  it("refetches sessions when the sessions topic changes", async () => {
+    let view = VIEW;
+    const fetch = stubFetch({
+      [PATH]: () => ({ status: 200, body: view }),
+      [SIDEBAR_PATH]: { on: true },
+    });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    view = { ...VIEW, sessions: [row({ id: ID.pricing, name: "new workspace" })] };
+    await act(async () => hub.refetchTopic("sessions"));
+    expect(await screen.findByText("new workspace")).toBeTruthy();
   });
 
   it("shows each session's cost today, the week on hover and focus, and a dash with no use", async () => {
@@ -168,8 +221,8 @@ describe("Sessions page", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
     // No spend reads as a dash, whether the row has none or no agent.
     const cells = (i: number) => within(bodyRows()[i] as HTMLElement).getAllByRole("cell");
-    expect(cells(1)[4]?.textContent).toBe("—");
-    expect(cells(3)[4]?.textContent).toBe("—");
+    expect(cells(1)[5]?.textContent).toBe("—");
+    expect(cells(3)[5]?.textContent).toBe("—");
   });
 
   it("never shows a model without a price as a known cost", async () => {

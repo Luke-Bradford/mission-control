@@ -19,6 +19,14 @@ export const CMUX_SESSION_STATE_LABEL: Record<CmuxSessionState, string> = {
 /** `crew`: a workspace the hub started for a seat (`<seat> · <ticket>`); `operator`: any other. */
 export type CmuxSessionOwner = "operator" | "crew";
 
+export interface SessionPr {
+  number: number;
+  url: string;
+  isDraft: boolean;
+  ci: "passing" | "failing" | "pending" | null;
+  review: "approved" | "changes" | "requested" | null;
+}
+
 export interface CmuxSessionRow {
   /** The workspace's cmux UUID. */
   id: string;
@@ -40,6 +48,9 @@ export interface CmuxSessionRow {
   app: { url: string; answers: boolean | null } | null;
   /** The session's `cmux agent inbox`: messages not yet read, and the newest one's text. */
   inbox: { unread: number; newest: string | null };
+  branch?: string | null;
+  ticket?: { number: number; repoId: string | null } | null;
+  pr?: SessionPr | null;
   /** The workspace's latest repo check (queued, running or how it ended); null: none this hub run. */
   check: SessionCheck | null;
   /**
@@ -70,6 +81,31 @@ export const SESSIONS_OFF_TEXT = "This hub does not read cmux sessions.";
 /** A cmux workspace UUID: checked before any cmux call. */
 export const CMUX_WORKSPACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export const SIDEBAR_KEY_PREFIX = "mc-";
+export const SIDEBAR_KEYS = {
+  ci: "mc-ci",
+  review: "mc-review",
+  cost: "mc-cost",
+  check: "mc-check",
+} as const;
+export const SESSIONS_CMUX_WRITES_SETTING = "sessions.cmux_writes";
+export const SIDEBAR_CI_TEXT = {
+  passing: "CI passing",
+  failing: "CI failing",
+  pending: "CI running",
+} as const;
+export const SIDEBAR_REVIEW_TEXT = {
+  approved: "Approved",
+  changes: "Changes asked",
+  requested: "Review asked",
+} as const;
+export const SESSION_NOTICE_TITLE = {
+  waiting: "Waiting on you",
+  finished: "Finished",
+  appStopped: "App stopped",
+  checkFailed: "Check failed",
+} as const;
+export type SessionNoticeKind = keyof typeof SESSION_NOTICE_TITLE;
 /** The page's order: waiting, working, idle, no agent; the longest in its state first. */
 const SESSION_ORDER: readonly CmuxSessionState[] = ["waiting", "working", "idle", "no-agent"];
 export function sortSessions(rows: readonly CmuxSessionRow[]): CmuxSessionRow[] {

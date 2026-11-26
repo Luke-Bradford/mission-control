@@ -161,7 +161,10 @@ import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { createSessionChecks } from "./sessions/checks.ts";
+import { applyCmuxSessionEvent, startCmuxEvents } from "./sessions/events.ts";
+import { createBranchPrs } from "./sessions/pr.ts";
 import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
+import { createSessionSidebar } from "./sessions/sidebar.ts";
 import { createSessionWatch } from "./sessions/watch.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
@@ -1039,7 +1042,9 @@ export async function main(): Promise<void> {
   // A preview hub reads them but never tells a session its app stopped.
   const cmux = createCmux([CMUX_COMMAND], (m) => log(m));
   const seatIds = () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];
+  const branchPrs = createBranchPrs({ store, repos: () => config.repos, gh });
   const notifications = new LocalNotifications(store, config, bus, Date.now);
+  let sessionSidebar: ReturnType<typeof createSessionSidebar> | null = null;
   // An operator session's repo checks when it finishes a piece of work, in a repo he turned on.
   const sessionChecks = createSessionChecks({
     cmux,
@@ -1060,6 +1065,8 @@ export async function main(): Promise<void> {
         ?.checks ?? []),
     ],
     notify: (text) => notifications.notice("checks", text),
+    sidebarNotify: (workspaceId, body) =>
+      sessionSidebar?.notify(workspaceId, "checkFailed", body) ?? Promise.resolve(),
     log: (m) => log(m),
   });
   const sessions = createSessions({
@@ -1067,6 +1074,8 @@ export async function main(): Promise<void> {
     store,
     seatIds,
     checks: sessionChecks,
+    repos: () => config.repos.map((repo) => ({ id: repo.id, github: repo.github })),
+    prs: branchPrs,
     timeZone: () => config.operator.timezone,
     tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
     rolesDir: hubRoot === null ? undefined : join(hubRoot, ROLE_PROMPT_DIR),
@@ -1078,6 +1087,24 @@ export async function main(): Promise<void> {
     store,
     bus,
     mode: () => readFlightMode(store),
+    log: (m) => log(m),
+  });
+  sessionSidebar = createSessionSidebar({
+    sessions,
+    cmux,
+    store,
+    costToday: (row) => row.spend?.today.costUsd ?? null,
+    lastCheck: (row) => sessionChecks.lastResult(row.id),
+    writes: process.env.MC_NO_LOOP_WRITES !== "1",
+    log: (m) => log(m),
+  });
+  const cmuxEvents = startCmuxEvents({
+    cmux,
+    cursorFile: join(dirname(dbPath), "cmux-events.cursor"),
+    onChange: () => {
+      if (sessionSidebar !== null)
+        applyCmuxSessionEvent({ sessions, bus, sidebar: sessionSidebar });
+    },
     log: (m) => log(m),
   });
 
@@ -1202,6 +1229,9 @@ export async function main(): Promise<void> {
 
   const app = buildApp({
     sessions,
+    onSessionSidebarChange: (on) => {
+      if (on) sessionSidebar.reset();
+    },
     sessionChecks,
     notifications,
     diskUse: hubDiskUse,
@@ -1276,6 +1306,7 @@ export async function main(): Promise<void> {
   // a session that names its app is told when it stops answering, whether or not the page is open
   if (process.env.MC_NO_LOOP_WRITES !== "1")
     trackTimer(setInterval(() => void sessions.view(), SESSIONS_APP_WATCH_MS)).unref();
+  if (process.env.MC_NO_LOOP_WRITES !== "1") sessionSidebar.start();
   sessionWatch.start();
   app.addHook("onClose", async () => sessionWatch.stop());
   // a preview hub never runs a repo's commands by itself
@@ -1283,6 +1314,8 @@ export async function main(): Promise<void> {
   app.addHook("onClose", async () => sessionChecks.stop());
   app.addHook("onClose", async () => {
     for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
+    sessionSidebar.stop();
+    cmuxEvents.stop();
   });
   for (const line of early.splice(0)) log(line);
   let stopDiscovery = () => {};

@@ -35,10 +35,19 @@
 }
 
 .sess-read {
-  margin-left: auto;
   color: var(--muted);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
+}
+
+.sess-sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--sp-6);
+  margin-left: auto;
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  white-space: nowrap;
 }
 
 .sess-banner {
@@ -74,6 +83,12 @@
 }
 .sess-table .c-folder {
   width: 14%;
+}
+.sess-table .c-branch {
+  width: 15%;
+}
+.sess-table .c-last {
+  width: 12%;
 }
 .sess-table .c-state {
   width: 152px;
@@ -199,9 +214,84 @@ button.sess-inbox[aria-expanded="true"] {
   color: var(--fg-2);
 }
 
+.sess-folder-toggle {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sess-folder b {
   color: var(--fg);
   font-weight: 500;
+}
+
+.sess-folder-detail td,
+.sess-branch-detail td {
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-2);
+}
+
+.sess-folder-detail div,
+.sess-branch-detail div {
+  max-block-size: 96px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+.sess-folder-detail b,
+.sess-branch-detail b {
+  margin-right: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+
+.sess-folder-detail b + code + b {
+  margin-left: var(--sp-3);
+}
+
+.sess-branchcell {
+  min-width: 0;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.sess-branchline,
+.sess-prline {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.sess-branch-toggle {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: var(--lh-s);
+  text-align: left;
+  margin-block-end: calc(var(--sp-1) / -4);
+}
+
+.sess-prline {
+  color: var(--muted);
+}
+.sess-prline .pill {
+  font-size: inherit;
 }
 
 .sess-last {
@@ -426,6 +516,39 @@ button.sess-inbox[aria-expanded="true"] {
   }
 }
 
+/* At 1600 px beside the dock, the new branch column yields width before the session, app and
+   action labels do. The branch is free text with an ellipsis and title; those controls are not. */
+@media (min-width: 1600px) and (max-width: 1799px) {
+  .sess-table .c-folder {
+    width: 128px;
+  }
+  .sess-table .c-branch {
+    width: 228px;
+  }
+  .sess-table .c-state {
+    width: 140px;
+  }
+  .sess-table .c-for {
+    width: 56px;
+  }
+  .sess-table .c-status {
+    width: 9%;
+  }
+  .sess-table .c-last {
+    width: 10%;
+  }
+  .sess-table .c-act {
+    width: 128px;
+  }
+  .sess-prline {
+    gap: var(--sp-1);
+    white-space: nowrap;
+  }
+  .sess-prline .pill {
+    padding-inline: var(--sp-1);
+  }
+}
+
 /* 1280 to 1599 px: tighter cell padding and fixed columns cut to what their words need, so the
    last line keeps a useful width beside the dock. */
 @media (max-width: 1599px) {
@@ -433,8 +556,17 @@ button.sess-inbox[aria-expanded="true"] {
   .sess-table td {
     padding-inline: var(--sp-2);
   }
+  .sess-table th {
+    white-space: normal;
+  }
   .sess-table .c-folder {
-    width: 11%;
+    width: 104px;
+  }
+  .sess-table .c-branch {
+    width: 228px;
+  }
+  .sess-table .c-name {
+    width: 140px;
   }
   .sess-table .c-state {
     width: 140px;
@@ -443,7 +575,7 @@ button.sess-inbox[aria-expanded="true"] {
     width: 44px;
   }
   .sess-table .c-status {
-    width: 9%;
+    width: 64px;
   }
   .sess-table .c-app {
     width: 124px;
@@ -456,6 +588,22 @@ button.sess-inbox[aria-expanded="true"] {
   }
   .sess-table .c-act {
     width: 112px;
+  }
+  .sess-table .c-last {
+    width: 80px;
+  }
+  .sess-prline {
+    gap: var(--sp-1);
+    white-space: nowrap;
+  }
+  .sess-prline .pill {
+    padding-inline: var(--sp-1);
+  }
+}
+
+@media (min-width: 2200px) {
+  .sess-table td.sess-branch {
+    padding-block: 0;
   }
 }
 
@@ -470,24 +618,20 @@ button.sess-inbox[aria-expanded="true"] {
   outline-offset: -2px;
 }
 
-/* Keyboard reaches every cut-short value: a row focused from the keyboard unwraps the name, folder
-   and repo, last line, status and app address. The name wraps beside or over its tags, which never
-   shrink; the address wraps above its answer word. Paths and addresses have no spaces, so they
-   break anywhere. Keyboard focus only: a mouse press on Write would otherwise grow the row under
-   the pointer, and the click would land on the row instead. */
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-last,
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-status {
+/* Keyboard focus on the row itself reveals cut-short text. A focused row control keeps the row
+   compact; its own disclosure supplies any long detail. */
+.sess-row:focus-visible .sess-last,
+.sess-row:focus-visible .sess-status {
   white-space: normal;
 }
 
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-name,
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-folder,
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-applink {
+.sess-row:focus-visible .sess-name,
+.sess-row:focus-visible .sess-applink {
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-applink {
+.sess-row:focus-visible .sess-applink {
   text-align: left;
 }
 
@@ -554,7 +698,7 @@ button.sess-inbox[aria-expanded="true"] {
   margin: 0;
 }
 
-.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-check-detail {
+.sess-row:focus-visible .sess-check-detail {
   display: block;
   white-space: normal;
   overflow-wrap: anywhere;

@@ -8,6 +8,7 @@ import {
   SESSION_NO_CHECKS_TEXT,
   SESSION_TEXT_MAX,
   SESSION_UNKNOWN_TEXT,
+  SESSIONS_CMUX_WRITES_SETTING,
   SESSIONS_OFF_TEXT,
 } from "@mc/core";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -21,6 +22,7 @@ import { OpenSessionArgs, SessionOpenError } from "./open.ts";
 import { SessionError, type SessionsService } from "./sessions.ts";
 
 const SendInput = z.strictObject({ text: z.string().min(1).max(SESSION_TEXT_MAX) });
+const SidebarInput = z.strictObject({ on: z.boolean() });
 const noBody = z.strictObject({}).optional();
 const RepoChecksInput = z.strictObject({
   repo: z.string().min(1).max(4096),
@@ -65,6 +67,23 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
     if (error instanceof CmuxError) return reply.code(503).send({ error: error.message });
     throw error;
   };
+
+  // Reader: docs/runbooks/cmux-sessions.md#the-cmux-sidebar (the Sessions page switch)
+  api.get("/sessions/sidebar", { preHandler: auth }, async () => ({
+    on: deps.store.getSetting(SESSIONS_CMUX_WRITES_SETTING) !== "off",
+  }));
+  // Reader: apps/web/src/pages/Sessions.tsx (the Write to cmux switch)
+  api.post("/sessions/sidebar", { preHandler: auth }, async (req, reply) => {
+    const body = SidebarInput.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "Send on as true or false." });
+    deps.store.setSetting(SESSIONS_CMUX_WRITES_SETTING, body.data.on ? "on" : "off");
+    if (body.data.on) deps.onSessionSidebarChange?.(true);
+    deps.store.addHubEvent(
+      `cmux writes turned ${body.data.on ? "on" : "off"} by operator`,
+      Date.now(),
+    );
+    return { on: body.data.on };
+  });
 
   // Reader: docs/runbooks/cmux-sessions.md#the-sessions-page (every cmux workspace on this Mac)
   api.get("/sessions", { preHandler: auth }, async () => sessions().view());

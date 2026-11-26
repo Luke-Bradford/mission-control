@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentState, compactUtc, inferTicket } from "../src/runs.ts";
+import { agentState, branchIssue, compactUtc, inferTicket } from "../src/runs.ts";
 import type { Run } from "../src/types.ts";
 
 function run(over: Partial<Run>): Run {
@@ -41,6 +41,18 @@ describe("inferTicket", () => {
   it("returns null otherwise", () => {
     expect(inferTicket("main", "shop-app")).toBeNull();
     expect(inferTicket(null, "shop-app")).toBeNull();
+  });
+});
+
+describe("branchIssue", () => {
+  it("reads the issue number from a ticket branch", () => {
+    expect(branchIssue("feature/2262-cmux-sidebar")).toBe(2262);
+    expect(branchIssue("fix/loop-812-x")).toBe(812);
+  });
+
+  it("returns null for branches without a ticket prefix", () => {
+    expect(branchIssue("main")).toBeNull();
+    expect(branchIssue("feature/no-ticket")).toBeNull();
   });
 });
 

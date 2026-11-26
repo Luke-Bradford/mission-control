@@ -498,6 +498,12 @@ beforeEach(() => {
     close: async () => {
       throw new Error("never closed");
     },
+    setStatus: async () => {},
+    clearStatus: async () => {},
+    linkPr: async () => {},
+    clearPr: async () => {},
+    notify: async () => {},
+    events: () => ({ stop: () => {}, ended: Promise.resolve() }),
   };
   flightDeps = (): FlightToolsDeps => ({
     attentionMaterials: { attachStory: (key, story) => materialsImpl(key, story) as never },

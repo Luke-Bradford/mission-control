@@ -8,6 +8,7 @@ import { lstat, open, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import {
+  branchIssue,
   CMUX_WORKSPACE_ID,
   type CmuxSessionRow,
   type CmuxSessionState,
@@ -19,6 +20,7 @@ import {
   SESSION_NO_APP_TEXT,
   SESSION_TEXT_MAX,
   SESSION_UNKNOWN_TEXT,
+  SIDEBAR_KEY_PREFIX,
   sortSessions,
 } from "@mc/core";
 import { cleanText } from "../repo/clean.ts";
@@ -31,8 +33,10 @@ import {
 } from "../runtime/cmux.ts";
 import { sessionSpendFor } from "../spend/sessions.ts";
 import type { Store } from "../store.ts";
+import { gitPlace } from "./branch.ts";
 import type { SessionChecks } from "./checks.ts";
 import { openSession, sessionRoles } from "./open.ts";
+import type { createBranchPrs } from "./pr.ts";
 
 /** cmux is not running; the hub never starts it for a read. */
 export const CMUX_NOT_RUNNING_TEXT = "cmux is not running.";
@@ -76,6 +80,10 @@ export class SessionError extends Error {
 
 export interface SessionsService {
   view(): Promise<CmuxSessionsView>;
+  /** Drops the short-lived cmux read cache after a workspace lifecycle event. */
+  invalidate(): void;
+  /** Refreshes workspace membership without waiting for each workspace's status or screen. */
+  refreshMembership(): Promise<void>;
   /** The workspace's screen, at most `lines` of its last lines. */
   read(id: string, lines: number): Promise<string>;
   focus(id: string): Promise<void>;
@@ -116,6 +124,8 @@ export interface SessionsDeps {
   timeZone?: () => string;
   now?: () => number;
   log?: (m: string) => void;
+  repos?: () => { id: string; github: string }[];
+  prs?: Pick<ReturnType<typeof createBranchPrs>, "prOf">;
 }
 
 /** Any HTTP answer is an answer; refused or timed out is not. Redirects are not followed. */
@@ -314,6 +324,8 @@ export function createSessions(deps: SessionsDeps): SessionsService {
   let appsAt = Number.NEGATIVE_INFINITY;
   const probes = new Map<string, { at: number; answers: Promise<boolean> }>();
   let cached: { at: number; view: Promise<CmuxSessionsView> } | null = null;
+  let lastRows = new Map<string, CmuxSessionRow>();
+  let lastRepos: Extract<CmuxSessionsView, { ok: true }>["repos"] = [];
 
   const agentOf = (agents: readonly CmuxAgent[], ws: string): CmuxAgent | null =>
     liveAgentOf(agents, ws, alive);
@@ -357,6 +369,47 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     return since;
   }
 
+  /** A row for a lifecycle refresh: existing details win while the full read enriches it later. */
+  function membershipRow(ws: CmuxWorkspace, agent: CmuxAgent | null | undefined): CmuxSessionRow {
+    const previous = lastRows.get(ws.id);
+    const state: CmuxSessionState =
+      agent === undefined
+        ? (previous?.state ?? "no-agent")
+        : agent === null
+          ? "no-agent"
+          : STATE_OF[agent.lifecycle];
+    const since = previous?.state === state ? previous.since : now();
+    seen.set(ws.id, { state, since });
+    const folder = agent === undefined ? (previous?.folder ?? ws.cwd) : (agent?.cwd ?? ws.cwd);
+    if (previous !== undefined)
+      return {
+        ...previous,
+        id: ws.id,
+        name: ws.name,
+        owner: deps.seatIds().some((seat) => ws.name.startsWith(`${seat} · `))
+          ? "crew"
+          : "operator",
+        folder,
+        state,
+        since,
+      };
+    return {
+      id: ws.id,
+      name: ws.name,
+      owner: deps.seatIds().some((seat) => ws.name.startsWith(`${seat} · `)) ? "crew" : "operator",
+      folder,
+      repo: null,
+      repoKey: null,
+      state,
+      since,
+      lastLine: null,
+      status: null,
+      app: null,
+      inbox: { unread: 0, newest: null },
+      check: deps.checks?.checkOf(ws.id) ?? null,
+    };
+  }
+
   async function rowOf(
     ws: CmuxWorkspace,
     agent: CmuxAgent | null,
@@ -378,7 +431,9 @@ export function createSessions(deps: SessionsDeps): SessionsService {
       lastLine = await transcriptLine(agent.transcriptPath);
     if (lastLine === null)
       lastLine = lastScreenLine(await byDeadline(cmux.readScreen(ws.id, SCREEN_TAIL_LINES), ""));
-    const statusKey = Object.keys(statuses).find((k) => k !== SESSION_APP_STATUS_KEY);
+    const statusKey = Object.keys(statuses).find(
+      (k) => k !== SESSION_APP_STATUS_KEY && !k.startsWith(SIDEBAR_KEY_PREFIX),
+    );
     const url = statuses[SESSION_APP_STATUS_KEY]?.trim();
     // a local app's probe starts here but is waited for in `withAnswers`, never inside a row's turn
     const app = url === undefined || url === "" || !isHttp(url) ? null : { url, answers: null };
@@ -529,12 +584,34 @@ export function createSessions(deps: SessionsDeps): SessionsService {
       for (const id of seen.keys()) if (!rows.some((r) => r.id === id)) seen.delete(id);
       withSpend(rows, agents, at);
       if (deps.tellApps !== false) await tellAppsInTurn(rows, at);
+      const enriched = await Promise.all(
+        rows.map(async (row) => {
+          if (row.folder === null) return row;
+          const place = await gitPlace(row.folder);
+          const branch = place?.branch ?? null;
+          const found =
+            branch === null || place?.github === null || place?.github === undefined || !deps.prs
+              ? null
+              : await deps.prs.prOf(place.github, branch);
+          const issue = branch === null ? null : branchIssue(branch);
+          return {
+            ...row,
+            branch,
+            ticket: issue === null ? null : { number: issue, repoId: found?.repoId ?? null },
+            pr: found?.pr ?? null,
+            check: deps.checks?.checkOf(row.id) ?? null,
+          };
+        }),
+      );
       // the crew's checkouts have no Repo checks line: their push gate runs checks
       const repos =
         deps.checks === undefined
           ? []
-          : await deps.checks.repos(rows.filter((r) => r.owner === "operator"));
-      return { ok: true, at, sessions: sortSessions(rows), repos };
+          : await deps.checks.repos(enriched.filter((r) => r.owner === "operator"));
+      const result = { ok: true as const, at, sessions: sortSessions(enriched), repos };
+      lastRows = new Map(result.sessions.map((row) => [row.id, row]));
+      lastRepos = repos;
+      return result;
     } catch (e) {
       return { ok: false, at, error: e instanceof Error ? e.message : String(e) };
     } finally {
@@ -565,6 +642,23 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     }
   }
 
+  /** Refreshes the membership cache from cmux without waiting for slow per-workspace enrichment. */
+  async function refreshMembership(): Promise<void> {
+    cached = null;
+    try {
+      const at = now();
+      const workspaces = await cmux.workspaces();
+      const rows = workspaces.map((ws) => membershipRow(ws, undefined));
+      const ids = new Set(rows.map((row) => row.id));
+      for (const id of seen.keys()) if (!ids.has(id)) seen.delete(id);
+      for (const id of lastRows.keys()) if (!ids.has(id)) lastRows.delete(id);
+      const view = { ok: true as const, at, sessions: sortSessions(rows), repos: lastRepos };
+      cached = { at, view: Promise.resolve(view) };
+    } catch {
+      // The regular poll remains the backstop when cmux cannot list workspaces here.
+    }
+  }
+
   /** The open workspace with this id; a malformed or unknown id is refused before it reaches cmux. */
   async function workspace(id: string): Promise<CmuxWorkspace> {
     if (!CMUX_WORKSPACE_ID.test(id)) throw new SessionError(404, SESSION_UNKNOWN_TEXT);
@@ -574,6 +668,10 @@ export function createSessions(deps: SessionsDeps): SessionsService {
   }
 
   return {
+    invalidate() {
+      cached = null;
+    },
+    refreshMembership,
     view() {
       if (cached !== null && now() - cached.at < VIEW_CACHE_MS) return cached.view;
       const view = read();

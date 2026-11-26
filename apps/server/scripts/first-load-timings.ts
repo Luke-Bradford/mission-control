@@ -32,7 +32,13 @@ import { Store } from "../src/store.ts";
  * Sessions page's list and its New session form's roles and folders read cmux and roles/ live with
  * the operator's token, not the database.
  */
-const SKIP = new Set(["/api/stream", "/api/update/log", "/api/sessions", "/api/sessions/roles"]);
+const SKIP = new Set([
+  "/api/stream",
+  "/api/update/log",
+  "/api/sessions",
+  "/api/sessions/sidebar",
+  "/api/sessions/roles",
+]);
 /** Routes that read config.yaml itself: timed only when --config names one. */
 const CONFIG_FILE_ROUTES = new Set(["/api/config/settings"]);
 /** A request still running after this long is reported, not waited for. */

@@ -84,6 +84,15 @@ function demoSessions(): CmuxSessionsView {
         since: now - 4 * min,
         lastLine: "Allow the migration to drop the old price_rules table?",
         status: "Moving prices to the new table",
+        branch: "feature/101-pricing-migration",
+        ticket: { number: 101, repoId: "shop-app" },
+        pr: {
+          number: 312,
+          url: "https://github.com/acme/shop-app/pull/312",
+          isDraft: false,
+          ci: "pending",
+          review: "requested",
+        },
         check: { state: "failed", at: now - 5 * min, command: "pnpm test", why: "idle" },
       }),
       row(2, {
@@ -103,6 +112,8 @@ function demoSessions(): CmuxSessionsView {
         since: now - 8 * min,
         folder: "/Users/demo/Dev/worktrees/shop-app/dev-1-101",
         lastLine: "Running the checkout cache tests",
+        branch: "feature/101-checkout-cache",
+        ticket: { number: 101, repoId: "shop-app" },
       }),
       row(4, {
         name: "FLIGHT · crew",

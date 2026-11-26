@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseAgents,
+  parseCmuxEvent,
   parseInbox,
   parseStatuses,
   parseWindows,
@@ -8,6 +9,26 @@ import {
 } from "../src/runtime/cmux.ts";
 
 describe("cmux parsers", () => {
+  it("reads workspace lifecycle events and rejects unrelated lines", () => {
+    expect(
+      parseCmuxEvent(
+        '{"type":"event","name":"workspace.created","workspace_id":"one","id":"event-one"}',
+      ),
+    ).toEqual({
+      kind: "created",
+      workspaceId: "one",
+    });
+    expect(
+      parseCmuxEvent(
+        '{"type":"event","name":"workspace.closed","workspace_id":"two","id":"event-two"}',
+      ),
+    ).toEqual({
+      kind: "closed",
+      workspaceId: "two",
+    });
+    expect(parseCmuxEvent('{"type":"sidebar.metadata.updated"}')).toBeNull();
+    expect(parseCmuxEvent("not json")).toBeNull();
+  });
   it("reads a workspace's folder under any of its names", () => {
     expect(
       parseWorkspaces(

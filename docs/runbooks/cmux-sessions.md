@@ -96,6 +96,17 @@ the operator's own Comms message to it from the last 24 hours. Each write adds a
 The text itself is never logged. Screen text FLIGHT reads with `cmux_sessions` goes to its
 model provider; the hub sends nothing else off this Mac.
 
+## The cmux sidebar
+
+The hub follows `cmux events` as well as its three-second read, so workspace opens and closes
+refresh Sessions without waiting for the next poll. It reads a workspace branch directly from
+`.git/HEAD`, then shows an open pull request, CI and review state when it can identify one.
+
+The Sessions switch `Write to cmux` controls all hub-owned sidebar fields and notifications. When
+on, the hub writes only `mc-ci`, `mc-review`, `mc-cost` and `mc-check`, and links the workspace's
+pull request with `cmux pr`. It never changes another status key. Turning the switch off prevents
+all sidebar writes and cmux notifications; reading and tracking continue.
+
 ## Apps that stop
 
 Every 30 s, and on each page read, the hub reads the sessions. When a session's app stops

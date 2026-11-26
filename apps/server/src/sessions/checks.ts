@@ -75,6 +75,8 @@ export interface SessionChecksDeps {
   configuredChecks: (github: string) => string[];
   /** One operator notice. */
   notify: (text: string) => void;
+  /** A local cmux sidebar notice for this workspace when its check fails. */
+  sidebarNotify?: (workspaceId: string, body: string) => Promise<void>;
   /** What runs each check at low priority; default `lowPriorityPrefix(process.platform)`. */
   lowPriority?: readonly string[];
   /** The Mac's 1-minute load and its cores; a check starts only while load is below cores. */
@@ -375,6 +377,11 @@ export function createSessionChecks(deps: SessionChecksDeps): SessionChecks {
     }
     const notice = `Checks ${ending === "failed" ? "failed" : "timed out"} in cmux session "${job.name}": ${command}`;
     deps.notify(notice);
+    try {
+      await deps.sidebarNotify?.(job.ws, notice);
+    } catch (e) {
+      log(`session checks: could not notify cmux workspace "${job.name}": ${String(e)}`);
+    }
     store.addHubEvent(notice, now());
   }
 

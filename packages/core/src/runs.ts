@@ -21,10 +21,16 @@ export const compactUtc = (ms: number): string =>
 const BRANCH_TICKET = /^(?:fix|feature|feat|docs|chore)\/(?:studio-|loop-)?(\d+)(?:-|$)/;
 const NO_RUNS_SINCE = 0;
 
+/** The issue number carried by a conventional ticket branch, else null. */
+export function branchIssue(branch: string): number | null {
+  const match = BRANCH_TICKET.exec(branch);
+  return match?.[1] === undefined ? null : Number(match[1]);
+}
+
 export function inferTicket(branch: string | null, repoId: RepoId): string | null {
   if (branch === null) return null;
-  const m = BRANCH_TICKET.exec(branch);
-  return m ? `${repoId}#${m[1]}` : null;
+  const issue = branchIssue(branch);
+  return issue === null ? null : `${repoId}#${issue}`;
 }
 
 function latestByStart(runs: Run[]): Run | undefined {

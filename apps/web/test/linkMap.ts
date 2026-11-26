@@ -272,7 +272,13 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
       rule(/^Machine$/, /^\/telemetry\?tab=machine$/, "A tab is in the URL, so it can be linked."),
     ],
   },
-  sessions: { routes: ["/sessions"], rules: [] },
+  sessions: {
+    routes: ["/sessions"],
+    rules: [
+      rule(/^#\d+$/, TICKET, "A session's ticket opens its ticket page."),
+      rule(/^PR \d+$/, EXTERNAL, "A session's pull request opens on GitHub."),
+    ],
+  },
   audit: {
     routes: ["/audit"],
     rules: [
@@ -386,6 +392,7 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/pages/Needs.tsx": "page: first item",
   "src/pages/Planner.tsx": "page: the plan list; the Planner views",
   "src/pages/QaReadiness.tsx": "page: QA, Audit; external: preview",
+  "src/pages/Sessions.tsx": "page: a session's ticket; external: its PR on GitHub",
   "src/pages/Setup.tsx": "page: Setup tabs",
   "src/pages/TicketPage.tsx": "page: back to Board",
   "src/palette/entries.ts": "page: whatever the palette entry names",

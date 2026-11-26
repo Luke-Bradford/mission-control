@@ -5,7 +5,7 @@
  * the operator's own included, through it too. The cmux JSON is read defensively (names in either
  * case): it is the one place that knows its shape.
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { homedir, userInfo } from "node:os";
 import { isObj } from "@mc/core";
 import { parseJson, rethrowJson } from "../json.ts";
@@ -61,6 +61,25 @@ export interface CmuxWorkspaceInput {
   exclude?: ReadonlySet<string>;
 }
 
+export type CmuxEvent = { kind: "created" | "closed"; workspaceId: string | null };
+
+/** A cmux events JSON line, limited to workspace lifecycle changes. */
+export function parseCmuxEvent(line: string): CmuxEvent | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (!isObj(value)) return null;
+  const name = pick(value, "name", "event", "type");
+  const kind =
+    name === "workspace.created" ? "created" : name === "workspace.closed" ? "closed" : null;
+  if (kind === null) return null;
+  const id = pick(value, "workspace_id", "workspaceId");
+  return { kind, workspaceId: typeof id === "string" ? id : null };
+}
+
 export interface Cmux {
   /** Throws a CmuxError when cmux refuses the hub or cannot be started. */
   ensure(): Promise<void>;
@@ -88,6 +107,15 @@ export interface Cmux {
   readScreen(ws: string, lines?: number): Promise<string>;
   /** Closes the workspace, forced. A workspace already gone is not an error. */
   close(ws: string): Promise<void>;
+  setStatus(ws: string, key: string, value: string): Promise<void>;
+  clearStatus(ws: string, key: string): Promise<void>;
+  linkPr(ws: string, url: string): Promise<void>;
+  clearPr(ws: string): Promise<void>;
+  notify(ws: string, title: string, body: string): Promise<void>;
+  events(
+    cursorFile: string,
+    onLine: (line: string) => void,
+  ): { stop(): void; ended: Promise<void> };
 }
 
 /** A start the hub refuses to make: cmux says no, or is not there. */
@@ -486,6 +514,49 @@ export function createCmux(
       if (!(await workspaces().catch(() => [{ id: ws, name: "" }])).some((w) => w.id === ws))
         return;
       throw failed("close-workspace", plain);
+    },
+    async setStatus(ws, key, value) {
+      const r = await cmux(["set-status", key, value, "--workspace", ws]);
+      if (r.code !== 0) throw failed("set-status", r);
+    },
+    async clearStatus(ws, key) {
+      const r = await cmux(["clear-status", key, "--workspace", ws]);
+      if (r.code !== 0) throw failed("clear-status", r);
+    },
+    async linkPr(ws, url) {
+      const r = await cmux(["pr", url, "--workspace", ws]);
+      if (r.code !== 0) throw failed("pr", r);
+    },
+    async clearPr(ws) {
+      const r = await cmux(["pr", "clear", "--workspace", ws]);
+      if (r.code !== 0) throw failed("pr clear", r);
+    },
+    async notify(ws, title, body) {
+      const r = await cmux(["notify", "--title", title, "--body", body, "--workspace", ws]);
+      if (r.code !== 0) throw failed("notify", r);
+    },
+    events(cursorFile, onLine) {
+      const child = spawn(file, [...base, "events", "--reconnect", "--cursor-file", cursorFile], {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      let remaining = "";
+      child.stdout?.on("data", (chunk: Buffer) => {
+        remaining += chunk.toString();
+        const lines = remaining.split("\n");
+        remaining = lines.pop() ?? "";
+        for (const line of lines) onLine(line);
+      });
+      const ended = new Promise<void>((resolve) => {
+        child.once("close", resolve);
+        child.once("error", (error) => {
+          log(`cmux events could not start: ${String(error)}`);
+          resolve();
+        });
+      });
+      return {
+        stop: () => child.kill(),
+        ended,
+      };
     },
   };
 }
