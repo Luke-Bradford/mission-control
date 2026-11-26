@@ -99,6 +99,9 @@
 .sess-table .c-check {
   width: 96px;
 }
+.sess-table .c-today {
+  width: 80px;
+}
 .sess-table .c-act {
   width: 168px;
 }
@@ -468,7 +471,7 @@ button.sess-inbox[aria-expanded="true"] {
     padding-inline: var(--sp-2);
   }
   .sess-table .c-folder {
-    width: 13%;
+    width: 11%;
   }
   .sess-table .c-branch {
     width: 8%;
@@ -482,11 +485,17 @@ button.sess-inbox[aria-expanded="true"] {
   .sess-table .c-for {
     width: 44px;
   }
+  .sess-table .c-status {
+    width: 9%;
+  }
   .sess-table .c-app {
     width: 124px;
   }
   .sess-table .c-check {
     width: 88px;
+  }
+  .sess-table .c-today {
+    width: 64px;
   }
   .sess-table .c-act {
     width: 112px;

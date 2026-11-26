@@ -1066,6 +1066,7 @@ export async function main(): Promise<void> {
     checks: sessionChecks,
     repos: () => config.repos.map((repo) => ({ id: repo.id, github: repo.github })),
     prs: branchPrs,
+    timeZone: () => config.operator.timezone,
     tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
     log: (m) => log(m),
   });
@@ -1073,6 +1074,8 @@ export async function main(): Promise<void> {
     sessions,
     cmux,
     store,
+    costToday: (row) => row.spend?.today.costUsd ?? null,
+    lastCheck: (row) => sessionChecks.lastResult(row.id),
     writes: process.env.MC_NO_LOOP_WRITES !== "1",
     log: (m) => log(m),
   });
