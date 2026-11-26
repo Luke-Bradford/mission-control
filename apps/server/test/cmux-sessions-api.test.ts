@@ -201,6 +201,33 @@ describe("the sessions routes", () => {
     expect(fake.state().workspaces?.map((w) => w.id)).toContain(PRICING);
   });
 
+  it("two opens at once with the same name each get, and close, only their own workspace", async () => {
+    const input = { folder: dir, worktree: false, role: "GUIDO", message: "m" };
+    fake.patch((s) => {
+      s.screen = "│ ❯ │\n  ? for shortcuts\n";
+    });
+    const both = await Promise.all([
+      operator().post("/api/sessions", input),
+      operator().post("/api/sessions", input),
+    ]);
+    expect(both.map((r) => r.statusCode)).toEqual([201, 201]);
+    const ids = both.map((r) => r.json().id);
+    expect(new Set(ids).size).toBe(2);
+    // both starts fail: each closes the workspace it made, and nothing else
+    fake.patch((s) => {
+      s.screen = "Claude Code will exit: this folder isn't trusted.\n% ";
+    });
+    const failed = await Promise.all([
+      operator().post("/api/sessions", input),
+      operator().post("/api/sessions", input),
+    ]);
+    expect(failed.map((r) => r.statusCode)).toEqual([503, 503]);
+    const closed = fake.state().closed ?? [];
+    expect(closed).toHaveLength(2);
+    expect(new Set(closed).size).toBe(2);
+    for (const id of [...ids, PRICING]) expect(closed).not.toContain(id);
+  });
+
   it("POST /api/sessions opens a workspace", async () => {
     const input = { folder: dir, worktree: false, role: "GUIDO", message: "Fix the login test" };
     // the new Claude comes up at its input prompt

@@ -121,6 +121,16 @@ async function freshWorktree(folder: string, role: string, at: number): Promise<
   }
 }
 
+/** The open under way on each cmux client: the next waits for it to have its workspace id. */
+const opening = new WeakMap<object, Promise<unknown>>();
+
+/** Runs `fn` after any earlier one for the same cmux has settled. */
+function oneAtATime<T>(cmux: object, fn: () => Promise<T>): Promise<T> {
+  const next = (opening.get(cmux) ?? Promise.resolve()).catch(() => {}).then(fn);
+  opening.set(cmux, next);
+  return next;
+}
+
 /** The pid the launch script wrote, or null while it has not. */
 const pidOf = (pidFile: string): number | null => {
   try {
@@ -174,9 +184,12 @@ export async function openSession(
   let id: string;
   try {
     // every workspace open before this one is excluded: a same-named one is never taken for it,
-    // so a failed start closes only the workspace this open made
-    const before = new Set((await deps.cmux.workspaces()).map((w) => w.id));
-    id = await deps.cmux.newWorkspace({ name, cwd, command: quote(script), exclude: before });
+    // so a failed start closes only the workspace this open made. One open at a time per cmux,
+    // from the list to the id found, so two at once never take the same new workspace.
+    id = await oneAtATime(deps.cmux, async () => {
+      const before = new Set((await deps.cmux.workspaces()).map((w) => w.id));
+      return deps.cmux.newWorkspace({ name, cwd, command: quote(script), exclude: before });
+    });
   } catch (e) {
     throw new SessionOpenError(503, e instanceof Error ? e.message : String(e));
   }
