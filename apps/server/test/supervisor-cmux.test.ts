@@ -16,7 +16,12 @@ import { join } from "node:path";
 import { CMUX_NEEDS_INPUT_TEXT, type Run } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { agentViews } from "../src/hud/hud.ts";
-import { cmuxKeeperKey, cmuxSourceKey, cmuxWorkspaceKey } from "../src/runtime/cmux-session.ts";
+import {
+  CMUX_WORKSPACE_PREFIX,
+  cmuxKeeperKey,
+  cmuxSourceKey,
+  cmuxWorkspaceKey,
+} from "../src/runtime/cmux-session.ts";
 import { crewKeeperDir } from "../src/store/crew-paths.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
@@ -439,6 +444,9 @@ describe("a Claude run in cmux", () => {
       s.down = false;
     });
 
+    expect(store.runsWithSettingPrefix("guido-1", CMUX_WORKSPACE_PREFIX).map((run) => run.id)).toContain(
+      runId,
+    );
     await expect(sup.startRun("guido-1", 42)).rejects.toThrow(/earlier cmux workspace/);
     expect(cmuxState().workspaces).toHaveLength(1);
     expect(cmuxState().sameName ?? []).toEqual([]);
