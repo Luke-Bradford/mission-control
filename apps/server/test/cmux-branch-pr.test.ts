@@ -41,4 +41,26 @@ describe("branch pull requests", () => {
     await prs.prOf("acme/app", "-bad");
     expect(gh).toHaveBeenCalledTimes(1);
   });
+
+  it("maps pending and failed status rollups", async () => {
+    const gh = vi.fn(async () => ({
+      code: 0,
+      stdout:
+        '[{"number":2,"url":"https://x","isDraft":false,"reviewDecision":null,"statusCheckRollup":[{"status":"IN_PROGRESS","conclusion":""}]}]',
+      stderr: "",
+    }));
+    const prs = createBranchPrs({ store: { openPullRequests: () => [] }, repos: () => [], gh });
+    await expect(prs.prOf("acme/app", "feature/one")).resolves.toMatchObject({
+      pr: { ci: "pending" },
+    });
+    gh.mockResolvedValueOnce({
+      code: 0,
+      stdout:
+        '[{"number":2,"url":"https://x","isDraft":false,"reviewDecision":null,"statusCheckRollup":[{"state":"FAILURE"}]}]',
+      stderr: "",
+    });
+    await expect(prs.prOf("acme/app", "feature/two")).resolves.toMatchObject({
+      pr: { ci: "failing" },
+    });
+  });
 });

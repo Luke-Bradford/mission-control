@@ -9,13 +9,14 @@ const BRANCH = /^\w[\w./-]*$/;
 
 const ciOf = (rollup: unknown): SessionPr["ci"] => {
   if (!Array.isArray(rollup) || rollup.length === 0) return null;
-  const states = rollup.map((item) =>
-    String(
-      (item as { conclusion?: unknown }).conclusion ?? (item as { status?: unknown }).status ?? "",
-    ).toUpperCase(),
-  );
-  if (states.some((state) => /FAIL|ERROR|CANCEL/.test(state))) return "failing";
-  if (states.some((state) => /PENDING|QUEUED|IN_PROGRESS|WAITING/.test(state))) return "pending";
+  const states = rollup.map((item) => {
+    const row = item as { conclusion?: unknown; status?: unknown; state?: unknown };
+    return String(row.conclusion || row.status || row.state || "").toUpperCase();
+  });
+  if (states.some((state) => /FAIL|ERROR|CANCEL|TIMED_OUT|ACTION_REQUIRED/.test(state)))
+    return "failing";
+  if (states.some((state) => /PENDING|EXPECTED|QUEUED|IN_PROGRESS|WAITING|REQUESTED/.test(state)))
+    return "pending";
   return "passing";
 };
 

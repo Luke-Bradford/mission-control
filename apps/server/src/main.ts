@@ -1042,7 +1042,13 @@ export async function main(): Promise<void> {
     tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
     log: (m) => log(m),
   });
-  const sessionSidebar = createSessionSidebar({ sessions, cmux, store, log: (m) => log(m) });
+  const sessionSidebar = createSessionSidebar({
+    sessions,
+    cmux,
+    store,
+    writes: process.env.MC_NO_LOOP_WRITES !== "1",
+    log: (m) => log(m),
+  });
   const cmuxEvents = startCmuxEvents({
     cmux,
     cursorFile: join(dirname(dbPath), "cmux-events.cursor"),

@@ -257,6 +257,16 @@ describe("sessions view", () => {
     });
   });
 
+  it("does not show hub-owned mc statuses as session status", async () => {
+    const { sessions } = setup({
+      ...threeSessions(),
+      statuses: { [PRICING]: { "mc-ci": "CI running", task: "build" } },
+    });
+    const view = await sessions.view();
+    if (!view.ok) throw new Error(view.error);
+    expect(view.sessions.find((row) => row.id === PRICING)?.status).toBe("build");
+  });
+
   it("twelve slow apps that are down all keep their address and read as not answering", async () => {
     const ids = Array.from(
       { length: 12 },

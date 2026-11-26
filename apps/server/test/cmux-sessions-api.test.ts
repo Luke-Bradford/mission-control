@@ -172,6 +172,16 @@ describe("the sessions routes", () => {
     expect(reset).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the sidebar setting operator-only", async () => {
+    expect((await operator().post("/api/sessions/sidebar", { on: false })).json()).toEqual({
+      on: false,
+    });
+    expect((await operator().get("/api/sessions/sidebar")).json()).toEqual({ on: false });
+    const seat = as({ [OPERATOR_HEADER]: KEY, authorization: "Bearer seat-token" });
+    expect((await seat.get("/api/sessions/sidebar")).statusCode).toBe(403);
+    expect((await operator().post("/api/sessions/sidebar", { on: false, extra: true })).statusCode).toBe(400);
+  });
+
   it("answers 503 on a hub without cmux sessions", async () => {
     await app.close();
     start({ sessions: undefined });

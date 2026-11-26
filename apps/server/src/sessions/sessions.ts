@@ -16,6 +16,7 @@ import {
   COMMS_CAPCOM,
   SESSION_APP_STATUS_KEY,
   SESSION_LINE_MAX,
+  SIDEBAR_KEY_PREFIX,
   SESSION_NO_APP_TEXT,
   SESSION_TEXT_MAX,
   SESSION_UNKNOWN_TEXT,
@@ -356,7 +357,9 @@ export function createSessions(deps: SessionsDeps): SessionsService {
       lastLine = await transcriptLine(agent.transcriptPath);
     if (lastLine === null)
       lastLine = lastScreenLine(await byDeadline(cmux.readScreen(ws.id, SCREEN_TAIL_LINES), ""));
-    const statusKey = Object.keys(statuses).find((k) => k !== SESSION_APP_STATUS_KEY);
+    const statusKey = Object.keys(statuses).find(
+      (k) => k !== SESSION_APP_STATUS_KEY && !k.startsWith(SIDEBAR_KEY_PREFIX),
+    );
     const url = statuses[SESSION_APP_STATUS_KEY]?.trim();
     // a local app's probe starts here but is waited for in `withAnswers`, never inside a row's turn
     const app = url === undefined || url === "" || !isHttp(url) ? null : { url, answers: null };

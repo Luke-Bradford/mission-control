@@ -5,6 +5,7 @@ import {
   type SessionCheckResult,
   type SessionNoticeKind,
   SIDEBAR_CI_TEXT,
+  SIDEBAR_KEY_PREFIX,
   SIDEBAR_KEYS,
   SIDEBAR_REVIEW_TEXT,
 } from "@mc/core";
@@ -18,8 +19,10 @@ export const cmuxWritesOn = (store: Pick<Store, "getSetting">) =>
 
 type Deps = {
   sessions: Pick<SessionsService, "view">;
-  cmux: Pick<Cmux, "setStatus" | "clearStatus" | "linkPr" | "notify">;
+  cmux: Pick<Cmux, "statuses" | "setStatus" | "clearStatus" | "linkPr" | "notify">;
   store: Pick<Store, "getSetting">;
+  /** Preview hubs read sessions but must never write to the operator's cmux. */
+  writes?: boolean;
   costToday?: (row: CmuxSessionRow) => number | null;
   lastCheck?: (row: CmuxSessionRow) => SessionCheckResult | null;
   log?: (line: string) => void;
@@ -45,13 +48,23 @@ export function createSessionSidebar(deps: Deps) {
     values.set(id, previous);
   };
   const tick = async () => {
-    if (!cmuxWritesOn(deps.store)) return;
+    if (deps.writes === false || !cmuxWritesOn(deps.store)) return;
     const view = await deps.sessions.view();
     if (!view.ok) return;
     const live = new Set(view.sessions.map((row) => row.id));
     for (const id of values.keys()) if (!live.has(id)) values.delete(id);
+    for (const id of states.keys()) if (!live.has(id)) states.delete(id);
+    for (const id of appAnswers.keys()) if (!live.has(id)) appAnswers.delete(id);
+    for (const id of urls.keys()) if (!live.has(id)) urls.delete(id);
     for (const row of view.sessions) {
       try {
+        if (!values.has(row.id)) {
+          const existing = await deps.cmux.statuses(row.id);
+          values.set(
+            row.id,
+            new Map(Object.entries(existing).filter(([key]) => key.startsWith(SIDEBAR_KEY_PREFIX))),
+          );
+        }
         const previousState = states.get(row.id);
         const previousAnswer = appAnswers.get(row.id);
         states.set(row.id, row.state);
@@ -112,7 +125,8 @@ export function createSessionSidebar(deps: Deps) {
       timer = null;
     },
     async notify(id: string, kind: SessionNoticeKind, body: string) {
-      if (cmuxWritesOn(deps.store)) await deps.cmux.notify(id, SESSION_NOTICE_TITLE[kind], body);
+      if (deps.writes !== false && cmuxWritesOn(deps.store))
+        await deps.cmux.notify(id, SESSION_NOTICE_TITLE[kind], body);
     },
     reset() {
       values.clear();
