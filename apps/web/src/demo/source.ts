@@ -383,6 +383,7 @@ export function answer(path: string): Response {
   if (diff !== undefined) return json(diff);
   if (/^\/api\/audit\/models\?range=/.test(path)) return json(modelsView());
   if (path === "/api/sessions") return json(demoSessions());
+  if (path === "/api/sessions/apps") return json([]);
   if (path === "/api/sessions/roles")
     return json({
       roles: ["FIDO", "GUIDO", "INCO", "RETRO"],
