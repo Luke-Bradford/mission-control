@@ -264,11 +264,11 @@ import {
 import { type Cmux, CmuxError, type CmuxOptions, createCmux } from "./cmux.ts";
 import {
   attachCmuxSession,
+  CMUX_WORKSPACE_PREFIX,
   type CmuxSaved,
   claudeConfigDir,
   claudeTranscript,
   cmuxKeeperKey,
-  CMUX_WORKSPACE_PREFIX,
   cmuxSourceKey,
   cmuxWorkspaceKey,
   startCmuxSession,
