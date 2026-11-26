@@ -4,6 +4,7 @@ import {
   priceFor,
   type SpendTokens,
   tokensCostUsd,
+  usageCostUsd,
 } from "../src/session-spend.ts";
 
 const M = 1_000_000;
@@ -31,5 +32,16 @@ describe("session spend prices", () => {
   it("multiplies a fast message", () => {
     const t = { ...none, output: M };
     expect(tokensCostUsd("claude-opus-5-5", t, true)).toBeCloseTo(20 * FAST_PRICE_MULTIPLIER);
+  });
+});
+
+describe("usageCostUsd", () => {
+  it("prices a run's stored tokens, its cache writes as 5-minute writes", () => {
+    const t = { input: M, output: M, cacheRead: M, cacheCreate: M };
+    expect(usageCostUsd("claude-opus-5-5", t)).toBeCloseTo(4 + 20 + 0.2 + 5);
+    expect(usageCostUsd("claude-opus-5-5", t)).toBe(
+      tokensCostUsd("claude-opus-5-5", { ...none, ...t, cacheWrite5m: M }),
+    );
+    expect(usageCostUsd("gpt-9", t)).toBeNull();
   });
 });

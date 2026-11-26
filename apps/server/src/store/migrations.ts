@@ -1,5 +1,12 @@
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
-import { COMMS_NOTICE, FLIGHT_WAKE_STORED_BYTES, inferTicket, TITLE_MARKERS } from "@mc/core";
+import {
+  COMMS_NOTICE,
+  FLIGHT_WAKE_STORED_BYTES,
+  inferTicket,
+  TITLE_MARKERS,
+  type TokenUsage,
+  usageCostUsd,
+} from "@mc/core";
 import { parseJson } from "../json.ts";
 import { compactFlightWake } from "./rows.ts";
 
@@ -78,6 +85,12 @@ export type Transaction = (fn: () => void, writeLock?: boolean) => void;
 
 /** The highest `runs` rowid whose branch has been read for a ticket (see `migrate`). */
 const RUN_TICKET_INFER_KEY = "run-ticket-infer-rowid-v1";
+
+/** Set once the Claude runs since cmux seats (#2194) that had no cost were priced from their tokens. */
+const RUN_COST_FROM_TOKENS_KEY = "run-cost-from-tokens-v1";
+/** When Claude seats moved into cmux, whose sessions write no result cost: 26 Nov 2026, 04:05 UTC. */
+const CMUX_SEATS_SINCE = Date.UTC(2026, 10, 26, 4, 5);
+const NO_TOKENS: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
 
 /** Upgrades a database made by an older release to the current shape; run once after SCHEMA. */
 export function migrate(db: DatabaseSync, transaction: Transaction): void {
@@ -468,6 +481,28 @@ class Migrations {
           if (ticket !== null) set.run(ticket, r.id);
         }
         this.setSetting(RUN_TICKET_INFER_KEY, String(newest.n));
+      }, true);
+    }
+    // Claude runs since seats moved into cmux kept their tokens but no cost; price them once, as
+    // applyFacts now prices such runs. A run with a cost keeps it.
+    if (this.getSetting(RUN_COST_FROM_TOKENS_KEY) === null) {
+      this.transaction(() => {
+        if (this.getSetting(RUN_COST_FROM_TOKENS_KEY) !== null) return;
+        const rows = this.db
+          .prepare(
+            `SELECT id, model, tokens FROM runs
+             WHERE started_at >= ? AND cost_usd IS NULL AND vendor = 'claude'
+               AND model IS NOT NULL AND tokens IS NOT NULL`,
+          )
+          .all(CMUX_SEATS_SINCE) as { id: string; model: string; tokens: string }[];
+        const set = this.db.prepare(
+          "UPDATE runs SET cost_usd = ? WHERE id = ? AND cost_usd IS NULL",
+        );
+        for (const r of rows) {
+          const cost = usageCostUsd(r.model, parseJson<TokenUsage>(r.tokens, NO_TOKENS));
+          if (cost !== null && Number.isFinite(cost) && cost > 0) set.run(cost, r.id);
+        }
+        this.setSetting(RUN_COST_FROM_TOKENS_KEY, "1");
       }, true);
     }
     // When we read the row from GitHub, by our own clock (GitHub's updatedAt does not move when a

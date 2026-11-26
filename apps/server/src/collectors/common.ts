@@ -1,5 +1,12 @@
 import { statSync } from "node:fs";
-import { type CrewVendor, inferTicket, type Run, type RunDigest } from "@mc/core";
+import {
+  type CrewVendor,
+  inferTicket,
+  type Run,
+  type RunDigest,
+  type TokenUsage,
+  usageCostUsd,
+} from "@mc/core";
 import type { AdoptedLoop } from "../config.ts";
 import { foldTranscript, type TranscriptFacts } from "../run/streamjson.ts";
 import type { Store } from "../store.ts";
@@ -104,17 +111,25 @@ export function pruneFoldState(
   for (const path of state.transcripts.keys()) if (!paths.has(path)) state.transcripts.delete(path);
 }
 
+const hasTokens = (t: TokenUsage): boolean => t.input + t.output + t.cacheRead + t.cacheCreate > 0;
+
 /**
  * Copies folded transcript facts onto `r`, which holds what is already known of the run (the
  * stored row). A transcript that does not name a session, model or branch never nulls a known
- * one; cost, tokens, PRs and summary are the transcript's. A watch run (FLIGHT) never takes a branch: its
- * transcript names the PR branches it reads, and a branch on its row would read as a seat's own.
+ * one; cost, tokens, PRs and summary are the transcript's. A Claude transcript with tokens but no
+ * result cost (a cmux session writes none) is priced from its tokens. A watch run (FLIGHT) never
+ * takes a branch: its transcript names the PR branches it reads, and a branch on its row would
+ * read as a seat's own.
  */
 export function applyFacts(r: Run, facts: TranscriptFacts): void {
   r.sessionId = facts.sessionId ?? r.sessionId;
   r.model = facts.model ?? r.model;
   if (r.loopKind !== "watch") r.branch = facts.branch ?? r.branch;
-  r.costUsd = facts.costUsd;
+  r.costUsd =
+    facts.costUsd ??
+    (r.vendor !== "codex" && r.model !== null && hasTokens(facts.tokens)
+      ? usageCostUsd(r.model, facts.tokens)
+      : null);
   r.tokens = facts.tokens;
   r.prs = facts.prs.map((p) => ({ ...p }));
   r.summary = facts.summary;
