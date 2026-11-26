@@ -353,6 +353,8 @@ const RESUMED = "resumed after a restart; send a message to continue";
 const RESUME_FAILED = "could not resume the session";
 /** How long `stopAll` waits for a Stop's `close` line to reach its keeper's socket. */
 const CLOSE_SENT_WAIT_MS = 1000;
+/** How many of a seat's latest runs a cmux start checks for a workspace still open. */
+const SEAT_WORKSPACE_RUNS = 10;
 const RESUME_MODE_CHANGED = "could not resume: the seat's mode changed";
 /**
  * A resumed process that exits this soon after its spawn failed to resume. The real CLI prints
@@ -957,9 +959,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.setSetting(cmuxSourceKey(runId), JSON.stringify(state.source));
   }
   /**
-   * Closes the cmux workspace a run holds, and forgets it. False only when its Claude may still be
-   * running and cmux would not close it: with the pid gone (cmux down after a reboot, say), nothing can
-   * still run the session, so the run may resume, on the keeper when cmux stays down.
+   * Closes the cmux workspace a run holds, and forgets it. False when cmux would not close it and
+   * its Claude may still run, or cmux still lists it: a dead Claude does not close its workspace,
+   * and a start beside it would make a second one of the same name. With cmux down (after a reboot,
+   * say) and the pid gone, nothing is left to close, so the run may resume, on the keeper when cmux
+   * stays down.
    */
   async function closeWorkspace(runId: string): Promise<boolean> {
     const saved = savedWorkspace(runId);
@@ -969,8 +973,23 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } catch (e) {
       log(`could not close the cmux workspace of ${runId}: ${errText(e)}`);
       if (saved.pid !== null && pidAlive(saved.pid)) return false;
+      const listed = await (cmux?.workspaces() ?? Promise.resolve([])).then(
+        (all) => all.some((w) => w.id === saved.workspace),
+        () => false,
+      );
+      if (listed) return false;
     }
     store.deleteSetting(cmuxWorkspaceKey(runId));
+    return true;
+  }
+  /**
+   * Closes the workspaces the seat's earlier runs left open (one cmux would not close when its run
+   * ended). False when one is still open: the seat starts nothing beside it.
+   */
+  async function closeSeatWorkspaces(seatId: string, runId: string): Promise<boolean> {
+    for (const earlier of store.runs(seatId, SEAT_WORKSPACE_RUNS)) {
+      if (earlier.id !== runId && !(await closeWorkspace(earlier.id))) return false;
+    }
     return true;
   }
   /** Ends a run's process: its cmux workspace and any keeper it has. */
@@ -2004,6 +2023,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         // a resume starts a new workspace: the old one (its Claude gone, or about to be replaced) closes
         if (!(await closeWorkspace(run.id)))
           throw new SupervisorError(409, "could not close the run's earlier cmux workspace");
+        if (!(await closeSeatWorkspaces(info.seat.id, run.id)))
+          throw new SupervisorError(409, "could not close the seat's earlier cmux workspace");
         store.deleteSetting(cmuxKeeperKey(run.id));
       } else {
         const old = savedWorkspace(run.id);

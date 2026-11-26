@@ -1,6 +1,7 @@
 // Every Claude seat's run is a cmux workspace; a fake cmux (fixtures/fake-cmux.mjs) stands in for it.
 // The file's state is cmux's: a test sets a session's lifecycle to play the operator and Claude.
 import "./supervisor-harness.ts";
+import { spawn } from "node:child_process";
 import {
   appendFileSync,
   copyFileSync,
@@ -325,6 +326,37 @@ describe("a Claude run in cmux", () => {
     expect(cmuxState().closed).toContain(ws);
     expect(store.getSetting(cmuxWorkspaceKey(runId))).toBeNull();
     expect(store.run(runId)?.endedAt).not.toBeNull();
+  });
+
+  it("a workspace cmux will not close after Claude exits keeps the seat's next start until it closes", async () => {
+    const claude = spawn("sleep", ["60"], { stdio: "ignore" });
+    fakeCmux({ claudePid: claude.pid });
+    const { sup } = make({ cmuxState: stateFile() });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(cmuxState().sent).toHaveLength(1));
+    const name = cmuxState().workspaces[0]?.name;
+    const named = () => cmuxState().workspaces.filter((w) => w.name === name);
+    patch((s) => {
+      s.noClose = true;
+      s.claudePid = process.pid;
+    });
+    claude.kill("SIGKILL");
+    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    // Claude is dead, but cmux still lists its workspace: the hub keeps it to close
+    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
+    await expect(sup.startRun("guido-1", 42)).rejects.toThrow(/earlier cmux workspace/);
+    expect(named()).toHaveLength(1);
+    patch((s) => {
+      s.noClose = false;
+    });
+    const next = await sup.startRun("guido-1", 42);
+    await until(() => expect(cmuxState().sent).toHaveLength(2));
+    expect(named()).toHaveLength(1);
+    expect(named()[0]?.id).toBe(
+      JSON.parse(store.getSetting(cmuxWorkspaceKey(next.runId)) as string).workspace,
+    );
+    expect(store.getSetting(cmuxWorkspaceKey(runId))).toBeNull();
   });
 
   it.each([
