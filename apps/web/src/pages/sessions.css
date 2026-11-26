@@ -463,6 +463,29 @@ button.sess-inbox[aria-expanded="true"] {
   }
 }
 
+/* At 1600 px beside the dock, the new branch column yields width before the session, app and
+   action labels do. The branch is free text with an ellipsis and title; those controls are not. */
+@media (min-width: 1600px) and (max-width: 1799px) {
+  .sess-table .c-folder {
+    width: 11%;
+  }
+  .sess-table .c-branch {
+    width: 8%;
+  }
+  .sess-table .c-state {
+    width: 140px;
+  }
+  .sess-table .c-for {
+    width: 44px;
+  }
+  .sess-table .c-status {
+    width: 9%;
+  }
+  .sess-table .c-act {
+    width: 112px;
+  }
+}
+
 /* 1280 to 1599 px: tighter cell padding and fixed columns cut to what their words need, so the
    last line keeps a useful width beside the dock. */
 @media (max-width: 1599px) {
