@@ -164,7 +164,7 @@ import { CREW_APP_DEFAULTS, createCrewApps } from "./sessions/apps.ts";
 import { createSessionChecks } from "./sessions/checks.ts";
 import { applyCmuxSessionEvent, startCmuxEvents } from "./sessions/events.ts";
 import { createBranchPrs } from "./sessions/pr.ts";
-import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
+import { createSessions, probeLocal, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
 import { createSessionSidebar } from "./sessions/sidebar.ts";
 import { createSessionWatch } from "./sessions/watch.ts";
 import { onSignal } from "./shutdown.ts";
@@ -1057,6 +1057,7 @@ export async function main(): Promise<void> {
         return checkout && commands?.length ? [{ id: repo.id, checkout, commands }] : [];
       }),
     root: `${config.crew?.worktrees ?? dirname(dbPath)}-apps`,
+    probe: probeLocal,
     log: (m) => log(m),
   });
   const seatIds = () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];

@@ -14,12 +14,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../src/hud.css";
 import { hub } from "../src/data.ts";
 import { Sessions } from "../src/pages/Sessions.tsx";
+import { Toast } from "../src/shell/Toast.tsx";
 import { settled, stubFetch } from "./fetchStub.ts";
 
 const NOW = Date.UTC(2026, 10, 25, 14, 32);
 const MIN = 60_000;
 const PATH = "/api/sessions";
 const SIDEBAR_PATH = "/api/sessions/sidebar";
+const APPS_PATH = "/api/sessions/apps";
 
 const SHOP = "/Users/op/Dev/shop-app";
 const MC = "/Users/op/Dev/mission-control";
@@ -111,6 +113,75 @@ afterEach(() => {
 const bodyRows = () => screen.getAllByRole("row").slice(1);
 
 describe("Sessions page", () => {
+  it("shows each crew app address, health word and start or stop action", async () => {
+    const start = vi.fn().mockResolvedValue({ status: 200, body: { ok: true } });
+    const fetch = stubFetch({
+      [PATH]: VIEW,
+      [SIDEBAR_PATH]: { on: true },
+      [APPS_PATH]: [
+        {
+          id: "autonomy-engine",
+          name: "autonomy-engine · app",
+          running: true,
+          apps: [{ url: "http://127.0.0.1:5173", answers: true }],
+        },
+        {
+          id: "ebull",
+          name: "ebull · app",
+          running: false,
+          apps: [
+            { url: "http://127.0.0.1:5174", answers: false },
+            { url: "http://127.0.0.1:5175", answers: null },
+          ],
+        },
+      ],
+      [`POST ${APPS_PATH}/ebull/start`]: start,
+    });
+    render(<Sessions />);
+    await settled(fetch, APPS_PATH);
+
+    expect(screen.getByRole("link", { name: "127.0.0.1:5173" }).getAttribute("href")).toBe(
+      "http://127.0.0.1:5173",
+    );
+    expect(screen.getAllByText("Answers").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not answering").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not checked").length).toBeGreaterThan(0);
+    expect(screen.getByText("Stopped")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+  });
+
+  it("reports crew app read and action failures", async () => {
+    const stop = vi.fn().mockResolvedValue({ status: 500, body: { error: "Could not stop app" } });
+    const fetch = stubFetch({
+      [PATH]: VIEW,
+      [SIDEBAR_PATH]: { on: true },
+      [APPS_PATH]: [{ id: "studio", name: "studio · app", running: true, apps: [] }],
+      [`POST ${APPS_PATH}/studio/stop`]: stop,
+    });
+    render(
+      <>
+        <Sessions />
+        <Toast />
+      </>,
+    );
+    await settled(fetch, APPS_PATH);
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(await screen.findByText("Could not stop app")).toBeTruthy();
+
+    hub.clear();
+    const failedFetch = stubFetch({
+      [PATH]: VIEW,
+      [SIDEBAR_PATH]: { on: true },
+      [APPS_PATH]: () => ({ status: 500, body: { error: "Apps unavailable" } }),
+    });
+    render(<Sessions />);
+    await settled(failedFetch, APPS_PATH);
+    expect(
+      (await screen.findAllByText("Could not read crew apps: Apps unavailable")).length,
+    ).toBeGreaterThan(0);
+  });
+
   it("lists every workspace, waiting first, with state words, age, last line and app", async () => {
     const fetch = stubFetch({ [PATH]: VIEW, [SIDEBAR_PATH]: { on: true } });
     render(<Sessions />);

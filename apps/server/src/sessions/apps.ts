@@ -1,7 +1,9 @@
 /** Keeps each crew repository's development app in its own cmux workspace. */
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { SESSION_APP_STATUS_KEY } from "@mc/core";
 import type { Cmux } from "../runtime/cmux.ts";
+import { probeLocal } from "./sessions.ts";
 
 export const APP_RESTART_MS = 5 * 60_000;
 export const APP_PORT_START = 5173;
@@ -42,6 +44,7 @@ interface CrewAppsDeps {
   root: string;
   now?(): number;
   probe?(url: string): Promise<boolean>;
+  worktreeExists?(path: string): boolean;
   log?(message: string): void;
 }
 
@@ -49,7 +52,12 @@ export interface CrewApps {
   start(repoId: string): Promise<void>;
   stop(repoId: string): Promise<void>;
   tick(): Promise<void>;
-  view(): { id: string; name: string; running: boolean }[];
+  view(): {
+    id: string;
+    name: string;
+    running: boolean;
+    apps: { url: string; answers: boolean | null }[];
+  }[];
 }
 
 const appName = (repoId: string) => `${repoId} · app`;
@@ -62,14 +70,31 @@ const portOf = (repos: readonly CrewAppRepo[], target: string, command: number) 
   return port + command;
 };
 const urlAt = (url: string, port: number) => url.replaceAll("$PORT", String(port));
+const commandAt = (repo: string, command: string, port: number, backendPort?: number) => {
+  const rendered = command.replaceAll("$PORT", String(port));
+  if (!/pnpm dev$/.test(rendered)) return rendered;
+  const vite = `${rendered} -- --host 127.0.0.1 --port ${port}`;
+  if (repo.toLowerCase() !== "ebull" || backendPort === undefined) return vite;
+  return vite.replace(
+    "cd frontend && ",
+    `cd frontend && VITE_API_PROXY_TARGET=http://127.0.0.1:${backendPort} `,
+  );
+};
 
 /** App worktrees are private to the hub and always detached at the freshly fetched origin/main. */
 export function createCrewApps(deps: CrewAppsDeps): CrewApps {
   const now = deps.now ?? Date.now;
-  const probe = deps.probe ?? (async () => false);
+  const probe = deps.probe ?? probeLocal;
+  const worktreeExists = deps.worktreeExists ?? ((path) => existsSync(join(path, ".git")));
+  const prepared = new Set<string>();
   const running = new Map<
     string,
-    { workspace: string; urls: string[]; main: string; restartedAt?: number }
+    {
+      workspace: string;
+      urls: { url: string; answers: boolean | null }[];
+      main: string;
+      restartedAt?: number;
+    }
   >();
 
   const repoOf = (id: string) => deps.repos().find((repo) => repo.id === id);
@@ -83,21 +108,28 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     const repo = repoOf(repoId);
     if (!repo || repo.commands.length === 0) return;
     checkJobs(repo);
-    const old = running.get(repoId);
-    if (old) await deps.cmux.close(old.workspace);
     const worktree = join(deps.root, repo.id);
     await deps.run("git", ["-C", repo.checkout, "fetch", "origin", "main"]);
     const main = (await deps.run("git", ["-C", repo.checkout, "rev-parse", "origin/main"])).trim();
-    await deps.run("git", [
-      "-C",
-      repo.checkout,
-      "worktree",
-      "add",
-      "--force",
-      "--detach",
-      worktree,
-      "origin/main",
-    ]);
+    if (prepared.has(repo.id) || worktreeExists(worktree)) {
+      await deps.run("git", ["-C", worktree, "reset", "--hard", "origin/main"]);
+      await deps.run("git", ["-C", worktree, "clean", "-fdx"]);
+      prepared.add(repo.id);
+    } else {
+      await deps.run("git", [
+        "-C",
+        repo.checkout,
+        "worktree",
+        "add",
+        "--force",
+        "--detach",
+        worktree,
+        "origin/main",
+      ]);
+      prepared.add(repo.id);
+    }
+    const old = running.get(repoId);
+    if (old) await deps.cmux.close(old.workspace);
     await deps.cmux.ensure();
     const repos = deps.repos();
     const first = repo.commands[0] as CrewAppCommand;
@@ -105,15 +137,19 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     const workspace = await deps.cmux.newWorkspace({
       name: appName(repo.id),
       cwd: worktree,
-      command: `PORT=${firstPort} ${first.command}`,
+      command: commandAt(repo.id, first.command, firstPort),
     });
-    const urls = [urlAt(first.url, firstPort)];
+    const urls = [{ url: urlAt(first.url, firstPort), answers: null }];
     for (const [index, command] of repo.commands.slice(1).entries()) {
       const port = portOf(repos, repo.id, index + 1);
-      await deps.cmux.newPane(workspace, worktree, `PORT=${port} ${command.command}`);
-      urls.push(urlAt(command.url, port));
+      await deps.cmux.newPane(
+        workspace,
+        worktree,
+        commandAt(repo.id, command.command, port, firstPort),
+      );
+      urls.push({ url: urlAt(command.url, port), answers: null });
     }
-    await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, urls[0] as string);
+    await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, urls[0]?.url as string);
     running.set(repo.id, { workspace, urls, main });
     deps.log?.(`Started ${appName(repo.id)} from origin/main.`);
   };
@@ -139,7 +175,12 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
           await start(repo.id);
           continue;
         }
-        const answers = await Promise.all(app.urls.map(probe));
+        const answers = await Promise.all(
+          app.urls.map((entry) => probe(entry.url).catch(() => false)),
+        );
+        app.urls.forEach((entry, index) => {
+          entry.answers = answers[index] ?? false;
+        });
         if (answers.every(Boolean)) continue;
         if (app.restartedAt !== undefined && now() - app.restartedAt < APP_RESTART_MS) continue;
         app.restartedAt = now();
@@ -154,6 +195,12 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
         id: repo.id,
         name: appName(repo.id),
         running: running.has(repo.id),
+        apps:
+          running.get(repo.id)?.urls ??
+          repo.commands.map((command, index) => ({
+            url: urlAt(command.url, portOf(deps.repos(), repo.id, index)),
+            answers: null,
+          })),
       }));
     },
   };

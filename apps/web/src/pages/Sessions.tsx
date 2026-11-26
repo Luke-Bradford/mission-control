@@ -105,9 +105,14 @@ const message = (error: unknown): string =>
  */
 export function Sessions() {
   const res = useResource<CmuxSessionsView>(RESOURCES.sessions);
-  const crewApps = useResource<{ id: string; name: string; running: boolean }[]>(
-    RESOURCES.crewApps,
-  );
+  const crewApps = useResource<
+    {
+      id: string;
+      name: string;
+      running: boolean;
+      apps: { url: string; answers: boolean | null }[];
+    }[]
+  >(RESOURCES.crewApps);
   const sidebar = useResource<{ on: boolean }>(RESOURCES.sessionsSidebar);
   const [writesOverride, setWritesOverride] = useState<boolean | null>(null);
   const tz = useTz();
@@ -169,6 +174,10 @@ export function Sessions() {
         </button>
       </div>
       {crewApps.data && crewApps.data.length > 0 && <CrewApps apps={crewApps.data} />}
+      {crewApps.loading && <p className="sess-note">Reading crew apps…</p>}
+      {crewApps.error && (
+        <p className="sess-banner">Could not read crew apps: {crewApps.error.message}</p>
+      )}
       {opening && <OpenForm onClose={() => setOpening(false)} />}
       {error && (
         <p className="sess-banner" role="alert">
@@ -194,7 +203,16 @@ export function Sessions() {
   );
 }
 
-function CrewApps({ apps }: { apps: { id: string; name: string; running: boolean }[] }) {
+function CrewApps({
+  apps,
+}: {
+  apps: {
+    id: string;
+    name: string;
+    running: boolean;
+    apps: { url: string; answers: boolean | null }[];
+  }[];
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   const change = async (id: string, action: "start" | "stop") => {
     setBusy(id);
@@ -217,6 +235,22 @@ function CrewApps({ apps }: { apps: { id: string; name: string; running: boolean
           <span className={`sess-ans ${app.running ? "ok" : "muted"}`}>
             {app.running ? "Running" : "Stopped"}
           </span>
+          {app.apps.map((endpoint) => (
+            <span className="sess-appcell" key={endpoint.url}>
+              <a className="sess-applink" href={endpoint.url}>
+                {shortUrl(endpoint.url)}
+              </a>
+              <span
+                className={`sess-ans ${endpoint.answers === true ? "ok" : endpoint.answers === false ? "crit" : "muted"}`}
+              >
+                {endpoint.answers === true
+                  ? "Answers"
+                  : endpoint.answers === false
+                    ? "Not answering"
+                    : "Not checked"}
+              </span>
+            </span>
+          ))}
           <button
             type="button"
             className="ghost"
