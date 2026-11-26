@@ -185,6 +185,8 @@ describe("Sessions page", () => {
     view = { ...VIEW, sessions: [row({ id: ID.pricing, name: "new workspace" })] };
     await act(async () => hub.refetchTopic("sessions"));
     expect(await screen.findByText("new workspace")).toBeTruthy();
+  });
+
   it("shows each session's cost today, the week on hover and focus, and a dash with no use", async () => {
     const spend = {
       today: { tokens: 412_000, costUsd: 1.234 },
@@ -216,8 +218,8 @@ describe("Sessions page", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
     // No spend reads as a dash, whether the row has none or no agent.
     const cells = (i: number) => within(bodyRows()[i] as HTMLElement).getAllByRole("cell");
-    expect(cells(1)[4]?.textContent).toBe("—");
-    expect(cells(3)[4]?.textContent).toBe("—");
+    expect(cells(1)[5]?.textContent).toBe("—");
+    expect(cells(3)[5]?.textContent).toBe("—");
   });
 
   it("never shows a model without a price as a known cost", async () => {
