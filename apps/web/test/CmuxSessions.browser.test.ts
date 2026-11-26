@@ -20,6 +20,9 @@ const MIN = 60_000;
 const LONG =
   "Reworking the basket summary so the totals line up with the new price breakdown on mobile, then the receipt email, then the invoice PDF, then the order history page.";
 
+const LONG_COMMAND =
+  "pnpm -s vitest run apps/server/test/cmux-session-checks.test.ts apps/server/test/cmux-sessions-api.test.ts apps/web/test/CmuxSessions.test.tsx";
+
 const STATES: CmuxSessionState[] = ["waiting", "working", "working", "idle", "idle", "no-agent"];
 const NAMES = ["pricing", "storefront", "GUIDO-1 · #2235", "FLIGHT · crew", "notes", "api server"];
 
@@ -34,6 +37,7 @@ function row(i: number, long: boolean): CmuxSessionRow {
       ? `/Users/op/Dev/mc-crew/worktrees/mission-control/guido-1-${2200 + i}`
       : "/Users/op/Dev/shop-app/pricing",
     repo: crew ? "mission-control" : "shop-app",
+    repoKey: crew ? "/Users/op/Dev/mission-control" : "/Users/op/Dev/shop-app",
     state,
     since: NOW - (4 + i * 7) * MIN,
     lastLine: long && i === 0 ? LONG : `Line ${i + 1}: moved 3 of 4 price tables`,
@@ -45,6 +49,12 @@ function row(i: number, long: boolean): CmuxSessionRow {
           ? { url: "http://localhost:8080", answers: false }
           : null,
     inbox: { unread: i === 1 ? 1 : 0, newest: i === 1 ? "The pricing API is back." : null },
+    check:
+      i === 0
+        ? { state: "failed", at: NOW - 5 * MIN, command: long ? LONG_COMMAND : "pnpm test", why: "idle" }
+        : i === 1
+          ? { state: "running", at: NOW - MIN, command: "pnpm test", why: "operator" }
+          : null,
   };
 }
 
@@ -52,6 +62,27 @@ const view = (n: number, long = false): CmuxSessionsView => ({
   ok: true,
   at: NOW,
   sessions: Array.from({ length: n }, (_, i) => row(i, long)),
+  repos:
+    n === 0
+      ? []
+      : [
+          {
+            repo: "/Users/op/Dev/shop-app",
+            name: "shop-app",
+            on: true,
+            source: "page",
+            commands: long ? [LONG_COMMAND] : ["pnpm lint", "pnpm test"],
+            pageCommands: long ? [LONG_COMMAND] : ["pnpm lint", "pnpm test"],
+          },
+          {
+            repo: "/Users/op/Dev/mission-control",
+            name: "mission-control",
+            on: false,
+            source: "repo",
+            commands: ["pnpm -s lint", "pnpm -s typecheck"],
+            pageCommands: [],
+          },
+        ],
 });
 
 async function open(
