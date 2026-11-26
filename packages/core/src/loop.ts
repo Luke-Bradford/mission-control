@@ -802,6 +802,8 @@ export interface LoopSnapshot {
   floorApproved?: boolean;
   /** The run's profile limits: CI tries and review rounds. Absent: `CI_TRIES` and `REVIEW_ROUNDS`. */
   limits?: { tries: number; rounds: number };
+  /** This repository uses its own bot for review, so unattended rework stops after three rounds. */
+  repoBotReview?: boolean;
   /** The card's column from the poll. */
   card: string | null;
   /** This run's seat_lines keys, with the time each was claimed. */
@@ -1617,7 +1619,9 @@ function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
   const granted =
     (loop.flightReworks?.[sha] ?? 0) > 0 ||
     (loop.flightReworkGrantEpoch !== undefined && loop.epoch >= loop.flightReworkGrantEpoch);
-  return granted ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
+  if (granted) return 1;
+  const rounds = s.limits?.rounds ?? REVIEW_ROUNDS;
+  return s.repoBotReview ? Math.min(3, rounds) : rounds;
 }
 
 /** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
