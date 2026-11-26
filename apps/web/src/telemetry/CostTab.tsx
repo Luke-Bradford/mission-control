@@ -670,6 +670,41 @@ function SpendTd({ c, strong = false }: { c: SpendCell; strong?: boolean }) {
   );
 }
 
+/**
+ * The owner rows' box: the header and eight 40 px rows show, the rest scroll. Its gutter is kept
+ * whether or not it scrolls, and the footer's box keeps the same one, so the two tables' fixed
+ * columns line up.
+ */
+const OWNER_ROWS = {
+  "--table-row": "40px",
+  flex: "none",
+  maxHeight: "calc(9 * var(--table-row))",
+  overflowY: "auto",
+  scrollbarGutter: "stable",
+} as CSSProperties;
+const OWNER_FOOT: CSSProperties = { flex: "none", overflow: "hidden", scrollbarGutter: "stable" };
+const OWNER_TABLE = { "--table-row": "40px", tableLayout: "fixed" } as CSSProperties;
+const OWNER_HEAD: CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 1,
+  background: "var(--surface)",
+};
+
+/** The owner tables' columns: Day and the four figures fixed, Repo takes the rest. */
+function OwnerCols() {
+  return (
+    <colgroup>
+      <col style={{ width: 96 }} />
+      <col />
+      <col style={{ width: 92 }} />
+      <col style={{ width: 92 }} />
+      <col style={{ width: 92 }} />
+      <col style={{ width: 92 }} />
+    </colgroup>
+  );
+}
+
 /** Every Claude session on this Mac by day and repo: the operator's, the crew's and FLIGHT's. */
 function SpendByOwner({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const tz = useTz();
@@ -695,17 +730,33 @@ function SpendByOwner({ t, scope }: { t: Telemetry | undefined; scope: Scope }) 
         <p className="pb s muted">No Claude sessions in the last 7 days.</p>
       ) : (
         <>
-          {/* every row in normal flow, then the total and the note: the panel grows, nothing scrolls */}
-          <div className="pb tw" style={{ flex: "none", overflow: "visible" }}>
-            <table style={{ "--table-row": "40px" } as CSSProperties}>
+          {/* the rows scroll in their own box, the header held at its top; the account total and
+              the note sit below it, outside the scroll, so no row can pass behind them */}
+          <div
+            className="pb tw"
+            style={OWNER_ROWS}
+            tabIndex={0}
+            role="region"
+            aria-label="Spend by owner rows"
+          >
+            <table style={OWNER_TABLE}>
+              <OwnerCols />
               <thead>
                 <tr>
-                  <th>Day</th>
-                  <th>Repo</th>
-                  <th className="r">Yours</th>
-                  <th className="r">Crew</th>
-                  <th className="r">FLIGHT</th>
-                  <th className="r">Total</th>
+                  <th style={OWNER_HEAD}>Day</th>
+                  <th style={OWNER_HEAD}>Repo</th>
+                  <th className="r" style={OWNER_HEAD}>
+                    Yours
+                  </th>
+                  <th className="r" style={OWNER_HEAD}>
+                    Crew
+                  </th>
+                  <th className="r" style={OWNER_HEAD}>
+                    FLIGHT
+                  </th>
+                  <th className="r" style={OWNER_HEAD}>
+                    Total
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -722,6 +773,11 @@ function SpendByOwner({ t, scope }: { t: Telemetry | undefined; scope: Scope }) 
                   </tr>
                 ))}
               </tbody>
+            </table>
+          </div>
+          <div className="pb tw" style={OWNER_FOOT}>
+            <table style={OWNER_TABLE}>
+              <OwnerCols />
               <tfoot>
                 <tr>
                   <th colSpan={5}>Account total</th>
@@ -830,7 +886,7 @@ function StepTable({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
 /**
  * The first row, Totals beside Spend by owner, is at least as tall as its panels' content. The
  * grid's 240 px rows stay at 240 px once the page overflows, which cut the account total off; the
- * owner table shows every row, so the panel grows with them.
+ * owner panel grows to its eight-row box, the account total and the note.
  */
 const TABLES_ROWS: CSSProperties = { gridTemplateRows: "minmax(min-content, auto)" };
 

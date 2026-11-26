@@ -18,7 +18,7 @@ import type {
   SpendOwner,
 } from "../store/session-spend.ts";
 import type { Store } from "../store.ts";
-import { offsetSince, readNewLines } from "../transcript/tail.ts";
+import { MAX_READ_BYTES, offsetSince, readNewLines } from "../transcript/tail.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -125,13 +125,18 @@ const KINDS = ["input", "output", "cacheWrite5m", "cacheWrite1h", "cacheRead"] a
  *
  * Throws when `root` cannot be read (nothing is recorded) or, after reading the rest, when some
  * transcripts could not be read (their offsets are kept). Either way readAt keeps the last full
- * read and the failure is stored for the panel, so partial totals never look fresh.
+ * read and the failure is stored for the panel, so partial totals never look fresh. A pass reads at
+ * most `passBytes`, the most recently changed files first, so a just-ended turn is read ahead of a
+ * long first read; while files are left, readAt also keeps the last full read and the panel says
+ * how many are still to read.
  */
 export function readSessionSpend(i: {
   config: CcConfig;
   store: Store;
   root: string;
   now: number;
+  /** Most bytes this pass reads (default SESSION_SPEND_PASS_BYTES). */
+  passBytes?: number;
 }): {
   files: number;
   added: number;
@@ -143,7 +148,7 @@ export function readSessionSpend(i: {
   const attribute = attribution(config, store);
   let files = 0;
   let added = 0;
-  let budget = SESSION_SPEND_PASS_BYTES;
+  let budget = i.passBytes ?? SESSION_SPEND_PASS_BYTES;
   let listed: { paths: string[]; unreadable: string[] };
   try {
     listed = transcriptFiles(root);
@@ -153,14 +158,19 @@ export function readSessionSpend(i: {
   }
   const { paths, unreadable } = listed;
   const failed = [...unreadable];
+  // files the byte budget left unread, or read only part of: the pass is not a full read
+  let pending = 0;
+  const stated: { path: string; st: { size: number; mtimeMs: number } }[] = [];
   for (const path of paths) {
-    let st: { size: number; mtimeMs: number };
     try {
-      st = statSync(path);
+      stated.push({ path, st: statSync(path) });
     } catch {
       failed.push(path);
-      continue;
     }
+  }
+  // the most recently changed first, so a turn that just ended is read ahead of a long backlog
+  stated.sort((a, b) => b.st.mtimeMs - a.st.mtimeMs);
+  for (const { path, st } of stated) {
     const prev = store.sessionSpendFile(path);
     if (prev && prev.size === st.size && prev.mtime === st.mtimeMs) continue;
     if (!prev && st.mtimeMs < weekStart) {
@@ -171,7 +181,10 @@ export function readSessionSpend(i: {
       );
       continue;
     }
-    if (budget <= 0) break;
+    if (budget <= 0) {
+      pending++;
+      continue;
+    }
     files++;
     const stem = basename(path, ".jsonl");
     let offset = prev ? prev.offset : offsetSince(path, weekStart, { maxBytes: st.size });
@@ -213,6 +226,7 @@ export function readSessionSpend(i: {
     for (;;) {
       let error = false;
       const r = readNewLines(path, offset, {
+        maxBytes: Math.min(MAX_READ_BYTES, budget),
         onError: () => {
           error = true;
         },
@@ -271,12 +285,14 @@ export function readSessionSpend(i: {
       failed.push(path);
       continue;
     }
+    const short = budget <= 0 && offset < st.size;
+    if (short) pending++;
     store.addSessionSpend(
       {
         path,
         offset,
         // a pass that stopped short reads on next time, even when the file has not changed
-        size: budget <= 0 || unread ? -1 : st.size,
+        size: short || unread ? -1 : st.size,
         mtime: st.mtimeMs,
         last,
       },
@@ -293,6 +309,14 @@ export function readSessionSpend(i: {
     throw new Error(
       `${failed.length} of the transcripts under ${root} could not be read: ${failed.slice(0, 3).join(", ")}`,
     );
+  }
+  if (pending > 0) {
+    // not a failure, but the totals still miss sessions: keep the last full read and say so
+    store.setSetting(
+      SESSION_SPEND_FAILED_SETTING,
+      `${pending} ${pending === 1 ? "transcript" : "transcripts"} still to read.`,
+    );
+    return { files, added };
   }
   store.setSetting(SESSION_SPEND_READ_SETTING, String(now));
   store.setSetting(SESSION_SPEND_FAILED_SETTING, "");

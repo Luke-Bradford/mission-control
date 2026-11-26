@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -362,6 +363,48 @@ describe("session spend", () => {
     });
     expect(sessionSpendFor(store, ["locked"], NOW, TZ).get("locked")?.today.tokens).toBe(20);
     expect(sessionSpendFor(store, ["ok"], NOW, TZ).get("ok")?.today.tokens).toBe(20);
+  });
+
+  it("a capped pass is not a full read, and a just-ended turn is read ahead of the backlog", () => {
+    const p = join(root, "p");
+    mkdirSync(p);
+    const u = { input_tokens: 10, output_tokens: 10 };
+    // four backlog files of about 2.5 kB each, last changed an hour or more ago
+    for (let f = 0; f < 4; f++) {
+      const file = join(p, `old-${f}.jsonl`);
+      let text = "";
+      for (let m = 0; m < 10; m++) text += turn(`old-${f}`, "/x", `m${m}`, NOW - 7_200_000, u);
+      writeFileSync(file, text);
+      const at = (NOW - 3_600_000 * (f + 1)) / 1000;
+      utimesSync(file, at, at);
+    }
+    const passBytes = 3000;
+    const pass = (now: number) => readSessionSpend({ config, store, root, now, passBytes });
+    pass(NOW);
+    expect(sessionSpendSplit(config, store, NOW)).toMatchObject({
+      readAt: null,
+      failed: expect.stringMatching(/transcripts? still to read\./),
+    });
+    // the operator ends a turn in a new session while the backlog is still being read
+    const fresh = join(p, "sess-new.jsonl");
+    writeFileSync(fresh, turn("sess-new", "/nowhere/notes", "n1", NOW + 20_000, u));
+    utimesSync(fresh, (NOW + 20_000) / 1000, (NOW + 20_000) / 1000);
+    pass(NOW + 30_000);
+    expect(sessionSpendFor(store, ["sess-new"], NOW + 30_000, TZ).get("sess-new")?.today.tokens).toBe(
+      20,
+    );
+    expect(sessionSpendSplit(config, store, NOW + 30_000).readAt).toBeNull();
+    // the backlog carries on at each pass until every file is read to its end
+    let now = NOW + 30_000;
+    for (let i = 0; i < 10 && sessionSpendSplit(config, store, now).readAt === null; i++) {
+      now += 30_000;
+      pass(now);
+    }
+    expect(sessionSpendSplit(config, store, now)).toMatchObject({
+      readAt: now,
+      failed: null,
+      total: { tokens: 4 * 10 * 20 + 20 },
+    });
   });
 
   it("a later block of a message read on a later pass adds only what it grew by", () => {
