@@ -72,11 +72,11 @@ export function parseCmuxEvent(line: string): CmuxEvent | null {
     return null;
   }
   if (!isObj(value)) return null;
-  const name = pick(value, "type", "event", "name");
+  const name = pick(value, "name", "event", "type");
   const kind =
     name === "workspace.created" ? "created" : name === "workspace.closed" ? "closed" : null;
   if (kind === null) return null;
-  const id = pick(value, "workspace_id", "workspaceId", "id");
+  const id = pick(value, "workspace_id", "workspaceId");
   return { kind, workspaceId: typeof id === "string" ? id : null };
 }
 

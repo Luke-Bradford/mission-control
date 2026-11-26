@@ -52,7 +52,9 @@ describe("cmux sidebar", () => {
       });
       expect(starts).toHaveBeenCalledTimes(1);
       if (firstLine === undefined) throw new Error("cmux events callback was not registered");
-      firstLine('{"type":"workspace.created","workspace_id":"new"}');
+      firstLine(
+        '{"type":"event","name":"workspace.created","workspace_id":"new","id":"event-new"}',
+      );
       expect(changed).toHaveBeenCalledWith({ kind: "created", workspaceId: "new" });
       resolveEnd();
       await vi.advanceTimersByTimeAsync(5000);

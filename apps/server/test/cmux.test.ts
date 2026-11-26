@@ -10,11 +10,19 @@ import {
 
 describe("cmux parsers", () => {
   it("reads workspace lifecycle events and rejects unrelated lines", () => {
-    expect(parseCmuxEvent('{"type":"workspace.created","workspace_id":"one"}')).toEqual({
+    expect(
+      parseCmuxEvent(
+        '{"type":"event","name":"workspace.created","workspace_id":"one","id":"event-one"}',
+      ),
+    ).toEqual({
       kind: "created",
       workspaceId: "one",
     });
-    expect(parseCmuxEvent('{"event":"workspace.closed","id":"two"}')).toEqual({
+    expect(
+      parseCmuxEvent(
+        '{"type":"event","name":"workspace.closed","workspace_id":"two","id":"event-two"}',
+      ),
+    ).toEqual({
       kind: "closed",
       workspaceId: "two",
     });
