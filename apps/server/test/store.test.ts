@@ -30,6 +30,7 @@ import {
   DEFAULT_PROFILES,
   FLIGHT_SIGNALS_SETTING,
   NEW_LOOP,
+  usageCostUsd,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pendingRunApproval } from "../src/attention/subjects.ts";
@@ -540,6 +541,39 @@ describe("Store", () => {
         ["k", "shop-app#9"],
       ]),
     );
+  });
+
+  it("prices once, from their tokens, the Claude runs since cmux seats that have no cost", () => {
+    const since = Date.UTC(2026, 10, 26, 4, 5);
+    const tokens = { input: 1000, output: 2000, cacheRead: 30_000, cacheCreate: 4000 };
+    const model = "claude-opus-5-5";
+    store.upsertRun(run({ id: "cmux", seq: 1, startedAt: since, model, tokens }));
+    store.upsertRun(run({ id: "paid", seq: 2, startedAt: since, model, tokens, costUsd: 9 }));
+    store.upsertRun(run({ id: "old", seq: 3, startedAt: since - 1, model, tokens }));
+    store.upsertRun(run({ id: "codex", seq: 4, startedAt: since, model, tokens, vendor: "codex" }));
+    store.upsertRun(run({ id: "unpriced", seq: 5, startedAt: since, model: "gpt-9", tokens }));
+    store.upsertRun(run({ id: "empty", seq: 6, startedAt: since, model }));
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    db.prepare("DELETE FROM settings WHERE key = 'run-cost-from-tokens-v1'").run();
+    db.close();
+    const cost = (s: Store) => new Map(s.runs("a1", 10).map((r) => [r.id, r.costUsd]));
+    const reopened = new Store(join(dir, "mc.sqlite"));
+    expect(cost(reopened)).toEqual(
+      new Map([
+        ["cmux", usageCostUsd(model, tokens)],
+        ["paid", 9],
+        ["old", null],
+        ["codex", null],
+        ["unpriced", null],
+        ["empty", null],
+      ]),
+    );
+    // once: a run stored without a cost afterwards is left to the fold, not re-priced on open
+    reopened.upsertRun(run({ id: "later", seq: 7, startedAt: since, model, tokens }));
+    reopened.close();
+    const again = new Store(join(dir, "mc.sqlite"));
+    expect(cost(again).get("later")).toBeNull();
+    again.close();
   });
 
   it("migrates an old runs table, defaulting prs, summary and folded", () => {
