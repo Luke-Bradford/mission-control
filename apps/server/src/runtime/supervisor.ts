@@ -1443,6 +1443,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       emit({ kind: "seat-free", seatId, runId: l.run.id });
       return;
     }
+    // The cmux session tries this as Claude exits. Retry from the run-end path so a refused close
+    // cannot leave a workspace behind without the supervisor recording and attempting its cleanup.
+    if (viaCmux(l.run)) void endAndRemoveKeeper(seatId, l.run.id);
     recordEnded(l.run.id, l.run.endedAt as number, l.run.status, l.endedBy ?? "exit");
     removeRunFiles(l.run.id);
     closeRunItems(l.info, l.run.id);

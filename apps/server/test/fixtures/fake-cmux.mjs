@@ -8,6 +8,7 @@
 //   sent        [{ws, text, paste}]             every `send`
 //   keys        [{ws, key, force}]              every `send-key`
 //   closed      [ws]                            every `close-workspace`
+//   closeAttempts [ws]                          every `close-workspace`, including one that refuses
 //   sameName    [ws]                            every listed workspace a `new-workspace` shared its name with
 //   screens     {ws: text}                      what `read-screen` prints
 //   calls       [[argv...]]                     every call that changes something
@@ -293,9 +294,11 @@ switch (cmd) {
     ok("OK surface:9");
     break;
   case "close-workspace": {
+    const id = flag("--workspace");
+    state.closeAttempts ??= [];
+    state.closeAttempts.push(id);
     if (state.noForce && rest.includes("--force")) fail("unknown flag --force");
     if (state.noClose) fail("could not close the workspace");
-    const id = flag("--workspace");
     state.closed ??= [];
     state.closed.push(id);
     if (state.linger)

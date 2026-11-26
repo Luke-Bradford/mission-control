@@ -45,6 +45,7 @@ interface FakeCmux {
   sent: { text: string }[];
   keys: { key: string; force: boolean }[];
   closed: string[];
+  closeAttempts?: string[];
   calls: string[][];
   [k: string]: unknown;
 }
@@ -359,6 +360,24 @@ describe("a Claude run in cmux", () => {
 
     await sup.endRun("guido-1");
 
+    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
+  });
+
+  it("retries closing a workspace when Claude exits", async () => {
+    const claude = spawn("sleep", ["60"], { stdio: "ignore" });
+    fakeCmux({ claudePid: claude.pid, noClose: true });
+    const { sup } = make({ cmuxState: stateFile() });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(cmuxState().sent).toHaveLength(1));
+    const workspace = cmuxState().workspaces[0]?.id;
+
+    claude.kill("SIGKILL");
+
+    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    await until(() =>
+      expect(cmuxState().closeAttempts?.filter((id) => id === workspace)).toHaveLength(2),
+    );
     expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
   });
 
