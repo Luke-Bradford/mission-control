@@ -43,6 +43,7 @@ import {
   trustMenu,
   withKeeperFallback,
 } from "../src/runtime/cmux-session.ts";
+import { CMUX_CLEAR_MARK, foldTranscript } from "../src/run/streamjson.ts";
 import type { CrewSession } from "../src/runtime/session.ts";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-cmux.mjs", import.meta.url));
@@ -523,9 +524,41 @@ describe("startCmuxSession", () => {
     );
     await wait(() => h.events.some((e) => e.kind === "init"));
     expect(h.events.find((e) => e.kind === "init")).toMatchObject({ sessionId: fresh });
-    await wait(() => h.session.lines === 1);
+    await wait(() => h.session.lines === 2);
     expect(h.session.alive).toBe(true);
     expect(h.events.some((e) => e.kind === "exit")).toBe(false);
+    await h.session.close();
+  });
+
+  it("an operator's /clear forgets the cleared session's context use until the new one replies", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+    });
+    const h = start();
+    await h.session.ready;
+    h.claudeLines({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "full" }], usage: { input_tokens: 90_000 } },
+    });
+    await wait(() => h.session.lines === 1);
+    await expect(h.session.control("get_context_usage")).resolves.toMatchObject({
+      totalTokens: 90_000,
+    });
+    const fresh = "22222222-2222-4222-8222-222222222222";
+    writeFileSync(
+      join(root, "fresh.jsonl"),
+      `${JSON.stringify({ type: "user", message: { content: "x" } })}\n`,
+    );
+    patch((s) => {
+      s.sessions[0].session_id = fresh;
+      s.sessions[0].transcript_path = join(root, "fresh.jsonl");
+    });
+    await wait(() => h.events.some((e) => e.kind === "init"));
+    await expect(h.session.control("get_context_usage")).rejects.toMatchObject({ kind: "refused" });
+    await wait(() => readFileSync(h.transcript, "utf8").includes('"content":"x"'));
+    const run = readFileSync(h.transcript, "utf8").trim().split("\n");
+    expect(foldTranscript(null, run, 1).digest.contextTokens).toBeNull();
+    expect(foldTranscript(null, run, 1).sessionId).toBe(fresh);
     await h.session.close();
   });
 
@@ -897,9 +930,9 @@ describe("a restart reads Claude's transcript from where it left off", () => {
       s.sessions[0].session_id = fresh;
       s.sessions[0].transcript_path = freshFile;
     });
-    await wait(() => h.session.lines === 4);
-    appendFileSync(freshFile, `${JSON.stringify({ type: "assistant", t: "y" })}\n`);
     await wait(() => h.session.lines === 5);
+    appendFileSync(freshFile, `${JSON.stringify({ type: "assistant", t: "y" })}\n`);
+    await wait(() => h.session.lines === 6);
     appendFileSync(freshFile, `${JSON.stringify({ type: "assistant", t: "new" })}\n`);
     const h2 = { ...h, sessionId: fresh, claudeLines: () => {} } as Harness;
     await restartAfter(h2, [], h.transcript);
@@ -907,7 +940,17 @@ describe("a restart reads Claude's transcript from where it left off", () => {
       .trim()
       .split("\n")
       .map((l) => JSON.parse(l));
-    expect(copied.map((l) => l.t)).toEqual(["a", "b", "c", "x", "y", "new"]);
+    expect(copied.filter((l) => !l[CMUX_CLEAR_MARK]).map((l) => l.t)).toEqual([
+      "a",
+      "b",
+      "c",
+      "x",
+      "y",
+      "new",
+    ]);
+    expect(copied.filter((l) => l[CMUX_CLEAR_MARK])).toEqual([
+      { type: "system", subtype: "init", session_id: fresh, [CMUX_CLEAR_MARK]: true },
+    ]);
   });
 });
 
@@ -947,7 +990,7 @@ it("after /clear to a transcript with as many lines as the old one, the fresh li
     s.sessions[0].session_id = "55555555-5555-4555-8555-555555555555";
     s.sessions[0].transcript_path = freshFile;
   });
-  await wait(() => h.session.lines === 2);
+  await wait(() => h.session.lines === 3);
   await new Promise((r) => setTimeout(r, 100));
   const h2 = {
     ...h,
@@ -959,7 +1002,7 @@ it("after /clear to a transcript with as many lines as the old one, the fresh li
     .trim()
     .split("\n")
     .map((l) => JSON.parse(l));
-  expect(copied.map((l) => l.t)).toEqual(["old", "fresh"]);
+  expect(copied.filter((l) => !l[CMUX_CLEAR_MARK]).map((l) => l.t)).toEqual(["old", "fresh"]);
 });
 
 describe("attachCmuxSession", () => {
@@ -1244,6 +1287,41 @@ describe("with no cmux record of the session", () => {
     );
     await wait(() => readFileSync(h.transcript, "utf8").includes("later"));
     expect(h.events.filter((e) => e.kind === "init")).toHaveLength(1);
+    h.session.detach();
+  });
+
+  it("a /clear with no record forgets the cleared session's context use until the new one replies", async () => {
+    const h = await bare();
+    patch((s) => {
+      s.screen = PROMPT_SCREEN;
+    });
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${launched()}\n`);
+    await h.session.ready;
+    own(h, {
+      type: "assistant",
+      cwd: root,
+      sessionId: h.sessionId,
+      message: { content: [{ type: "text", text: "full" }], usage: { input_tokens: 90_000 } },
+    });
+    await wait(
+      () => existsSync(h.transcript) && readFileSync(h.transcript, "utf8").includes("full"),
+    );
+    await expect(h.session.control("get_context_usage")).resolves.toMatchObject({
+      totalTokens: 90_000,
+    });
+    const dir = join(root, "config", "projects", "-some-folder");
+    const fresh = "44444444-4444-4444-8444-444444444444";
+    writeFileSync(
+      join(dir, `${fresh}.jsonl`),
+      `${JSON.stringify({ type: "user", cwd: root, sessionId: fresh, message: { content: "after clear" } })}\n`,
+    );
+    await wait(() => h.events.some((e) => e.kind === "init"));
+    await expect(h.session.control("get_context_usage")).rejects.toMatchObject({ kind: "refused" });
+    await wait(() => readFileSync(h.transcript, "utf8").includes("after clear"));
+    expect(
+      foldTranscript(null, readFileSync(h.transcript, "utf8").trim().split("\n"), 1).digest
+        .contextTokens,
+    ).toBeNull();
     h.session.detach();
   });
 

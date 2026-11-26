@@ -24,6 +24,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { isObj, type SessionEvent } from "@mc/core";
 import { parseJson, rethrowJson } from "../json.ts";
+import { CMUX_CLEAR_MARK } from "../run/streamjson.ts";
 import { toolResultBytes } from "../telemetry/prompt-cost.ts";
 import { sleep, str } from "../util.ts";
 import type { Cmux, CmuxAgent } from "./cmux.ts";
@@ -632,6 +633,20 @@ function createCmuxDriver(
     emit({ kind: "result", isError: false, stopReason: "end_turn" });
   }
 
+  /**
+   * An operator's /clear: the same Claude on a new session. Its context is unknown until its first
+   * reply, here and in the run's digest, so a cleared FLIGHT is not handed over on the old reading.
+   */
+  function cleared(id: string): void {
+    sessionId = id;
+    contextTokens = null;
+    appendTranscript(
+      JSON.stringify({ type: "system", subtype: "init", session_id: id, [CMUX_CLEAR_MARK]: true }),
+    );
+    lines++;
+    emit({ kind: "init", sessionId, model: null });
+  }
+
   function change(next: CmuxAgent["lifecycle"]): void {
     const prev = lifecycle;
     lifecycle = next;
@@ -669,8 +684,7 @@ function createCmuxDriver(
         const fresh = here.filter((a) => pid !== null && a.pid === pid).at(-1);
         if (fresh !== undefined) {
           seen = fresh;
-          sessionId = fresh.sessionId;
-          emit({ kind: "init", sessionId, model: null });
+          cleared(fresh.sessionId);
         } else seen = here.at(-1);
       }
       if (seen !== undefined && seen.pid !== null && pid !== null && seen.pid !== pid) {
@@ -692,8 +706,7 @@ function createCmuxDriver(
         // /clear with no record: the same process starts a new transcript beside the old one
         const next = clearedTo(path);
         if (next !== null) {
-          sessionId = next.id;
-          emit({ kind: "init", sessionId, model: null });
+          cleared(next.id);
           path = next.path;
           copyTranscript(path);
         }
