@@ -104,4 +104,36 @@ describe("branch pull requests", () => {
       pr: { ci: "failing" },
     });
   });
+
+  it("rechecks pending CI after two minutes", async () => {
+    let now = 0;
+    const gh = vi
+      .fn()
+      .mockResolvedValueOnce({
+        code: 0,
+        stdout:
+          '[{"number":2,"url":"https://x","isDraft":false,"reviewDecision":null,"statusCheckRollup":[{"state":"PENDING"}]}]',
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        stdout:
+          '[{"number":2,"url":"https://x","isDraft":false,"reviewDecision":null,"statusCheckRollup":[{"conclusion":"SUCCESS"}]}]',
+        stderr: "",
+      });
+    const prs = createBranchPrs({
+      store: { openPullRequests: () => [] },
+      repos: () => [],
+      gh,
+      now: () => now,
+    });
+    await expect(prs.prOf("acme/app", "feature/one")).resolves.toMatchObject({
+      pr: { ci: "pending" },
+    });
+    now = 120_000;
+    await expect(prs.prOf("acme/app", "feature/one")).resolves.toMatchObject({
+      pr: { ci: "passing" },
+    });
+    expect(gh).toHaveBeenCalledTimes(2);
+  });
 });

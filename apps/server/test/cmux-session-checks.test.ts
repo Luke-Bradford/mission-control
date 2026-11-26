@@ -102,6 +102,7 @@ function setup(
   const store = new Store(join(dir, "store.sqlite"));
   const fake = fakeCmux(workspaces, agents);
   const notify = vi.fn();
+  const sidebarNotify = vi.fn(async () => {});
   const checks = createSessionChecks({
     cmux: fake.cmux,
     store,
@@ -109,6 +110,7 @@ function setup(
     crewRoots: () => [],
     configuredChecks: () => [],
     notify,
+    sidebarNotify,
     lowPriority: [],
     load: () => 0,
     cores: () => 8,
@@ -116,7 +118,7 @@ function setup(
     ...over,
   });
   running.push(checks);
-  return { ...fake, store, notify, checks };
+  return { ...fake, store, notify, sidebarNotify, checks };
 }
 
 /** Turns the repo on with these page commands, as the Sessions page does. */
@@ -231,6 +233,10 @@ it("a failing check sends one message with the command and its last 40 lines, an
   expect(m?.text).not.toMatch(/line 20\n/);
   expect(t.notify).toHaveBeenCalledTimes(1);
   expect(t.notify).toHaveBeenCalledWith(
+    `Checks failed in cmux session "pricing": ${PRINT_AND_FAIL}`,
+  );
+  expect(t.sidebarNotify).toHaveBeenCalledWith(
+    WS_A,
     `Checks failed in cmux session "pricing": ${PRINT_AND_FAIL}`,
   );
   expect(t.store.hubEvents(0).map((e) => e.text)).toContain(

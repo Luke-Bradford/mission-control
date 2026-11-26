@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { startCmuxEvents } from "../src/sessions/events.ts";
+import { ChangeBus } from "../src/bus.ts";
+import { applyCmuxSessionEvent, startCmuxEvents } from "../src/sessions/events.ts";
 import { createSessionSidebar } from "../src/sessions/sidebar.ts";
 
 const row = (over: Record<string, unknown> = {}) => ({
@@ -62,6 +63,32 @@ describe("cmux sidebar", () => {
     }
   });
 
+  it("makes an opened and closed workspace reach a fresh page view within two seconds", async () => {
+    let cached = true;
+    let open = false;
+    const invalidate = vi.fn(() => {
+      cached = false;
+    });
+    const view = vi.fn(async () => ({
+      ok: true as const,
+      at: 0,
+      sessions: cached ? [] : open ? [row()] : [],
+      repos: [],
+    }));
+    const bus = new ChangeBus();
+    const emitted = vi.fn();
+    bus.subscribe(emitted);
+    const sidebar = { tick: vi.fn(async () => {}) };
+    await view();
+    open = true;
+    applyCmuxSessionEvent({ sessions: { invalidate }, bus, sidebar });
+    await vi.waitFor(async () => expect((await view()).sessions).toHaveLength(1), { timeout: 2000 });
+    expect(emitted).toHaveBeenCalledWith("sessions");
+    open = false;
+    applyCmuxSessionEvent({ sessions: { invalidate }, bus, sidebar });
+    await vi.waitFor(async () => expect((await view()).sessions).toHaveLength(0), { timeout: 2000 });
+  });
+
   it("writes a pull request and only changed CI state", async () => {
     const current = [row()];
     const cmux = {
@@ -100,6 +127,54 @@ describe("cmux sidebar", () => {
     await sidebar.tick();
     expect(cmux.setStatus).not.toHaveBeenCalled();
     expect(cmux.linkPr).not.toHaveBeenCalled();
+  });
+
+  it("stops a pending tick when writes turn off", async () => {
+    let resolveView!: () => void;
+    let on = true;
+    const cmux = {
+      statuses: vi.fn(async () => ({})),
+      setStatus: vi.fn(async () => {}),
+      clearStatus: vi.fn(async () => {}),
+      linkPr: vi.fn(async () => {}),
+      notify: vi.fn(async () => {}),
+    };
+    const sidebar = createSessionSidebar({
+      sessions: { view: () => new Promise((resolve) => { resolveView = () => resolve({ ok: true, at: 0, sessions: [row()], repos: [] }); }) },
+      cmux,
+      store: { getSetting: () => (on ? null : "off") },
+    });
+    const tick = sidebar.tick();
+    await Promise.resolve();
+    on = false;
+    resolveView();
+    await tick;
+    expect(cmux.setStatus).not.toHaveBeenCalled();
+    expect(cmux.linkPr).not.toHaveBeenCalled();
+    expect(cmux.notify).not.toHaveBeenCalled();
+  });
+
+  it("serializes overlapping ticks", async () => {
+    let release!: () => void;
+    const cmux = {
+      statuses: vi.fn(() => new Promise<Record<string, string>>((resolve) => { release = () => resolve({}); })),
+      setStatus: vi.fn(async () => {}),
+      clearStatus: vi.fn(async () => {}),
+      linkPr: vi.fn(async () => {}),
+      notify: vi.fn(async () => {}),
+    };
+    const sidebar = createSessionSidebar({
+      sessions: { view: async () => ({ ok: true as const, at: 0, sessions: [row()], repos: [] }) },
+      cmux,
+      store: { getSetting: () => null },
+    });
+    const one = sidebar.tick();
+    const two = sidebar.tick();
+    await vi.waitFor(() => expect(cmux.statuses).toHaveBeenCalledTimes(1));
+    release();
+    await Promise.all([one, two]);
+    expect(cmux.linkPr).toHaveBeenCalledTimes(1);
+    expect(cmux.setStatus).toHaveBeenCalledTimes(1);
   });
 
   it("clears remembered mc keys, but not foreign keys", async () => {

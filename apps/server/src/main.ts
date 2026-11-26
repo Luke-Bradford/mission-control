@@ -159,7 +159,7 @@ import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { createSessionChecks } from "./sessions/checks.ts";
-import { startCmuxEvents } from "./sessions/events.ts";
+import { applyCmuxSessionEvent, startCmuxEvents } from "./sessions/events.ts";
 import { createBranchPrs } from "./sessions/pr.ts";
 import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
 import { createSessionSidebar } from "./sessions/sidebar.ts";
@@ -1037,6 +1037,7 @@ export async function main(): Promise<void> {
   const seatIds = () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];
   const branchPrs = createBranchPrs({ store, repos: () => config.repos, gh });
   const notifications = new LocalNotifications(store, config, bus, Date.now);
+  let sessionSidebar: ReturnType<typeof createSessionSidebar> | null = null;
   // An operator session's repo checks when it finishes a piece of work, in a repo he turned on.
   const sessionChecks = createSessionChecks({
     cmux,
@@ -1057,6 +1058,8 @@ export async function main(): Promise<void> {
         ?.checks ?? []),
     ],
     notify: (text) => notifications.notice("checks", text),
+    sidebarNotify: (workspaceId, body) =>
+      sessionSidebar?.notify(workspaceId, "checkFailed", body) ?? Promise.resolve(),
     log: (m) => log(m),
   });
   const sessions = createSessions({
@@ -1070,7 +1073,7 @@ export async function main(): Promise<void> {
     tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
     log: (m) => log(m),
   });
-  const sessionSidebar = createSessionSidebar({
+  sessionSidebar = createSessionSidebar({
     sessions,
     cmux,
     store,
@@ -1083,9 +1086,7 @@ export async function main(): Promise<void> {
     cmux,
     cursorFile: join(dirname(dbPath), "cmux-events.cursor"),
     onChange: () => {
-      sessions.invalidate();
-      bus.emit("sessions");
-      void sessionSidebar.tick();
+      if (sessionSidebar !== null) applyCmuxSessionEvent({ sessions, bus, sidebar: sessionSidebar });
     },
     log: (m) => log(m),
   });

@@ -28,7 +28,7 @@ export function createBranchPrs(deps: {
 }) {
   const cache = new Map<
     string,
-    { at: number; value: Promise<{ pr: SessionPr | null; repoId: string | null }> }
+    { at: number; ttl: number; value: Promise<{ pr: SessionPr | null; repoId: string | null }> }
   >();
   return {
     async prOf(
@@ -56,7 +56,7 @@ export function createBranchPrs(deps: {
       const key = `${github}:${branch}`;
       const now = deps.now?.() ?? Date.now();
       const prior = cache.get(key);
-      if (prior && now - prior.at < NO_PR_RECHECK_MS) return prior.value;
+      if (prior && now - prior.at < prior.ttl) return prior.value;
       const value = deps
         .gh(
           [
@@ -97,7 +97,11 @@ export function createBranchPrs(deps: {
           };
         })
         .catch(() => ({ pr: null, repoId: null }));
-      cache.set(key, { at: now, value });
+      const entry = { at: now, ttl: NO_PR_RECHECK_MS, value };
+      cache.set(key, entry);
+      void value.then(({ pr }) => {
+        entry.ttl = pr?.ci === "pending" ? PR_RECHECK_MS : NO_PR_RECHECK_MS;
+      });
       return value;
     },
   };

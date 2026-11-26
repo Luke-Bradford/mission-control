@@ -34,21 +34,28 @@ export function createSessionSidebar(deps: Deps) {
   const states = new Map<string, CmuxSessionRow["state"]>();
   const appAnswers = new Map<string, boolean | null>();
   let timer: NodeJS.Timeout | null = null;
+  let inFlight = Promise.resolve();
+  const writesOn = () => deps.writes !== false && cmuxWritesOn(deps.store);
+  const mutate = async (write: () => Promise<void>) => {
+    if (!writesOn()) return false;
+    await write();
+    return true;
+  };
   const set = async (id: string, key: string, value: string | null) => {
     const previous = values.get(id) ?? new Map<string, string>();
     if (previous.get(key) === value) return;
     if (value === null) {
       if (!previous.has(key)) return;
-      await deps.cmux.clearStatus(id, key);
+      if (!(await mutate(() => deps.cmux.clearStatus(id, key)))) return;
       previous.delete(key);
     } else {
-      await deps.cmux.setStatus(id, key, value);
+      if (!(await mutate(() => deps.cmux.setStatus(id, key, value)))) return;
       previous.set(key, value);
     }
     values.set(id, previous);
   };
-  const tick = async () => {
-    if (deps.writes === false || !cmuxWritesOn(deps.store)) return;
+  const reconcile = async () => {
+    if (!writesOn()) return;
     const view = await deps.sessions.view();
     if (!view.ok) return;
     const live = new Set(view.sessions.map((row) => row.id));
@@ -71,26 +78,26 @@ export function createSessionSidebar(deps: Deps) {
         appAnswers.set(row.id, row.app?.answers ?? null);
         if (row.owner === "operator" && previousState !== undefined) {
           if (row.state === "waiting" && previousState !== "waiting")
-            await deps.cmux.notify(
+            await mutate(() => deps.cmux.notify(
               row.id,
               SESSION_NOTICE_TITLE.waiting,
               `"${row.name}" has a question for you.`,
-            );
+            ));
           else if (previousState === "working" && row.state === "idle")
-            await deps.cmux.notify(
+            await mutate(() => deps.cmux.notify(
               row.id,
               SESSION_NOTICE_TITLE.finished,
               `"${row.name}" finished and is idle.`,
-            );
+            ));
           else if (previousAnswer === true && row.app?.answers === false)
-            await deps.cmux.notify(
+            await mutate(() => deps.cmux.notify(
               row.id,
               SESSION_NOTICE_TITLE.appStopped,
               `Its app at ${row.app.url} stopped answering.`,
-            );
+            ));
         }
         const url = row.pr?.url ?? null;
-        if (urls.get(row.id) !== url && url !== null) await deps.cmux.linkPr(row.id, url);
+        if (urls.get(row.id) !== url && url !== null) await mutate(() => deps.cmux.linkPr(row.id, url));
         urls.set(row.id, url);
         await set(row.id, SIDEBAR_KEYS.ci, row.pr?.ci ? SIDEBAR_CI_TEXT[row.pr.ci] : null);
         await set(
@@ -115,6 +122,11 @@ export function createSessionSidebar(deps: Deps) {
       }
     }
   };
+  const tick = () => {
+    const next = inFlight.then(reconcile, reconcile);
+    inFlight = next.catch(() => {});
+    return next;
+  };
   return {
     tick,
     start() {
@@ -125,8 +137,7 @@ export function createSessionSidebar(deps: Deps) {
       timer = null;
     },
     async notify(id: string, kind: SessionNoticeKind, body: string) {
-      if (deps.writes !== false && cmuxWritesOn(deps.store))
-        await deps.cmux.notify(id, SESSION_NOTICE_TITLE[kind], body);
+      await mutate(() => deps.cmux.notify(id, SESSION_NOTICE_TITLE[kind], body));
     },
     reset() {
       values.clear();
