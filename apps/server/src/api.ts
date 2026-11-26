@@ -575,6 +575,8 @@ const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 export interface AppDeps {
   /** Every cmux workspace on this Mac (the Sessions page); absent: its routes answer 503. */
   sessions?: SessionsService;
+  /** Drops remembered cmux sidebar fields after the operator turns their writes back on. */
+  onSessionSidebarChange?: (on: boolean) => void;
   attentionMaterials?: AttentionMaterialsService;
   qaReports?: QaReportService;
   /** Moves a card on the board: approving a held plan moves its ticket to Ready; absent: the card stays. */

@@ -51,6 +51,7 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
     const body = SidebarInput.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "Send on as true or false." });
     deps.store.setSetting(SESSIONS_CMUX_WRITES_SETTING, body.data.on ? "on" : "off");
+    if (body.data.on) deps.onSessionSidebarChange?.(true);
     deps.store.addHubEvent(
       `cmux writes turned ${body.data.on ? "on" : "off"} by operator`,
       Date.now(),

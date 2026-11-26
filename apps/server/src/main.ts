@@ -1175,6 +1175,9 @@ export async function main(): Promise<void> {
 
   const app = buildApp({
     sessions,
+    onSessionSidebarChange: (on) => {
+      if (on) sessionSidebar.reset();
+    },
     diskUse: hubDiskUse,
     qaReports,
     previews,

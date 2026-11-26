@@ -68,7 +68,7 @@ export const SESSION_UNKNOWN_TEXT = "No cmux workspace has that id.";
 export const SESSION_NO_APP_TEXT = "That session names no app (cmux set-status app <url>).";
 export const SESSIONS_OFF_TEXT = "This hub does not read cmux sessions.";
 /** A cmux workspace UUID: checked before any cmux call. */
-export const CMUX_WORKSPACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const CMUX_WORKSPACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const SIDEBAR_KEYS = {
   ci: "mc-ci",

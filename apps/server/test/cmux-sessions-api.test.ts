@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OPERATOR_HEADER, SESSION_BUSY_TEXT, SESSIONS_OFF_TEXT } from "@mc/core";
 import type { FastifyInstance } from "fastify";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type AppDeps, buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -156,6 +156,20 @@ describe("the sessions routes", () => {
       { ws: PRICING, type: "browser", url: "http://localhost:5173" },
     ]);
     expect((await operator().post(`/api/sessions/${WAITING}/app`)).statusCode).toBe(400);
+  });
+
+  it("resets remembered sidebar fields when cmux writes turn on", async () => {
+    await app.close();
+    const reset = vi.fn();
+    start({ onSessionSidebarChange: reset });
+    expect((await operator().post("/api/sessions/sidebar", { on: false })).json()).toEqual({
+      on: false,
+    });
+    expect(reset).not.toHaveBeenCalled();
+    expect((await operator().post("/api/sessions/sidebar", { on: true })).json()).toEqual({
+      on: true,
+    });
+    expect(reset).toHaveBeenCalledTimes(1);
   });
 
   it("answers 503 on a hub without cmux sessions", async () => {
