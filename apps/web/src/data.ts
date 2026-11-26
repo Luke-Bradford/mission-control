@@ -79,6 +79,8 @@ export const RESOURCES = {
     topic: ["agents", "boards", "attention", "flight"],
   },
   prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
+  /** Every cmux workspace on this Mac, read from cmux; the Sessions page polls it, no topic. */
+  sessions: { path: "/api/sessions", topic: null },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).
@@ -346,6 +348,12 @@ export const RESOURCES = {
 
 /** Mutation endpoints. */
 export const ACTIONS = {
+  /** Body `{}`; brings the cmux workspace to the front. */
+  sessionFocus: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/focus`,
+  /** Body `{ text }`; pastes it into the workspace, then Enter. 409 while it has a question open. */
+  sessionSend: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/send`,
+  /** Body `{}`; opens the session's app in that workspace's cmux browser. */
+  sessionApp: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/app`,
   saveInstruction: (seatId: string | null) =>
     seatId === null ? "/api/flight/orders" : `/api/seats/${enc(seatId)}/instructions`,
   revokeInstruction: (seatId: string | null, id: number) =>
@@ -534,9 +542,10 @@ const VISIT_REUSE_MS = 2000;
 
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 
-/** Only PR flow needs a protected JSON read. */
+/** Protected JSON reads: PR flow, dependencies, attention materials and cmux sessions. */
 const readResource = async <T>(path: string): Promise<T> =>
   path === RESOURCES.prFlow.path ||
+  path === RESOURCES.sessions.path ||
   path === RESOURCES.dependencies.path ||
   /^\/api\/attention\/[^/]+\/materials$/.test(path)
     ? apiOperatorGet<T>(path)

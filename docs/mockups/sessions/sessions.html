@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mission Control · Sessions</title>
+<!--
+  Mockup of the Sessions page: "What is each of my cmux sessions doing, and which one needs me?"
+  Six sessions across three repos, one waiting on the operator, one running an app.
+  Tokens are apps/web/src/hud.css. Sample names, folders and lines are illustration only.
+  Rendered at 1920×940 and 2560×1145 (sessions-1920x940.png, sessions-2560x1145.png).
+-->
+<style>
+:root{
+  --bg:#070a0e;--surface:#0c1117;--surface-2:#131a23;--line:#1b2430;--line-2:#2a3646;
+  --fg:#e7eaef;--fg-2:#aab2bf;--muted:#808999;--accent:#56d8e6;--accent-ink:#021417;
+  --accent-soft:rgba(86,216,230,.14);--ok:#45c486;--ok-soft:rgba(69,196,134,.16);
+  --warn:#f2b53a;--warn-soft:rgba(242,181,58,.15);--crit:#f1706d;--crit-soft:rgba(240,107,104,.15);
+  --think:#b8a8f7;
+  --sans:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --mono:"IBM Plex Mono","Cascadia Mono",Consolas,ui-monospace,monospace;
+  --display:"Barlow Semi Condensed","Arial Narrow","IBM Plex Sans",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/20px var(--sans)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{display:grid;grid-template-rows:auto 1fr;height:100vh}
+header{display:flex;align-items:center;gap:16px;padding:8px 24px;border-bottom:1px solid var(--line);background:var(--surface)}
+.brand{font:600 16px/24px var(--display);letter-spacing:.08em;text-transform:uppercase}
+nav{display:flex;gap:4px}
+nav a{color:var(--fg-2);padding:6px 12px;border-radius:6px;min-height:32px;display:inline-flex;align-items:center}
+nav a:hover{background:var(--surface-2);text-decoration:none}
+nav a[aria-current]{color:var(--fg);background:var(--surface-2);box-shadow:inset 0 -2px 0 var(--accent)}
+.body{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:24px;padding:24px;min-height:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;min-height:0}
+.ph{display:flex;align-items:baseline;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+h1{margin:0;font:600 20px/28px var(--display);letter-spacing:.04em}
+.summary{color:var(--fg-2)}
+.summary b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
+.summary .w b{color:var(--warn)}
+.read{margin-left:auto;color:var(--muted);font-size:12px}
+.scroll{overflow:auto;min-height:0}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{position:sticky;top:0;background:var(--surface);text-align:left;font:600 12px/16px var(--display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:8px 12px;border-bottom:1px solid var(--line)}
+th.num{text-align:right}
+th .sort{color:var(--fg-2)}
+td{padding:0 12px;height:40px;border-bottom:1px solid var(--line);vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+tbody tr{cursor:pointer}
+tbody tr:hover td{background:var(--surface-2)}
+tbody tr.waiting td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+td.num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:12px}
+.name{font-weight:600}
+.tag{font:11px/16px var(--mono);padding:0 6px;border:1px solid var(--line-2);border-radius:4px;color:var(--fg-2);margin-left:8px}
+.tag.crew{color:var(--think);border-color:rgba(184,168,247,.4)}
+.folder{font-family:var(--mono);font-size:12px;color:var(--fg-2)}
+.folder b{color:var(--fg);font-weight:500}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--fg-2)}
+.pill::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.pill.working{color:var(--accent);background:var(--accent-soft)}
+.pill.waiting{color:var(--warn);background:var(--warn-soft)}
+.pill.waiting::before{border-radius:1px;transform:rotate(45deg)}
+.pill.idle{color:var(--fg-2)}
+.pill.idle::before{background:transparent;border:1.5px solid currentColor}
+.pill.none{color:var(--muted)}
+.pill.none::before{width:8px;height:2px;border-radius:0}
+.last{color:var(--fg-2)}
+.status{color:var(--fg)}
+.dash{color:var(--muted)}
+.appcell a{font-family:var(--mono);font-size:12px}
+.ans{font-size:12px;white-space:nowrap}
+.ans.ok{color:var(--ok)}
+.ans.bad{color:var(--crit)}
+.inbox{font:12px/16px var(--mono);color:var(--accent);margin-left:6px;background:transparent;border:1px solid rgba(86,216,230,.4);border-radius:4px;padding:0 4px;min-height:24px}
+.inbox[aria-expanded="true"]{background:var(--accent-soft)}
+tr.msgrow td{height:auto;padding:4px 12px 8px;background:var(--surface-2);white-space:normal;cursor:default;color:var(--fg)}
+tr.msgrow .lbl{color:var(--muted);font-size:12px;margin-right:8px}
+.appcell div{display:flex;flex-wrap:wrap;align-items:center;column-gap:8px}
+.write{border:1px solid var(--line-2);background:transparent;border-radius:6px;font-size:12px;padding:2px 8px;min-height:26px}
+.write:hover{border-color:var(--accent)}
+tr.composer td{height:auto;padding:8px 12px 12px;background:var(--surface-2);white-space:normal;cursor:default}
+.composer-box{display:flex;gap:8px;align-items:center}
+.composer-box input{flex:1;background:var(--bg);border:1px solid var(--line-2);border-radius:6px;color:var(--fg);padding:6px 10px;font:13px/20px var(--sans);min-height:32px}
+.btn{border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);border-radius:6px;padding:4px 12px;font-weight:600;min-height:32px}
+.btn.ghost{background:transparent;color:var(--fg-2);border-color:var(--line-2);font-weight:400}
+.hint{color:var(--muted);font-size:12px;margin-top:4px}
+.foot{padding:8px 16px;color:var(--muted);font-size:12px;border-top:1px solid var(--line)}
+/* FLIGHT dock */
+.dock .msgs{padding:12px 16px;display:flex;flex-direction:column;gap:12px;overflow:auto;flex:1;min-height:0}
+.msg{max-width:92%}
+.msg .who{font:11px/16px var(--mono);color:var(--muted)}
+.msg .txt{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.msg.me{align-self:flex-end}
+.msg.me .txt{background:var(--accent-soft);border-color:rgba(86,216,230,.3)}
+.cite{display:block;margin-top:6px;font:12px/16px var(--mono);color:var(--muted);border-left:2px solid var(--line-2);padding-left:8px}
+.dock .box{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+.dock .box input{flex:1;background:var(--bg);border:1px solid var(--line-2);border-radius:6px;color:var(--fg);padding:6px 10px;font:13px/20px var(--sans);min-height:32px}
+.dock h2{margin:0;font:600 14px/20px var(--display);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-2)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <span class="brand">Mission Control</span>
+    <nav aria-label="Pages">
+      <a href="#">Overview</a><a href="#">Needs you</a><a href="#">FLIGHT</a><a href="#">Board</a>
+      <a href="#">Agents</a><a href="#" aria-current="page">Sessions</a><a href="#">Comms</a>
+      <a href="#">QA</a><a href="#">Telemetry</a><a href="#">Audit</a><a href="#">Setup</a>
+    </nav>
+  </header>
+  <div class="body">
+    <section class="panel" aria-labelledby="t">
+      <div class="ph">
+        <h1 id="t">Sessions</h1>
+        <span class="summary"><b>6</b> sessions · <span class="w"><b>1</b> waiting on you</span> · <b>2</b> working</span>
+        <span class="read">Read from cmux 14:32:05 · every 3 s</span>
+      </div>
+      <div class="scroll">
+        <table>
+          <colgroup>
+            <col style="width:14%"><col style="width:14%"><col style="width:152px"><col style="width:52px">
+            <col><col style="width:11%"><col style="width:max(148px,14%)"><col style="width:72px">
+          </colgroup>
+          <thead><tr>
+            <th scope="col">Session</th><th scope="col">Folder · repo</th><th scope="col">State <span class="sort" aria-label="sorted">↓</span></th>
+            <th scope="col" class="num">For</th><th scope="col">Last line</th><th scope="col">Status</th>
+            <th scope="col">App</th><th scope="col"><span class="dash" aria-hidden="true"></span></th>
+          </tr></thead>
+          <tbody>
+            <tr class="waiting" tabindex="0" title="Open in cmux">
+              <td><span class="name">pricing</span><span class="tag">Yours</span></td>
+              <td class="folder" title="/Users/op/Dev/shop-app/pricing">~/Dev/shop-app/pricing · <b>shop-app</b></td>
+              <td><span class="pill waiting">Waiting on you</span></td>
+              <td class="num">4m</td>
+              <td class="last" title="Allow the migration to drop the old price_rules table?">Allow the migration to drop the old price_rules table?</td>
+              <td class="status">Moving prices to the new table</td>
+              <td><span class="dash">—</span></td>
+              <td><button class="write" type="button">Write</button></td>
+            </tr>
+            <tr tabindex="0" title="Open in cmux">
+              <td><span class="name">storefront</span><span class="tag">Yours</span><button type="button" class="inbox" aria-expanded="true" aria-controls="msg-store" aria-label="1 unread message for storefront">1 unread</button></td>
+              <td class="folder" title="/Users/op/Dev/shop-app">~/Dev/shop-app · <b>shop-app</b></td>
+              <td><span class="pill working">Working</span></td>
+              <td class="num">22m</td>
+              <td class="last">Reworking the basket summary so the totals line up with the new price breakdown on mobile</td>
+              <td class="status">Basket redesign</td>
+              <td class="appcell"><div><a href="#" title="Open in this session's cmux browser">localhost:5173</a><span class="ans ok">● Answers</span></div></td>
+              <td><button class="write" type="button">Write</button></td>
+            </tr>
+            <tr class="msgrow"><td colspan="8" id="msg-store"><span class="lbl">Newest message</span>The pricing API is back, rebase when free.</td></tr>
+            <tr tabindex="0" title="Open in cmux">
+              <td><span class="name">GUIDO-1 · #2235</span><span class="tag crew">Crew</span></td>
+              <td class="folder" title="/Users/op/Dev/mc-crew/worktrees/mission-control/guido-1-2235">…/guido-1-2235 · <b>mission-control</b></td>
+              <td><span class="pill working">Working</span></td>
+              <td class="num">8m</td>
+              <td class="last">Running the sessions route tests</td>
+              <td><span class="dash">—</span></td>
+              <td><span class="dash">—</span></td>
+              <td><button class="write" type="button">Write</button></td>
+            </tr>
+            <tr class="composer"><td colspan="8">
+              <div class="composer-box">
+                <input aria-label="Write to GUIDO-1 · #2235" value="Also check the 409 path when a dialog is open">
+                <button class="btn" type="button">Send</button>
+                <button class="btn ghost" type="button">Cancel</button>
+              </div>
+              <div class="hint">Pasted into the session, then Enter. Logged as written by you.</div>
+            </td></tr>
+            <tr tabindex="0" title="Open in cmux">
+              <td><span class="name">FLIGHT · crew</span><span class="tag crew">Crew</span></td>
+              <td class="folder" title="/Users/op/Dev/mc-crew/mission-control">~/Dev/mc-crew/mission-control · <b>mission-control</b></td>
+              <td><span class="pill idle">Idle</span></td>
+              <td class="num">11m</td>
+              <td class="last">Two PRs wait on review; nothing needs you.</td>
+              <td><span class="dash">—</span></td>
+              <td><span class="dash">—</span></td>
+              <td><button class="write" type="button">Write</button></td>
+            </tr>
+            <tr tabindex="0" title="Open in cmux">
+              <td><span class="name">notes</span><span class="tag">Yours</span></td>
+              <td class="folder" title="/Users/op/Dev/field-notes">~/Dev/field-notes · <b>field-notes</b></td>
+              <td><span class="pill idle">Idle</span></td>
+              <td class="num">2h</td>
+              <td class="last">Added the November entries and fixed the broken links in the index.</td>
+              <td class="status">Weekly write-up</td>
+              <td><span class="dash">—</span></td>
+              <td><button class="write" type="button">Write</button></td>
+            </tr>
+            <tr tabindex="0" title="Open in cmux">
+              <td><span class="name">api server</span><span class="tag">Yours</span></td>
+              <td class="folder" title="/Users/op/Dev/shop-app/api">~/Dev/shop-app/api · <b>shop-app</b></td>
+              <td><span class="pill none">No agent</span></td>
+              <td class="num">3h</td>
+              <td class="last">GET /api/prices 200 in 14 ms</td>
+              <td><span class="dash">—</span></td>
+              <td class="appcell"><div><a href="#" title="Open in this session's cmux browser">localhost:8080</a><span class="ans bad">✕ Not answering</span></div></td>
+              <td><button class="write" type="button">Write</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="foot">Click a row or press Enter to open it in cmux. The hub never closes a session.</div>
+    </section>
+    <aside class="panel dock" aria-labelledby="d">
+      <div class="ph"><h2 id="d">FLIGHT</h2><span class="read">reaches every session</span></div>
+      <div class="msgs">
+        <div class="msg me"><div class="who">You · 14:29</div><div class="txt">Ask the pricing session where it got to.</div></div>
+        <div class="msg"><div class="who">FLIGHT · 14:30</div><div class="txt">It has moved 3 of 4 price tables and is waiting on you: it asks whether to drop the old price_rules table.
+          <span class="cite">From its screen: "Allow the migration to drop the old price_rules table? (y/n)"</span></div></div>
+        <div class="msg me"><div class="who">You · 14:31</div><div class="txt">Tell it yes, after it has backed the table up.</div></div>
+        <div class="msg"><div class="who">FLIGHT · 14:31</div><div class="txt">The session has a question open, so I cannot type into it. Answer it in cmux, or click its row.</div></div>
+      </div>
+      <div class="box"><input aria-label="Message FLIGHT" placeholder="Message FLIGHT about any session"><button class="btn" type="button">Send</button></div>
+    </aside>
+  </div>
+</div>
+</body>
+</html>
