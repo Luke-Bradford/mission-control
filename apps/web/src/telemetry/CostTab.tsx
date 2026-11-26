@@ -732,10 +732,10 @@ function SpendByOwner({ t, scope }: { t: Telemetry | undefined; scope: Scope }) 
         <>
           {/* the rows scroll in their own box, the header held at its top; the account total and
               the note sit below it, outside the scroll, so no row can pass behind them */}
-          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll the bounded rows. */}
           <section
             className="pb tw"
             style={OWNER_ROWS}
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll the bounded rows.
             tabIndex={0}
             aria-label="Spend by owner rows"
           >
