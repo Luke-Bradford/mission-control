@@ -300,6 +300,19 @@ function SessionRow({
           {r.check ? <CheckCell check={r.check} time={time} /> : <Dash />}
         </td>
         <td className="sess-acts">
+          <button
+            type="button"
+            className="sess-write"
+            aria-label={`Write to ${r.name}`}
+            aria-expanded={writing}
+            onClick={(e) => {
+              e.stopPropagation();
+              onWrite(!writing);
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            Write
+          </button>
           {r.owner === "operator" && (
             <button
               type="button"
@@ -318,19 +331,6 @@ function SessionRow({
               Run<span className="sess-run-more"> checks</span>
             </button>
           )}
-          <button
-            type="button"
-            className="sess-write"
-            aria-label={`Write to ${r.name}`}
-            aria-expanded={writing}
-            onClick={(e) => {
-              e.stopPropagation();
-              onWrite(!writing);
-            }}
-            onKeyDown={(e) => e.stopPropagation()}
-          >
-            Write
-          </button>
         </td>
       </tr>
       {reading && newest && (

@@ -410,6 +410,14 @@ button.sess-inbox[aria-expanded="true"] {
   .sess-ans {
     margin-block-start: calc(var(--sp-1) / -4);
   }
+  /* "Run" alone beside Write; the button's label still names the checks. */
+  .sess-run-more {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
 }
 
 /* 1280 to 1599 px: tighter cell padding and fixed columns cut to what their words need, so the
@@ -436,13 +444,6 @@ button.sess-inbox[aria-expanded="true"] {
   }
   .sess-table .c-act {
     width: 112px;
-  }
-  .sess-run-more {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
   }
 }
 
