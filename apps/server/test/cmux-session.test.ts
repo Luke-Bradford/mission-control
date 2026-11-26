@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SessionEvent } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CMUX_CLEAR_MARK, foldTranscript } from "../src/run/streamjson.ts";
 import {
   CMUX_DOWN_TEXT,
   CMUX_REFUSED_TEXT,
@@ -43,7 +44,6 @@ import {
   trustMenu,
   withKeeperFallback,
 } from "../src/runtime/cmux-session.ts";
-import { CMUX_CLEAR_MARK, foldTranscript } from "../src/run/streamjson.ts";
 import type { CrewSession } from "../src/runtime/session.ts";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-cmux.mjs", import.meta.url));
