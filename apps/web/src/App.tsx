@@ -310,13 +310,15 @@ function RepoRequired({ title }: { title: string }) {
       <div className="ph">
         <h1 id="repo-required-heading">{title}</h1>
       </div>
-      <p>
-        {lead}
-        <a href={to} onClick={(e) => followLink(e, to)}>
-          {REPO_REQUIRED_LINK}
-        </a>
-        .
-      </p>
+      <div className="pb">
+        <p>
+          {lead}
+          <a href={to} onClick={(e) => followLink(e, to)}>
+            {REPO_REQUIRED_LINK}
+          </a>
+          .
+        </p>
+      </div>
     </section>
   );
 }

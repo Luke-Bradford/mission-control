@@ -173,11 +173,17 @@ describeRendered("A sessions-only hub (no repository)", () => {
                   href:
                     document.querySelector("#page-repo-required p a")?.getAttribute("href") ?? null,
                   docWidth: document.documentElement.scrollWidth,
+                  lineX: document.querySelector("#page-repo-required p")?.getBoundingClientRect().x,
+                  headingX: document
+                    .querySelector("#page-repo-required h1")
+                    ?.getBoundingClientRect().x,
                 }),
                 undefined,
               );
               expect(facts.path).toBe(path);
               expect(facts.h1).toHaveLength(1);
+              // The line sits in the panel body, lined up with the heading, not on the panel's edge.
+              expect(Math.abs((facts.lineX ?? 0) - (facts.headingX ?? 0))).toBeLessThanOrEqual(1);
               expect(facts.line).toBe(REPO_REQUIRED_TEXT);
               expect(facts.href).toBe("/setup/repos");
               expect(facts.docWidth).toBeLessThanOrEqual(width);
