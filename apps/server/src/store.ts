@@ -1862,13 +1862,13 @@ export class Store {
   private writePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): void {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
-         review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
+         review, repo_bot_review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
          assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files,
          base, is_cross_repository)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
-         is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
+         is_draft = excluded.is_draft, review = excluded.review, repo_bot_review = excluded.repo_bot_review, ci = excluded.ci,
          created_at = excluded.created_at, updated_at = excluded.updated_at,
          merged_at = excluded.merged_at, read_at = excluded.read_at,
          head_sha = excluded.head_sha, mergeable = excluded.mergeable, author = excluded.author,
@@ -1965,6 +1965,7 @@ export class Store {
         p.state,
         p.isDraft ? 1 : 0,
         p.review,
+        JSON.stringify(p.repoBotReview ?? null),
         p.ci,
         p.createdAt,
         p.updatedAt,
@@ -3300,6 +3301,7 @@ export class Store {
       state: r.state as PullRequestView["state"],
       isDraft: r.is_draft === 1,
       review: r.review as PullRequestView["review"],
+      repoBotReview: parseJson<PullRequestView["repoBotReview"]>(r.repo_bot_review, null),
       ci: r.ci as PullRequestView["ci"],
       createdAt: r.created_at as number,
       updatedAt: r.updated_at as number,

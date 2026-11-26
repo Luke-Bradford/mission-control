@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS board_items (
 CREATE TABLE IF NOT EXISTS pull_requests (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL,
   branch TEXT NOT NULL, ticket TEXT, state TEXT NOT NULL, is_draft INTEGER NOT NULL,
-  review TEXT, ci TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, merged_at INTEGER,
+  review TEXT, repo_bot_review TEXT, ci TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, merged_at INTEGER,
   PRIMARY KEY (repo_id, number)
 );
 -- A merged PR outlives the bounded live PR cache used by the board.

@@ -1012,18 +1012,18 @@ Setup's board action also creates the board's fields and the repo's type labels,
 - **`repos[].review`** is optional. Set it when the repository's own bot is the review gate:
 
   ```yaml
-  review: { kind: repo-bot, check: Claude Code Review, verdict: comment }
+  review: { kind: repo-bot, check: Claude Code Review, verdict: comment, actor: "github-actions[bot]" }
   ```
 
-  `check` names the bot workflow check. `verdict: comment` waits for its GitHub review decision;
-  `verdict: check` treats a passing check as approval. The bot check is not also a CI gate: a failed
+  `check` names the bot workflow check. `verdict: comment` requires the named `actor`'s review,
+  or verdict comment naming the current head; `verdict: check` treats a passing check as approval. The bot check is not also a CI gate: a failed
   check becomes an Important finding for the author, and approval plus the remaining green CI skips
   the crew reviewer. The bot gets at most three blocking rounds before FLIGHT decides. Add these
   live-config settings for the current repositories:
 
   ```yaml
   # eBull
-  review: { kind: repo-bot, check: Claude Code Review, verdict: comment }
+  review: { kind: repo-bot, check: Claude Code Review, verdict: comment, actor: "github-actions[bot]" }
   # autonomy-engine
   review: { kind: repo-bot, check: review, verdict: check }
   ```

@@ -165,14 +165,29 @@ describe("loadConfig", () => {
     const path = tmpConfig((yaml) =>
       yaml.replace(
         "    project: 2\n",
-        "    project: 2\n    review: { kind: repo-bot, check: Claude Code Review, verdict: comment }\n",
+        '    project: 2\n    review: { kind: repo-bot, check: Claude Code Review, verdict: comment, actor: "claude[bot]" }\n',
       ),
     );
     expect(loadConfig(path).repos[0]?.review).toEqual({
       kind: "repo-bot",
       check: "Claude Code Review",
       verdict: "comment",
+      actor: "claude[bot]",
     });
+  });
+
+  it.each([
+    "{ kind: another-bot, check: review, verdict: check }",
+    "{ kind: repo-bot, check: '', verdict: check }",
+    "{ kind: repo-bot, check: review, verdict: unknown }",
+    "{ kind: repo-bot, check: review, verdict: comment }",
+    "{ kind: repo-bot, check: review, verdict: check, extra: no }",
+  ])("refuses an invalid repository review bot policy: %s", (review) => {
+    const path = tmpConfig((yaml) =>
+      yaml.replace("    project: 2\n", `    project: 2\n    review: ${review}\n`),
+    );
+    const error = errorOf(() => loadConfig(path));
+    expect(error.path).toMatch(/^repos\[0\]\.review(?:\.|$)/);
   });
 
   it("accepts audit.controller_sessions and controller_checkout but ignores them, and refuses unknown audit keys", () => {

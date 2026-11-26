@@ -1803,17 +1803,26 @@ export function createEngine(deps: EngineDeps): Engine {
           if (id === null) return;
           const botRun = `${REPO_BOT_SEAT}:${run.id}:${a.sha}`;
           store.setReviewState(id, ["queued"], "running", { at, runId: botRun });
-          const changes: ReviewFinding[] = [
-            {
-              severity: "Important",
-              file: ".github/workflows",
-              line: 0,
-              summary: `The ${repo.review.check} review bot did not approve this head.`,
-              scenario: "The repository's configured review bot is the review gate for this PR.",
-              fix: "Address the bot's review, push a new commit, and report the result.",
-              category: "spec",
-            },
-          ];
+          const detail = pr.repoBotReview?.findings ?? [];
+          const checkUrl = (pr.checks ?? []).find(
+            (check) => check.name === repo.review?.check,
+          )?.url;
+          const changes: ReviewFinding[] =
+            detail.length > 0
+              ? detail.map((finding) => ({ ...finding, severity: "Important", category: "spec" }))
+              : [
+                  {
+                    severity: "Important",
+                    file: ".github/workflows",
+                    line: 0,
+                    summary: `The ${repo.review.check} review bot did not approve this head.`,
+                    scenario: checkUrl
+                      ? `The repository bot check failed. Details: ${checkUrl}`
+                      : "The repository's configured review bot is the review gate for this PR.",
+                    fix: "Address the bot's review, push a new commit, and report the result.",
+                    category: "spec",
+                  },
+                ];
           store.recordFindings(id, botRun, {
             verdict:
               verdict === "approved"

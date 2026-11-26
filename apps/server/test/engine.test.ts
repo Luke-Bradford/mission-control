@@ -4689,11 +4689,21 @@ describe("the engine runs reviews", () => {
           attempt: 1,
           url: null,
         },
+        {
+          name: "mc/review",
+          state: "passing",
+          kind: "status",
+          conclusion: "success",
+          attempt: null,
+          url: null,
+        },
       ],
     });
     await h.engine.reconcileRun(RUN);
     expect(reviewRows()).toMatchObject([{ seatId: "repo-bot", state: "reported", blocking: 0 }]);
     expect(h.starts).toEqual([]);
+    await h.engine.reconcileRun(RUN);
+    expect(h.steps).toContain("merge");
   });
 
   it("sends a repository bot change request to the author as a finding", async () => {
@@ -4719,6 +4729,58 @@ describe("the engine runs reviews", () => {
     await h.engine.reconcileRun(RUN);
     expect(reviewRows()).toMatchObject([{ seatId: "repo-bot", state: "reported", blocking: 1 }]);
     expect(h.sent[0]?.text).toContain("review bot did not approve this head");
+  });
+
+  it("passes the configured bot's actionable findings to the author", async () => {
+    const repo = config.repos[0];
+    if (repo === undefined) throw new Error("missing test repository");
+    repo.review = {
+      kind: "repo-bot",
+      check: "Claude Code Review",
+      verdict: "comment",
+      actor: "claude[bot]",
+    };
+    report();
+    await h.engine.reconcileRun(RUN);
+    setPr({
+      ci: "passing",
+      checks: [
+        {
+          name: "Claude Code Review",
+          state: "passing",
+          kind: "check",
+          conclusion: "success",
+          attempt: 1,
+          url: "https://ci.example/review",
+        },
+      ],
+      repoBotReview: {
+        actor: "claude[bot]",
+        sha: SHA,
+        verdict: "changes",
+        findings: [
+          {
+            file: "apps/server/src/example.ts",
+            line: 4,
+            summary: "Reject the empty value.",
+            scenario: "The bot found an empty request value.",
+            fix: "Reject it at the boundary.",
+          },
+        ],
+      },
+    });
+    await h.engine.reconcileRun(RUN);
+    await h.engine.reconcileRun(RUN);
+    expect(store.findingsOf(first().id)).toMatchObject([
+      {
+        file: "apps/server/src/example.ts",
+        line: 4,
+        summary: "Reject the empty value.",
+        scenario: "The bot found an empty request value.",
+        fix: "Reject it at the boundary.",
+      },
+    ]);
+    expect(h.sent[0]?.text).toContain("Reject the empty value.");
   });
 
   it("reviewerOf prefers the review seat with the profile's role, else the first", () => {
