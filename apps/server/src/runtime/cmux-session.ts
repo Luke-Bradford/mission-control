@@ -569,7 +569,9 @@ function createCmuxDriver(
           continue;
         }
         if (!isObj(ev) || typeof ev.cwd !== "string") continue;
-        return samePath(ev.cwd, i.cwd) && ev.sessionId === id ? "ours" : "other";
+        // Claude's transcripts say `sessionId`; its stream-json output says `session_id`
+        const own = ev.sessionId ?? ev.session_id;
+        return samePath(ev.cwd, i.cwd) && own === id ? "ours" : "other";
       }
       return "unknown";
     } catch {

@@ -1158,7 +1158,8 @@ describe("with no cmux record of the session", () => {
     h.session.detach();
   });
 
-  it("an operator's /clear with no record: the new transcript is read from its start and the run holds the new id", async () => {
+  // Claude's transcripts name the session `sessionId`; its stream-json output says `session_id`. Either is taken.
+  it.each(["sessionId", "session_id"])("an operator's /clear with no record (%s): the new transcript is read from its start and the run holds the new id", async (key) => {
     const h = await bare();
     patch((s) => {
       s.screen = PROMPT_SCREEN;
@@ -1169,10 +1170,10 @@ describe("with no cmux record of the session", () => {
     // another session in the same project folder, from before this start: never taken for the new one
     mkdirSync(dir, { recursive: true });
     const before = join(dir, "99999999-9999-4999-8999-999999999999.jsonl");
-    writeFileSync(before, `${JSON.stringify({ type: "user", cwd: root, sessionId: "x" })}\n`);
+    writeFileSync(before, `${JSON.stringify({ type: "user", cwd: root, [key]: "x" })}\n`);
     const old = Date.now() / 1000 - 3600;
     utimesSync(before, old, old);
-    own(h, { type: "user", cwd: root, sessionId: h.sessionId, message: { content: "brief" } });
+    own(h, { type: "user", cwd: root, [key]: h.sessionId, message: { content: "brief" } });
     await wait(
       () => existsSync(h.transcript) && readFileSync(h.transcript, "utf8").includes("brief"),
     );
@@ -1180,18 +1181,18 @@ describe("with no cmux record of the session", () => {
     const stranger = join(dir, "88888888-8888-4888-8888-888888888888.jsonl");
     writeFileSync(
       stranger,
-      `${JSON.stringify({ type: "user", cwd: "/elsewhere", sessionId: "88888888-8888-4888-8888-888888888888", message: { content: "not ours" } })}\n`,
+      `${JSON.stringify({ type: "user", cwd: "/elsewhere", [key]: "88888888-8888-4888-8888-888888888888", message: { content: "not ours" } })}\n`,
     );
     // /clear: the same process, a new session and transcript
     const fresh = "22222222-2222-4222-8222-222222222222";
     writeFileSync(
       join(dir, `${fresh}.jsonl`),
       `${[
-        { type: "user", cwd: root, sessionId: fresh, message: { content: "after clear" } },
+        { type: "user", cwd: root, [key]: fresh, message: { content: "after clear" } },
         {
           type: "assistant",
           cwd: root,
-          sessionId: fresh,
+          [key]: fresh,
           message: { content: [{ type: "text", text: "ok" }], usage: { input_tokens: 7 } },
         },
       ]
@@ -1209,7 +1210,7 @@ describe("with no cmux record of the session", () => {
     // it stays tracked: later lines of the new transcript are copied too
     appendFileSync(
       join(dir, `${fresh}.jsonl`),
-      `${JSON.stringify({ type: "user", cwd: root, sessionId: fresh, message: { content: "later" } })}\n`,
+      `${JSON.stringify({ type: "user", cwd: root, [key]: fresh, message: { content: "later" } })}\n`,
     );
     await wait(() => readFileSync(h.transcript, "utf8").includes("later"));
     expect(h.session.alive).toBe(true);
