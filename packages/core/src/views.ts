@@ -324,6 +324,25 @@ export interface AgentSeries {
  * input + output unless named otherwise.
  */
 export interface Telemetry {
+  /** Four ISO weeks of per-repository delivery and capacity figures. */
+  repoWeeks?: {
+    repoId: RepoId;
+    /** The observed loop's October weekly baseline, set in config; absent for a repo without one. */
+    baseline: { mergedPrsPerWeek: number; tokensPerWeek: number } | null;
+    weeks: {
+      /** ISO week's Monday, in the operator's local calendar. */
+      week: string;
+      mergedPrs: number;
+      /** Input plus output tokens per merged PR, by CLI vendor; null when the week has no merges. */
+      tokensPerMergedPr: { claude: number | null; codex: number | null };
+      /** Mean reported review rounds per merged PR; null where no merged PR has a reported review. */
+      reviewRoundsPerPr: number | null;
+      /** Median Ready-to-merge duration in hours; null without a matched Ready timestamp. */
+      medianReadyToMergeHours: number | null;
+      /** Whole hours the repo had Ready work but no configured seat or loop was running. */
+      noSeatWorkingHours: number | null;
+    }[];
+  }[];
   /** Raw, bounded observations for the Instrument charts. Missing observations are never made up. */
   series?: {
     /** State intervals are clipped to the requested range. A terminal span ends at its last observation, never request time. */

@@ -2379,3 +2379,114 @@ it.each([
     attemptUsage?.length && attemptUsage[0]?.tokens ? 6 : (10 * 13) / 14,
   );
 });
+
+describe("repository weekly telemetry", () => {
+  it("separates Claude and Codex tokens per merged PR and keeps the configured loop baseline", () => {
+    (
+      config.repos[0] as (typeof config.repos)[number] & {
+        loopBaseline: { mergedPrsPerWeek: number; tokensPerWeek: number };
+      }
+    ).loopBaseline = { mergedPrsPerWeek: 88, tokensPerWeek: 1_500_000_000 };
+    const week = at("2026-10-12T00:00:00Z");
+    store.replacePullRequests("shop-app", [pr(1, week + HOUR), pr(2, week + 2 * HOUR)], 0);
+    store.upsertRun(
+      run({
+        id: "claude-week",
+        startedAt: week + 3 * HOUR,
+        endedAt: week + 4 * HOUR,
+        vendor: "claude",
+        tokens: tok(20_000_000, 0),
+      }),
+    );
+    store.upsertRun(
+      run({
+        id: "codex-week",
+        startedAt: week + 4 * HOUR,
+        endedAt: week + 5 * HOUR,
+        vendor: "codex",
+        tokens: tok(38_000_000, 0),
+      }),
+    );
+
+    const rows = (
+      tel("7d") as typeof tel extends (...args: never[]) => infer T
+        ? T & { repoWeeks: unknown[] }
+        : never
+    ).repoWeeks;
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        repoId: "shop-app",
+        baseline: { mergedPrsPerWeek: 88, tokensPerWeek: 1_500_000_000 },
+        weeks: expect.arrayContaining([
+          expect.objectContaining({
+            week: "2026-10-12",
+            mergedPrs: 2,
+            tokensPerMergedPr: { claude: 10_000_000, codex: 19_000_000 },
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("reports review rounds, Ready-to-merge median and unstaffed Ready hours", () => {
+    const week = at("2026-10-12T00:00:00Z");
+    store.replacePullRequests(
+      "shop-app",
+      [{ ...pr(3, week + 12 * HOUR), ticket: "shop-app#3" }],
+      0,
+    );
+    store.replaceFlow(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 3,
+          size: "S",
+          startAt: week + 8 * HOUR,
+          doneAt: week + 12 * HOUR,
+        },
+      ],
+      [],
+      [
+        { repoId: "shop-app", number: 3, at: week + 8 * HOUR, column: "Ready" },
+        { repoId: "shop-app", number: 3, at: week + 12 * HOUR, column: "Done" },
+      ],
+    );
+    store.upsertRun(run({ id: "working", startedAt: week + 9 * HOUR, endedAt: week + 10 * HOUR }));
+    const reviewId = store.requestReview({
+      authorRunId: "author",
+      repoId: "shop-app",
+      seatId: "retro",
+      prNumber: 3,
+      sha: "a".repeat(40),
+      epoch: 0,
+      attempt: 1,
+      round: 2,
+      at: week + 10 * HOUR,
+    }) as number;
+    store.setReviewState(reviewId, ["queued"], "running", {
+      at: week + 10 * HOUR,
+      runId: "review",
+    });
+    store.recordFindings(reviewId, "review", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "clear",
+      findings: [],
+      at: week + 11 * HOUR,
+    });
+
+    const row = (
+      tel("7d") as typeof tel extends (...args: never[]) => infer T
+        ? T & { repoWeeks: { repoId: string; weeks: unknown[] }[] }
+        : never
+    ).repoWeeks.find((value) => value.repoId === "shop-app");
+    expect(row?.weeks).toContainEqual(
+      expect.objectContaining({
+        week: "2026-10-12",
+        reviewRoundsPerPr: 2,
+        medianReadyToMergeHours: 4,
+        noSeatWorkingHours: 3,
+      }),
+    );
+  });
+});

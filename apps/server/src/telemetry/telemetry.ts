@@ -36,6 +36,7 @@ import type { Store } from "../store.ts";
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * 60 * MINUTE_MS;
+const WEEK_MS = 7 * DAY_MS;
 const CHART_STATES = new Set(["running", "waiting", "parked", "idle"] as const);
 
 type Interval = [number, number];
@@ -128,6 +129,18 @@ export interface TelemetryScope {
   agent: string | null;
   account: string | null;
   ticket?: string | null;
+}
+
+/** Start of the local ISO week containing `at`. */
+function startOfIsoWeek(at: number, timeZone: string): number {
+  const day = startOfLocalDay(at, timeZone);
+  const weekday = new Date(`${dayFormatter(timeZone)(day)}T12:00:00Z`).getUTCDay();
+  const daysSinceMonday = (weekday + 6) % 7;
+  return startOfLocalDay(day - daysSinceMonday * DAY_MS + 12 * HOUR_MS, timeZone);
+}
+
+function nextLocalWeek(weekStart: number, timeZone: string): number {
+  return startOfLocalDay(weekStart + WEEK_MS + 12 * HOUR_MS, timeZone);
 }
 
 /**
@@ -956,6 +969,124 @@ export function telemetry(
         (a.model ?? "").localeCompare(b.model ?? ""),
     );
 
+  // ── repository weeks ──
+  // These rows deliberately use the configured loop baseline rather than deriving a moving target.
+  const currentWeek = startOfIsoWeek(now, tz);
+  const weekStarts = Array.from({ length: 4 }, (_, index) =>
+    startOfIsoWeek(currentWeek - (3 - index) * WEEK_MS + 12 * HOUR_MS, tz),
+  );
+  const allRuns = store.runsOverlapping(0, now + 1).filter((run) => known.has(run.agentId));
+  const allReviews = store.reviewsIn(["reported"]);
+  const issuesByTicket = new Map<string, { startAt: number | null }>(
+    store.flowIssues(0).map((issue) => [`${issue.repoId}#${issue.number}`, issue] as const),
+  );
+  const repoWeeks: NonNullable<Telemetry["repoWeeks"]> = config.repos.map((repo) => {
+    const repoPrs = store
+      .pullRequests(repo.id)
+      .filter((pr) => pr.mergedAt !== null && pr.mergedAt <= now);
+    const repoAgentIds = new Set(
+      agents.filter((agent) => agent.repoId === repo.id).map((agent) => agent.id),
+    );
+    const repoMoves = store
+      .flowColumnMoves()
+      .filter((move) => move.repoId === repo.id && move.at <= now);
+    const readyIntervals: Interval[] = [];
+    const readyAt = new Map<number, number>();
+    for (const move of repoMoves) {
+      const began = readyAt.get(move.number);
+      if (began !== undefined && move.column !== "Ready") {
+        readyIntervals.push([began, move.at]);
+        readyAt.delete(move.number);
+      }
+      if (began === undefined && move.column === "Ready") readyAt.set(move.number, move.at);
+    }
+    for (const began of readyAt.values()) readyIntervals.push([began, now]);
+    const repoRuns = allRuns.filter(
+      (run) => run.repoId === repo.id && repoAgentIds.has(run.agentId),
+    );
+    const noSeatWorkingHours = (from: number, to: number): number | null => {
+      if (repoMoves.length === 0) return null;
+      const boundaries = new Set([from, to]);
+      for (const [start, end] of readyIntervals) {
+        if (end > from && start < to) {
+          boundaries.add(Math.max(from, start));
+          boundaries.add(Math.min(to, end));
+        }
+      }
+      for (const run of repoRuns) {
+        const end = endOf(run, now);
+        if (end > from && run.startedAt < to) {
+          boundaries.add(Math.max(from, run.startedAt));
+          boundaries.add(Math.min(to, end));
+        }
+      }
+      const points = [...boundaries].sort((a, b) => a - b);
+      let idleMs = 0;
+      for (let index = 1; index < points.length; index++) {
+        const start = points[index - 1] as number;
+        const end = points[index] as number;
+        const midpoint = start + (end - start) / 2;
+        const hasReady = readyIntervals.some(([a, b]) => a <= midpoint && midpoint < b);
+        const working = repoRuns.some(
+          (run) => run.startedAt <= midpoint && midpoint < endOf(run, now),
+        );
+        if (hasReady && !working) idleMs += end - start;
+      }
+      return idleMs / HOUR_MS;
+    };
+    return {
+      repoId: repo.id,
+      baseline: repo.loopBaseline ?? null,
+      weeks: weekStarts.map((start) => {
+        const end = nextLocalWeek(start, tz);
+        const merged = repoPrs.filter(
+          (pr) => pr.mergedAt !== null && pr.mergedAt >= start && pr.mergedAt < end,
+        );
+        const tokens = { claude: 0, codex: 0 };
+        for (const run of repoRuns) {
+          const overlap = share(run, start, end);
+          if (overlap === 0) continue;
+          const vendor =
+            run.vendor ??
+            config.accounts.find(
+              (account) =>
+                account.id === agents.find((agent) => agent.id === run.agentId)?.accountId,
+            )?.vendor;
+          if (vendor === "claude" || vendor === "codex") tokens[vendor] += ioTokens(run) * overlap;
+        }
+        const rounds = merged.flatMap((pr) => {
+          const reported = allReviews.filter(
+            (review) => review.repoId === repo.id && review.prNumber === pr.number,
+          );
+          return reported.length === 0 ? [] : [Math.max(...reported.map((review) => review.round))];
+        });
+        const durations = merged.flatMap((pr) => {
+          const issue = pr.ticket === null ? undefined : issuesByTicket.get(pr.ticket);
+          return issue?.startAt === null || issue?.startAt === undefined || pr.mergedAt === null
+            ? []
+            : [(pr.mergedAt - issue.startAt) / HOUR_MS];
+        });
+        return {
+          week: dayFormatter(tz)(start),
+          mergedPrs: merged.length,
+          tokensPerMergedPr:
+            merged.length === 0
+              ? { claude: null, codex: null }
+              : {
+                  claude: Math.round(tokens.claude / merged.length),
+                  codex: Math.round(tokens.codex / merged.length),
+                },
+          reviewRoundsPerPr:
+            rounds.length === 0
+              ? null
+              : rounds.reduce((sum, round) => sum + round, 0) / merged.length,
+          medianReadyToMergeHours: median(durations),
+          noSeatWorkingHours: noSeatWorkingHours(start, end),
+        };
+      }),
+    };
+  });
+
   return {
     series,
     today,
@@ -976,5 +1107,6 @@ export function telemetry(
     sessionSpend: sessionSpendSplit(config, store, now),
     capcom,
     totals: totalRows,
+    repoWeeks,
   };
 }

@@ -264,6 +264,8 @@ export interface CcConfig {
     id: RepoId;
     github: string;
     project: number;
+    /** October loop baseline, deliberately configured rather than recomputed from current records. */
+    loopBaseline?: { mergedPrsPerWeek: number; tokensPerWeek: number };
     statusMap: Record<string, TicketState>;
     /** Labels that mark an open issue as needing the operator; collector default is ['needs-design']. */
     needsYouLabels?: string[];
@@ -612,6 +614,12 @@ const fileSchema = z
         id: nonEmpty,
         github: nonEmpty,
         project: z.number().int().positive(),
+        loop_baseline: z
+          .strictObject({
+            merged_prs_per_week: z.number().nonnegative(),
+            tokens_per_week: z.number().nonnegative(),
+          })
+          .optional(),
         status_map: z.record(z.string(), ticketState),
         needs_you_labels: z.array(nonEmpty).optional(),
         full_suite: z.array(nonEmpty).default([]),
@@ -822,6 +830,14 @@ const fileSchema = z
         id: r.id,
         github: r.github,
         project: r.project,
+        ...(r.loop_baseline === undefined
+          ? {}
+          : {
+              loopBaseline: {
+                mergedPrsPerWeek: r.loop_baseline.merged_prs_per_week,
+                tokensPerWeek: r.loop_baseline.tokens_per_week,
+              },
+            }),
         statusMap: r.status_map,
         ...(r.needs_you_labels === undefined ? {} : { needsYouLabels: r.needs_you_labels }),
         fullSuite: r.full_suite,
