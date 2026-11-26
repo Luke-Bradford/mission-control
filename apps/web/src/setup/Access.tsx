@@ -17,6 +17,7 @@ const NOTIFY: [NotificationCategory, string][] = [
   ["capcom", "Anything tagged @CAPCOM"],
   ["awayDigest", "The away-mode digest when I come back"],
   ["quota", "Quota above 90%"],
+  ["checks", "Checks that fail in my cmux sessions"],
 ];
 
 const SAMPLES = [

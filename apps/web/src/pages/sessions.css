@@ -87,8 +87,11 @@
 .sess-table .c-app {
   width: max(148px, 14%);
 }
+.sess-table .c-check {
+  width: 96px;
+}
 .sess-table .c-act {
-  width: 72px;
+  width: 168px;
 }
 
 .sess-table th {
@@ -253,6 +256,106 @@ button.sess-inbox[aria-expanded="true"] {
   background: transparent;
 }
 
+/* Write and Run checks side by side; the pill's state word never clips. */
+.sess-acts {
+  white-space: nowrap;
+}
+
+.sess-acts > * + * {
+  margin-left: var(--sp-1);
+}
+
+.sess-run {
+  font-size: var(--fs-s);
+  background: transparent;
+}
+
+.sess-check {
+  white-space: nowrap;
+}
+
+/* The check's command and time; shown only while its row has keyboard focus (below). */
+.sess-check-detail {
+  display: none;
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--fg-2);
+}
+
+/* Repo checks: one line per repo under the table, its switch, name, commands, source and Edit. */
+.sess-repos {
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+.sess-repos h2 {
+  margin: 0 0 var(--sp-2);
+  font: 600 var(--fs) / var(--lh) var(--sans);
+  color: var(--fg);
+}
+
+.sess-repos ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 30vh;
+  overflow: auto;
+}
+
+.sess-repo {
+  display: grid;
+  grid-template-columns: auto minmax(80px, max-content) minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: var(--sp-3);
+  min-height: 32px;
+}
+
+.sess-repo-on {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  white-space: nowrap;
+}
+
+.sess-repo-name {
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sess-repo-cmds {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+  color: var(--fg-2);
+}
+
+.sess-repo-src {
+  color: var(--muted);
+  font-size: var(--fs-s);
+  white-space: nowrap;
+}
+
+.sess-repo-edit {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+}
+
+.sess-repo-edit textarea {
+  flex: 1 1 320px;
+  min-width: 0;
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+}
+
 .sess-composer td {
   padding: var(--sp-2) var(--sp-3) var(--sp-3);
   background: var(--surface-2);
@@ -283,6 +386,10 @@ button.sess-inbox[aria-expanded="true"] {
   color: var(--crit);
 }
 
+.sess-repo-edit .sess-err {
+  flex-basis: 100%;
+}
+
 .sess-foot {
   margin: 0;
   padding: var(--sp-2) var(--sp-4);
@@ -310,6 +417,10 @@ button.sess-inbox[aria-expanded="true"] {
   .sess-ans {
     margin-block-start: calc(var(--sp-1) / -4);
   }
+  /* "Run" alone beside Write; the button's label still names the checks. */
+  .sess-run-more {
+    display: none;
+  }
 }
 
 /* 1280 to 1599 px: tighter cell padding and fixed columns cut to what their words need, so the
@@ -331,8 +442,11 @@ button.sess-inbox[aria-expanded="true"] {
   .sess-table .c-app {
     width: 124px;
   }
+  .sess-table .c-check {
+    width: 88px;
+  }
   .sess-table .c-act {
-    width: 64px;
+    width: 112px;
   }
 }
 
@@ -347,21 +461,35 @@ button.sess-inbox[aria-expanded="true"] {
   outline-offset: -2px;
 }
 
-/* Keyboard reaches every cut-short value: a focused row unwraps the name, folder and repo, last
-   line, status and app address. The name wraps beside or over its tags, which never shrink; the
-   address wraps above its answer word. Paths and addresses have no spaces, so they break anywhere. */
-.sess-row:focus-within .sess-last,
-.sess-row:focus-within .sess-status {
+/* Keyboard reaches every cut-short value: a row focused from the keyboard unwraps the name, folder
+   and repo, last line, status and app address. The name wraps beside or over its tags, which never
+   shrink; the address wraps above its answer word. Paths and addresses have no spaces, so they
+   break anywhere. Keyboard focus only: a mouse press on Write would otherwise grow the row under
+   the pointer, and the click would land on the row instead. */
+.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-last,
+.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-status {
   white-space: normal;
 }
 
-.sess-row:focus-within .sess-name,
-.sess-row:focus-within .sess-folder,
-.sess-row:focus-within .sess-applink {
+.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-name,
+.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-folder,
+.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-applink {
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-.sess-row:focus-within .sess-applink {
+.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-applink {
   text-align: left;
+}
+
+.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-check-detail {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* A repo line whose switch has keyboard focus shows its commands in full. */
+.sess-repo:has(:focus-visible) .sess-repo-cmds {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }

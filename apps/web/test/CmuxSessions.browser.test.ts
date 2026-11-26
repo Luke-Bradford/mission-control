@@ -20,6 +20,9 @@ const MIN = 60_000;
 const LONG =
   "Reworking the basket summary so the totals line up with the new price breakdown on mobile, then the receipt email, then the invoice PDF, then the order history page.";
 
+const LONG_COMMAND =
+  "pnpm -s vitest run apps/server/test/cmux-session-checks.test.ts apps/server/test/cmux-sessions-api.test.ts apps/web/test/CmuxSessions.test.tsx";
+
 const STATES: CmuxSessionState[] = ["waiting", "working", "working", "idle", "idle", "no-agent"];
 const NAMES = ["pricing", "storefront", "GUIDO-1 · #2235", "FLIGHT · crew", "notes", "api server"];
 
@@ -34,6 +37,7 @@ function row(i: number, long: boolean): CmuxSessionRow {
       ? `/Users/op/Dev/mc-crew/worktrees/mission-control/guido-1-${2200 + i}`
       : "/Users/op/Dev/shop-app/pricing",
     repo: crew ? "mission-control" : "shop-app",
+    repoKey: crew ? "/Users/op/Dev/mission-control" : "/Users/op/Dev/shop-app",
     state,
     since: NOW - (4 + i * 7) * MIN,
     lastLine: long && i === 0 ? LONG : `Line ${i + 1}: moved 3 of 4 price tables`,
@@ -45,6 +49,17 @@ function row(i: number, long: boolean): CmuxSessionRow {
           ? { url: "http://localhost:8080", answers: false }
           : null,
     inbox: { unread: i === 1 ? 1 : 0, newest: i === 1 ? "The pricing API is back." : null },
+    check:
+      i === 0
+        ? {
+            state: "failed",
+            at: NOW - 5 * MIN,
+            command: long ? LONG_COMMAND : "pnpm test",
+            why: "idle",
+          }
+        : i === 1
+          ? { state: "running", at: NOW - MIN, command: "pnpm test", why: "operator" }
+          : null,
   };
 }
 
@@ -52,6 +67,27 @@ const view = (n: number, long = false): CmuxSessionsView => ({
   ok: true,
   at: NOW,
   sessions: Array.from({ length: n }, (_, i) => row(i, long)),
+  repos:
+    n === 0
+      ? []
+      : [
+          {
+            repo: "/Users/op/Dev/shop-app",
+            name: "shop-app",
+            on: true,
+            source: "page",
+            commands: long ? [LONG_COMMAND] : ["pnpm lint", "pnpm test"],
+            pageCommands: long ? [LONG_COMMAND] : ["pnpm lint", "pnpm test"],
+          },
+          {
+            repo: "/Users/op/Dev/mission-control",
+            name: "mission-control",
+            on: false,
+            source: "repo",
+            commands: ["pnpm -s lint", "pnpm -s typecheck"],
+            pageCommands: [],
+          },
+        ],
 });
 
 async function open(
@@ -407,6 +443,70 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
           expect(m.folderClipped).toBe(false);
           expect(m.linkClipped).toBe(false);
           expect(m.answerClipped).toBe(false);
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+
+  for (const scheme of ["light", "dark"] as const)
+    it(
+      `reads a long check command and its time, row and repo line, from the keyboard at 1280×800 in ${scheme}`,
+      async () => {
+        const page = await open(1280, 800, scheme, view(6, true));
+        const read = () =>
+          page.evaluate((command) => {
+            const scroll = document.querySelector<HTMLElement>(".sess-scroll") as HTMLElement;
+            const row = [...document.querySelectorAll<HTMLElement>("tr.sess-row")].find((r) =>
+              r.querySelector(".sess-check span")?.getAttribute("title")?.includes(command),
+            ) as HTMLElement;
+            const detail = row.querySelector<HTMLElement>(".sess-check-detail") as HTMLElement;
+            const cell = (detail.closest("td") as HTMLElement).getBoundingClientRect();
+            const d = detail.getBoundingClientRect();
+            const line = [...document.querySelectorAll<HTMLElement>(".sess-repo")].find((l) =>
+              l.querySelector(".sess-repo-cmds")?.textContent?.includes(command),
+            ) as HTMLElement;
+            const cmds = line.querySelector<HTMLElement>(".sess-repo-cmds") as HTMLElement;
+            const active = document.activeElement;
+            return {
+              rowFocused: active === row || row.contains(active),
+              lineFocused: line.contains(active),
+              detailText: detail.textContent ?? "",
+              detailShown:
+                d.width > 0 &&
+                d.height > 0 &&
+                detail.scrollWidth <= detail.clientWidth &&
+                d.right <= cell.right + 0.5 &&
+                d.bottom <= cell.bottom + 0.5 &&
+                d.bottom <= scroll.getBoundingClientRect().bottom,
+              cmdsText: cmds.textContent ?? "",
+              cmdsClipped:
+                cmds.scrollWidth > cmds.clientWidth || cmds.scrollHeight > cmds.clientHeight + 1,
+            };
+          }, LONG_COMMAND);
+        try {
+          let m = await read();
+          // Hidden or cut short until the keyboard reaches them.
+          expect(m.detailShown).toBe(false);
+          expect(m.cmdsClipped).toBe(true);
+          for (let i = 0; i < 80 && !m.rowFocused; i++) {
+            await page.press("Tab");
+            m = await read();
+          }
+          expect(m.rowFocused).toBe(true);
+          await capture(page, `sessions-1280x800-${scheme}-long-check-focused`);
+          expect(m.detailText).toContain(LONG_COMMAND);
+          expect(m.detailText).toMatch(/ · \S/);
+          expect(m.detailShown).toBe(true);
+          for (let i = 0; i < 80 && !m.lineFocused; i++) {
+            await page.press("Tab");
+            m = await read();
+          }
+          expect(m.lineFocused).toBe(true);
+          await capture(page, `sessions-1280x800-${scheme}-long-repo-checks-focused`);
+          expect(m.cmdsText).toBe(LONG_COMMAND);
+          expect(m.cmdsClipped).toBe(false);
         } finally {
           await page.close();
         }

@@ -2092,6 +2092,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/sessions/:id/focus", {}],
   ["POST", "/api/sessions/:id/send", { text: "hello" }],
   ["POST", "/api/sessions/:id/app", {}],
+  ["POST", "/api/sessions/:id/checks", {}],
+  ["POST", "/api/sessions/checks", { repo: "/r", on: true }],
   ["GET", "/api/seats/guido-1/instructions"],
   ["POST", "/api/seats/guido-1/instructions", { kind: "text", text: "Fixture instruction" }],
   ["POST", "/api/seats/guido-1/instructions/:instructionId/revoke", {}],

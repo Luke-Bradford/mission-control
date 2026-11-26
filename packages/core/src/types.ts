@@ -1579,7 +1579,8 @@ export type NotificationCategory =
   | "prs"
   | "capcom"
   | "awayDigest"
-  | "quota";
+  | "quota"
+  | "checks";
 
 /** Notify me about, on every signed-in device (catalogue §2.7.6). */
 export interface NotificationPreferences {
