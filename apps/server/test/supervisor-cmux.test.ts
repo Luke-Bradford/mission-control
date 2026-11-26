@@ -444,9 +444,9 @@ describe("a Claude run in cmux", () => {
       s.down = false;
     });
 
-    expect(store.runsWithSettingPrefix("guido-1", CMUX_WORKSPACE_PREFIX).map((run) => run.id)).toContain(
-      runId,
-    );
+    expect(
+      store.runsWithSettingPrefix("guido-1", CMUX_WORKSPACE_PREFIX).map((run) => run.id),
+    ).toContain(runId);
     await expect(sup.startRun("guido-1", 42)).rejects.toThrow(/earlier cmux workspace/);
     expect(cmuxState().workspaces).toHaveLength(1);
     expect(cmuxState().sameName ?? []).toEqual([]);
