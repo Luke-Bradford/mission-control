@@ -2,8 +2,8 @@ import "./temp-home.ts";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PORT, parseConfig } from "../src/config.ts";
 import { starterLogText } from "../src/config/hub-settings.ts";
+import { DEFAULT_PORT, parseConfig } from "../src/config.ts";
 
 const runbook = readFileSync(
   resolve(import.meta.dirname, "../../../docs/runbooks/work-mac.md"),
