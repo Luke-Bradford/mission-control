@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AppDeps } from "../api.ts";
 import { operatorTokenMatches } from "../operator.ts";
 import { CmuxError } from "../runtime/cmux.ts";
+import { OpenSessionArgs, SessionOpenError } from "./open.ts";
 import { SessionError, type SessionsService } from "./sessions.ts";
 
 const SendInput = z.strictObject({ text: z.string().min(1).max(SESSION_TEXT_MAX) });
@@ -29,7 +30,7 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
   };
   const sessions = () => deps.sessions as SessionsService;
   const failure = (error: unknown, reply: FastifyReply) => {
-    if (error instanceof SessionError)
+    if (error instanceof SessionError || error instanceof SessionOpenError)
       return reply.code(error.status).send({ error: error.message });
     if (error instanceof CmuxError) return reply.code(503).send({ error: error.message });
     throw error;
@@ -37,6 +38,21 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
 
   // Reader: docs/runbooks/cmux-sessions.md#the-sessions-page (every cmux workspace on this Mac)
   api.get("/sessions", { preHandler: auth }, async () => sessions().view());
+  // Reader: docs/runbooks/cmux-sessions.md#opening-a-session (the New session form's choices)
+  api.get("/sessions/roles", { preHandler: auth }, async () => sessions().roles());
+  // Reader: docs/runbooks/cmux-sessions.md#opening-a-session (the New session button)
+  api.post("/sessions", { preHandler: auth }, async (req, reply) => {
+    const body = OpenSessionArgs.safeParse(req.body);
+    if (!body.success)
+      return reply.code(400).send({
+        error: `Send a folder, a role and a first message of 1 to ${SESSION_TEXT_MAX} characters.`,
+      });
+    try {
+      return reply.code(201).send(await sessions().open(body.data, PAGE_ASKER));
+    } catch (error) {
+      return failure(error, reply);
+    }
+  });
   // Reader: docs/runbooks/cmux-sessions.md#the-sessions-page (a row click brings it to the front)
   api.post<{ Params: { id: string } }>(
     "/sessions/:id/focus",

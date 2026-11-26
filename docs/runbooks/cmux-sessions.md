@@ -33,6 +33,15 @@ One read is shared for 2 s. The actions:
 
 Every route needs the operator token. A seat's token gets 403. A hub without cmux answers 503.
 
+## Opening a session
+
+The New session button reads `GET /api/sessions/roles`: `{ roles, folders }`, the `roles/*.md`
+files but the README, and the open sessions' distinct folders. It opens one with
+`POST /api/sessions` and `{ folder, worktree, role, message, name? }`, which answers 201
+`{ id, name }`. FLIGHT's `cmux_open` takes the same input, in on-call mode only and with
+`asked_by` naming the operator's message. What the session runs, its name and its worktree are in
+the main runbook (`docs/runbook.md`, FLIGHT mode, "Opening a session").
+
 ## Who may write
 
 The page writes only when the operator acts. FLIGHT writes with `cmux_send` only when it names

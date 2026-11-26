@@ -34,6 +34,7 @@ import {
   LOOPBACK_HOST,
   QA_RETENTION_DAYS,
   type RepoId,
+  ROLE_PROMPT_DIR,
   type Run,
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
@@ -91,6 +92,7 @@ import { flightConflicts } from "./flight/conflicts.ts";
 import { renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
 import { MergeConflicts } from "./flight/merge-conflicts.ts";
+import { deliversToFlight, readFlightMode } from "./flight/mode.ts";
 import { operatorCall } from "./flight/operator-call.ts";
 import { createCrewTidy } from "./flight/tidy.ts";
 import { createFlightTools } from "./flight/tools.ts";
@@ -158,6 +160,7 @@ import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
+import { createSessionWatch } from "./sessions/watch.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
 import { Store } from "./store.ts";
@@ -793,7 +796,9 @@ export async function main(): Promise<void> {
 
   // The mc tools: commit and push run in the session clone's queue, the one the supervisor's
   // checkouts use. The push and PR scans read the GitHub token afresh for each call.
-  const deliverComms = (seatId: string, _text: string, _from: string): void => {
+  const deliverComms = (seatId: string, _text: string, from: string): void => {
+    // outside crew mode FLIGHT takes only the operator's messages; the rest wait for his next one
+    if (!deliversToFlight(store, config, seatId, from)) return;
     void messageUnpausedSeat(store, supervisor, seatId, "", {
       interrupt: false,
       questions: "none",
@@ -1033,6 +1038,15 @@ export async function main(): Promise<void> {
     store,
     seatIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
+    rolesDir: hubRoot === null ? undefined : join(hubRoot, ROLE_PROMPT_DIR),
+    log: (m) => log(m),
+  });
+  // watch mode: the operator is told when a cmux session waits on him or finishes (read live)
+  const sessionWatch = createSessionWatch({
+    sessions,
+    store,
+    bus,
+    mode: () => readFlightMode(store),
     log: (m) => log(m),
   });
 
@@ -1229,6 +1243,8 @@ export async function main(): Promise<void> {
   // a session that names its app is told when it stops answering, whether or not the page is open
   if (process.env.MC_NO_LOOP_WRITES !== "1")
     trackTimer(setInterval(() => void sessions.view(), SESSIONS_APP_WATCH_MS)).unref();
+  sessionWatch.start();
+  app.addHook("onClose", async () => sessionWatch.stop());
   app.addHook("onClose", async () => {
     for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
   });
@@ -1252,6 +1268,7 @@ export async function main(): Promise<void> {
       stopFocusRetry();
       offInstructionNotices();
       flightWatch.stop();
+      sessionWatch.stop();
       engine.stop();
       await scheduler.stop();
     },

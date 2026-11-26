@@ -66,6 +66,7 @@ import {
   ENGINE_TICK_MS,
   type FileDiff,
   FLIGHT_APPROVAL_RULES,
+  FLIGHT_MODES,
   FLIGHT_RUNAWAY_NOTE_KEY,
   fixesSent,
   flightShellBreakerWrite,
@@ -324,6 +325,7 @@ import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
+import { readFlightMode, writeFlightMode } from "./flight/mode.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER } from "./flight/operator-call.ts";
 import { liftRunaway, noteFlightWrite } from "./flight/runaway.ts";
 import {
@@ -729,6 +731,9 @@ export function crewGuardDeps(
     runGrants: (who) => runSeatGrants(config, store, who),
   };
 }
+
+/** `POST /api/settings/flight-mode`: how FLIGHT works. */
+const FlightModeBody = z.strictObject({ mode: z.enum(FLIGHT_MODES) });
 
 /** `POST /api/seats/:id/start`: a GitHub issue number. */
 const StartBody = z.strictObject({
@@ -1274,6 +1279,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       path === "/api/flight/runaway/lift" ||
       path === "/api/hub/restart" ||
       path === "/api/config/settings" ||
+      path === "/api/settings/flight-mode" ||
       path.startsWith("/api/attention/")
     )
       return reply.code(403).send({ error: SEAT_REFUSED });
@@ -6720,6 +6726,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("settings");
         bus.emit("agents");
         return pause;
+      });
+
+      // Reader: docs/runbook.md#flight-mode (the FLIGHT page sets it)
+      api.get("/settings/flight-mode", async () => ({ mode: readFlightMode(store) }));
+
+      // Reader: docs/runbook.md#flight-mode (the FLIGHT page sets it)
+      api.post("/settings/flight-mode", async (req, reply) => {
+        const body = FlightModeBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        writeFlightMode(store, body.data.mode, "operator", now());
+        bus.emit("settings");
+        bus.emit("agents");
+        return { mode: body.data.mode };
       });
 
       api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));
