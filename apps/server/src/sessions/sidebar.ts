@@ -79,26 +79,33 @@ export function createSessionSidebar(deps: Deps) {
         appAnswers.set(row.id, app?.answers ?? null);
         if (row.owner === "operator" && previousState !== undefined) {
           if (row.state === "waiting" && previousState !== "waiting")
-            await mutate(() => deps.cmux.notify(
-              row.id,
-              SESSION_NOTICE_TITLE.waiting,
-              `"${row.name}" has a question for you.`,
-            ));
+            await mutate(() =>
+              deps.cmux.notify(
+                row.id,
+                SESSION_NOTICE_TITLE.waiting,
+                `"${row.name}" has a question for you.`,
+              ),
+            );
           else if (previousState === "working" && row.state === "idle")
-            await mutate(() => deps.cmux.notify(
-              row.id,
-              SESSION_NOTICE_TITLE.finished,
-              `"${row.name}" finished and is idle.`,
-            ));
+            await mutate(() =>
+              deps.cmux.notify(
+                row.id,
+                SESSION_NOTICE_TITLE.finished,
+                `"${row.name}" finished and is idle.`,
+              ),
+            );
           else if (previousAnswer === true && app?.answers === false)
-            await mutate(() => deps.cmux.notify(
-              row.id,
-              SESSION_NOTICE_TITLE.appStopped,
-              `Its app at ${app.url} stopped answering.`,
-            ));
+            await mutate(() =>
+              deps.cmux.notify(
+                row.id,
+                SESSION_NOTICE_TITLE.appStopped,
+                `Its app at ${app.url} stopped answering.`,
+              ),
+            );
         }
         const url = row.pr?.url ?? null;
-        if (urls.get(row.id) !== url && url !== null) await mutate(() => deps.cmux.linkPr(row.id, url));
+        if (urls.get(row.id) !== url && url !== null)
+          await mutate(() => deps.cmux.linkPr(row.id, url));
         urls.set(row.id, url);
         await set(row.id, SIDEBAR_KEYS.ci, row.pr?.ci ? SIDEBAR_CI_TEXT[row.pr.ci] : null);
         await set(

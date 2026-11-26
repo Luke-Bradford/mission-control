@@ -1086,7 +1086,8 @@ export async function main(): Promise<void> {
     cmux,
     cursorFile: join(dirname(dbPath), "cmux-events.cursor"),
     onChange: () => {
-      if (sessionSidebar !== null) applyCmuxSessionEvent({ sessions, bus, sidebar: sessionSidebar });
+      if (sessionSidebar !== null)
+        applyCmuxSessionEvent({ sessions, bus, sidebar: sessionSidebar });
     },
     log: (m) => log(m),
   });

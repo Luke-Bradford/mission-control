@@ -140,7 +140,12 @@ describe("cmux sidebar", () => {
       notify: vi.fn(async () => {}),
     };
     const sidebar = createSessionSidebar({
-      sessions: { view: () => new Promise((resolve) => { resolveView = () => resolve({ ok: true, at: 0, sessions: [row()], repos: [] }); }) },
+      sessions: {
+        view: () =>
+          new Promise((resolve) => {
+            resolveView = () => resolve({ ok: true, at: 0, sessions: [row()], repos: [] });
+          }),
+      },
       cmux,
       store: { getSetting: () => (on ? null : "off") },
     });
@@ -157,7 +162,12 @@ describe("cmux sidebar", () => {
   it("serializes overlapping ticks", async () => {
     let release!: () => void;
     const cmux = {
-      statuses: vi.fn(() => new Promise<Record<string, string>>((resolve) => { release = () => resolve({}); })),
+      statuses: vi.fn(
+        () =>
+          new Promise<Record<string, string>>((resolve) => {
+            release = () => resolve({});
+          }),
+      ),
       setStatus: vi.fn(async () => {}),
       clearStatus: vi.fn(async () => {}),
       linkPr: vi.fn(async () => {}),
