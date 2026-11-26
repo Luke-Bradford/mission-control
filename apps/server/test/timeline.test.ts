@@ -170,7 +170,7 @@ it("keeps a turn open while the seat waits on the operator in cmux", () => {
     agentId: "dev",
     at: FROM + 20,
     from: "running",
-    to: "needs-input",
+    to: "blocked",
     text: "",
   });
   expect(view().lanes[1]?.spans).toEqual([{ kind: "turn", from: FROM + 10, to: null }]);
@@ -183,13 +183,13 @@ it("an answered question continues the turn it paused", () => {
     agentId: "dev",
     at: FROM + 20,
     from: "running",
-    to: "needs-input",
+    to: "blocked",
     text: "",
   });
   store.addAgentEvent({
     agentId: "dev",
     at: FROM + 30,
-    from: "needs-input",
+    from: "blocked",
     to: "running",
     text: "",
   });
@@ -198,11 +198,11 @@ it("an answered question continues the turn it paused", () => {
 });
 
 it("a turn waiting on the operator since before the window starts at the window's edge", () => {
-  seat("needs-input");
+  seat("running");
   store.addAgentEvent({
     agentId: "dev",
     at: FROM + 30,
-    from: "needs-input",
+    from: "blocked",
     to: "running",
     text: "",
   });
