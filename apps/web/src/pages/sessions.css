@@ -274,6 +274,13 @@ button.sess-inbox[aria-expanded="true"] {
   white-space: nowrap;
 }
 
+/* The check's command and time; shown only while its row has keyboard focus (below). */
+.sess-check-detail {
+  display: none;
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--fg-2);
+}
+
 /* Repo checks: one line per repo under the table, its switch, name, commands, source and Edit. */
 .sess-repos {
   padding: var(--sp-3) var(--sp-4);
@@ -473,4 +480,16 @@ button.sess-inbox[aria-expanded="true"] {
 
 .sess-row:is(:focus-visible, :has(:focus-visible)) .sess-applink {
   text-align: left;
+}
+
+.sess-row:is(:focus-visible, :has(:focus-visible)) .sess-check-detail {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* A repo line whose switch has keyboard focus shows its commands in full. */
+.sess-repo:has(:focus-visible) .sess-repo-cmds {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }

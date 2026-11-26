@@ -450,6 +450,70 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
       BROWSER_TEST_TIMEOUT_MS,
     );
 
+  for (const scheme of ["light", "dark"] as const)
+    it(
+      `reads a long check command and its time, row and repo line, from the keyboard at 1280×800 in ${scheme}`,
+      async () => {
+        const page = await open(1280, 800, scheme, view(6, true));
+        const read = () =>
+          page.evaluate((command) => {
+            const scroll = document.querySelector<HTMLElement>(".sess-scroll") as HTMLElement;
+            const row = [...document.querySelectorAll<HTMLElement>("tr.sess-row")].find((r) =>
+              r.querySelector(".sess-check span")?.getAttribute("title")?.includes(command),
+            ) as HTMLElement;
+            const detail = row.querySelector<HTMLElement>(".sess-check-detail") as HTMLElement;
+            const cell = (detail.closest("td") as HTMLElement).getBoundingClientRect();
+            const d = detail.getBoundingClientRect();
+            const line = [...document.querySelectorAll<HTMLElement>(".sess-repo")].find((l) =>
+              l.querySelector(".sess-repo-cmds")?.textContent?.includes(command),
+            ) as HTMLElement;
+            const cmds = line.querySelector<HTMLElement>(".sess-repo-cmds") as HTMLElement;
+            const active = document.activeElement;
+            return {
+              rowFocused: active === row || row.contains(active),
+              lineFocused: line.contains(active),
+              detailText: detail.textContent ?? "",
+              detailShown:
+                d.width > 0 &&
+                d.height > 0 &&
+                detail.scrollWidth <= detail.clientWidth &&
+                d.right <= cell.right + 0.5 &&
+                d.bottom <= cell.bottom + 0.5 &&
+                d.bottom <= scroll.getBoundingClientRect().bottom,
+              cmdsText: cmds.textContent ?? "",
+              cmdsClipped:
+                cmds.scrollWidth > cmds.clientWidth || cmds.scrollHeight > cmds.clientHeight + 1,
+            };
+          }, LONG_COMMAND);
+        try {
+          let m = await read();
+          // Hidden or cut short until the keyboard reaches them.
+          expect(m.detailShown).toBe(false);
+          expect(m.cmdsClipped).toBe(true);
+          for (let i = 0; i < 80 && !m.rowFocused; i++) {
+            await page.press("Tab");
+            m = await read();
+          }
+          expect(m.rowFocused).toBe(true);
+          await capture(page, `sessions-1280x800-${scheme}-long-check-focused`);
+          expect(m.detailText).toContain(LONG_COMMAND);
+          expect(m.detailText).toMatch(/ · \S/);
+          expect(m.detailShown).toBe(true);
+          for (let i = 0; i < 80 && !m.lineFocused; i++) {
+            await page.press("Tab");
+            m = await read();
+          }
+          expect(m.lineFocused).toBe(true);
+          await capture(page, `sessions-1280x800-${scheme}-long-repo-checks-focused`);
+          expect(m.cmdsText).toBe(LONG_COMMAND);
+          expect(m.cmdsClipped).toBe(false);
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+
   for (const n of [0, 1, 50])
     it(
       `shows ${n} sessions at 1920×940 without page scroll`,

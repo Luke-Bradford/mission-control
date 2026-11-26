@@ -435,6 +435,43 @@ it("prefers the hub config's checks for the repo over the page's list", async ()
   });
 });
 
+it("runs the repo's own checks from origin/HEAD over the working copy, the hub config and the page", async () => {
+  const main = repo();
+  const block = (command: string) =>
+    `# Pricing\n\n## Mission Control\n\n\`\`\`yaml\nmc:\n  checks: ["${command}"]\n\`\`\`\n`;
+  writeFileSync(join(main, "CLAUDE.md"), block("touch ran-origin"));
+  git(main, "add", "CLAUDE.md");
+  git(main, "commit", "-q", "-m", "checks");
+  git(main, "remote", "add", "origin", "https://github.com/Example/Pricing.git");
+  git(main, "update-ref", "refs/remotes/origin/main", "HEAD");
+  git(main, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  // the session edits its working copy's block; origin/HEAD still names the repo's checks
+  writeFileSync(join(main, "CLAUDE.md"), block("touch ran-working"));
+  const t = setup([{ id: WS_A, name: "pricing", cwd: main }], [agent(WS_A, main, "idle")], {
+    configuredChecks: (github) => (github === "example/pricing" ? ["touch ran-config"] : []),
+  });
+  await turnOn(t.checks, main, ["touch ran-page"]);
+  expect((await t.checks.repos([{ repoKey: main }]))[0]).toMatchObject({
+    source: "repo",
+    commands: ["touch ran-origin"],
+    pageCommands: ["touch ran-page"],
+  });
+  expect(await t.checks.run(WS_A)).toBe("queued");
+  await vi.waitFor(() => expect(stateOf(t.checks, WS_A)).toBe("passed"), { timeout: 5000 });
+  expect(t.checks.checkOf(WS_A)?.command).toBe("touch ran-origin");
+  const ran = (f: string) => {
+    try {
+      statSync(join(main, f));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  expect(["ran-origin", "ran-working", "ran-config", "ran-page"].filter(ran)).toEqual([
+    "ran-origin",
+  ]);
+});
+
 it("finds a folder's checkout and main checkout, a worktree's included", async () => {
   const main = repo();
   const wt = join(main, "..", "pricing-wt");

@@ -349,9 +349,11 @@ const Dash = () => <span className="sess-dash">—</span>;
 
 function CheckCell({ check, time }: { check: SessionCheck; time: (at: number) => string }) {
   const title = [check.command, time(check.at)].filter((t) => t !== null && t !== "—").join(" · ");
+  // The detail shows, in full, while the row has keyboard focus; a pointer reads the title.
   return (
     <span title={title || undefined}>
       <Pill tone={CHECK_TONE[check.state]}>{SESSION_CHECK_STATE_LABEL[check.state]}</Pill>
+      {title && <span className="sess-check-detail">{title}</span>}
     </span>
   );
 }
