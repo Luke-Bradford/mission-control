@@ -28,6 +28,7 @@ import {
   type CmuxInboxMessage,
   type CmuxWorkspace,
 } from "../runtime/cmux.ts";
+import { sessionSpendFor } from "../spend/sessions.ts";
 import type { Store } from "../store.ts";
 import type { SessionChecks } from "./checks.ts";
 
@@ -103,6 +104,8 @@ export interface SessionsDeps {
   probeDeadlineMs?: number;
   /** How long a whole view waits, cmux's ping and lists included; default 4.5 s. */
   viewDeadlineMs?: number;
+  /** The operator's time zone, for each session's spend today; default the hub's own. */
+  timeZone?: () => string;
   now?: () => number;
   log?: (m: string) => void;
 }
@@ -516,6 +519,7 @@ export function createSessions(deps: SessionsDeps): SessionsService {
         probesLate,
       );
       for (const id of seen.keys()) if (!rows.some((r) => r.id === id)) seen.delete(id);
+      withSpend(rows, agents, at);
       if (deps.tellApps !== false) await tellAppsInTurn(rows, at);
       // the crew's checkouts have no Repo checks line: their push gate runs checks
       const repos =
@@ -528,6 +532,28 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     } finally {
       clearTimeout(timer);
       clearTimeout(probeTimer);
+    }
+  }
+
+  /**
+   * Each row's Claude session spend, from the numbers the sessionSpend job stored. The join key is
+   * the transcript's file name (the session id), else the session id cmux reports.
+   */
+  function withSpend(rows: CmuxSessionRow[], agents: readonly CmuxAgent[], at: number): void {
+    const keyOf = new Map<string, string>();
+    for (const r of rows) {
+      const agent = agentOf(agents, r.id);
+      if (agent === null) continue;
+      keyOf.set(
+        r.id,
+        agent.transcriptPath ? basename(agent.transcriptPath, ".jsonl") : agent.sessionId,
+      );
+    }
+    const tz = deps.timeZone?.() ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const spend = sessionSpendFor(store, [...new Set(keyOf.values())], at, tz);
+    for (const r of rows) {
+      const key = keyOf.get(r.id);
+      r.spend = key === undefined ? null : (spend.get(key) ?? null);
     }
   }
 

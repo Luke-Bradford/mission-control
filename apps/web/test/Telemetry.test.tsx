@@ -1676,6 +1676,145 @@ describe("Cost and tokens tab", () => {
     expect(tip).toContain("model-a");
   });
 
+  it("Spend by owner shows the split and the account total", async () => {
+    const c = (tokens: number, costUsd: number) => ({ tokens, costUsd });
+    await loaded(
+      tel({
+        sessionSpend: {
+          rows: [
+            {
+              day: "2026-11-25",
+              repo: "shop-app",
+              operator: c(1000, 1.5),
+              crew: c(2000, 2.25),
+              flight: c(500, 0.5),
+              total: c(3500, 4.25),
+            },
+            {
+              day: "2026-11-24",
+              repo: null,
+              operator: c(100, 0.1),
+              crew: c(0, 0),
+              flight: c(0, 0),
+              total: c(100, 0.1),
+            },
+          ],
+          total: c(3600, 4.35),
+          unpricedTokens: 1234,
+          readAt: NOW,
+          failed: null,
+        },
+      }),
+      undefined,
+      undefined,
+      "cost",
+      "table",
+    );
+    const p = panel("tSpendOwner");
+    expect(within(p).getByRole("heading").textContent).toBe("Spend by owner");
+    expect(p.querySelector(".sub")?.textContent).toBe(
+      "~USD · last 7 days · whole Mac, not filtered",
+    );
+    expect([...p.querySelectorAll("thead th")].map((th) => th.textContent)).toEqual([
+      "Day",
+      "Repo",
+      "Yours",
+      "Crew",
+      "FLIGHT",
+      "Total",
+    ]);
+    const body = [...p.querySelectorAll("tbody tr")];
+    expect(body).toHaveLength(2);
+    expect(body[0]?.textContent).toContain("shop-app");
+    expect(body[0]?.textContent).toContain("~$4.25");
+    // token counts are shown, not only on hover
+    expect(body[0]?.textContent).toContain("3.5k tok");
+    expect(p.querySelector("[title]")).toBeNull();
+    expect(p.querySelector("table")?.style.getPropertyValue("--table-row")).toBe("40px");
+    expect(body[1]?.textContent).toContain("—");
+    const foot = p.querySelector("tfoot tr")?.textContent ?? "";
+    expect(foot).toContain("Account total");
+    expect(foot).toContain("~$4.35");
+    expect(p.textContent).toContain(
+      "1.2k tokens from models without a price are counted in tokens, not cost.",
+    );
+    expect(p.textContent).toMatch(/Read \d\d:\d\d/);
+  });
+
+  it.each([20, 50])(
+    "Spend by owner scrolls %i rows in their own box, the account total and note outside it",
+    async (n) => {
+      const c = (tokens: number, costUsd: number) => ({ tokens, costUsd });
+      const rows = Array.from({ length: n }, (_, i) => ({
+        day: `2026-11-${String(25 - (i % 7)).padStart(2, "0")}`,
+        repo: `repo-${i}`,
+        operator: c(100, 0.1),
+        crew: c(0, 0),
+        flight: c(0, 0),
+        total: c(100, 0.1),
+      }));
+      await loaded(
+        tel({
+          sessionSpend: {
+            rows,
+            total: c(100 * n, 0.1 * n),
+            unpricedTokens: 0,
+            readAt: NOW,
+            failed: "1 transcript could not be read.",
+          },
+        }),
+        undefined,
+        undefined,
+        "cost",
+        "table",
+      );
+      const p = panel("tSpendOwner");
+      const box = within(p).getByRole("region", { name: "Spend by owner rows" });
+      // the header and eight 40 px rows show; the rest scroll, reachable from the keyboard
+      expect(box.style.maxHeight).toBe("calc(9 * var(--table-row))");
+      expect(box.style.getPropertyValue("--table-row")).toBe("40px");
+      expect(box.style.overflowY).toBe("auto");
+      expect(box.tabIndex).toBe(0);
+      expect(box.querySelectorAll("tbody tr")).toHaveLength(n);
+      expect(within(box).getByText(`repo-${n - 1}`)).toBeTruthy();
+      expect((box.querySelector("thead th") as HTMLElement).style.position).toBe("sticky");
+      // the account total and the note are outside the scrolling box, in that order
+      expect(box.querySelector("tfoot")).toBeNull();
+      const foot = box.nextElementSibling as HTMLElement;
+      expect(foot.querySelector("tfoot th")?.textContent).toBe("Account total");
+      expect(foot.nextElementSibling?.className).toBe("pnote");
+      // both tables share fixed columns, and both boxes keep the same gutter, so they line up
+      const cols = (el: Element) =>
+        [...el.querySelectorAll("col")].map((col) => (col as HTMLElement).style.width);
+      expect(cols(foot)).toEqual(cols(box));
+      expect(box.style.scrollbarGutter).toBe("stable");
+      expect(foot.style.scrollbarGutter).toBe("stable");
+      // a pass that missed a transcript never reads as fresh
+      expect(p.textContent).toMatch(/Last full read \d\d:\d\d · 1 transcript could not be read\./);
+    },
+  );
+
+  it("Spend by owner says so when there are no sessions", async () => {
+    await loaded(
+      tel({
+        sessionSpend: {
+          rows: [],
+          total: { tokens: 0, costUsd: 0 },
+          unpricedTokens: 0,
+          readAt: null,
+          failed: null,
+        },
+      }),
+      undefined,
+      undefined,
+      "cost",
+      "table",
+    );
+    const p = panel("tSpendOwner");
+    expect(p.textContent).toContain("No Claude sessions in the last 7 days.");
+    expect(p.textContent).toContain("Not read yet");
+  });
+
   it("scales spend bars by reported cost, not token volume", async () => {
     await loaded(
       tel({

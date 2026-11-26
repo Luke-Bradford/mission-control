@@ -46,6 +46,7 @@ export * from "./roles.ts";
 export * from "./runs.ts";
 export * from "./runtime.ts";
 export * from "./session-checks.ts";
+export * from "./session-spend.ts";
 export * from "./sessions.ts";
 export * from "./spec-bounce.ts";
 export * from "./standing-instructions.ts";

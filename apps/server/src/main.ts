@@ -1060,6 +1060,7 @@ export async function main(): Promise<void> {
     store,
     seatIds,
     checks: sessionChecks,
+    timeZone: () => config.operator.timezone,
     tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
     log: (m) => log(m),
   });
