@@ -187,6 +187,17 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
       return rows.map(toRun);
     },
 
+    /** Every run of a seat with a durable setting named by `prefix` plus its id. */
+    runsWithSettingPrefix(agentId: AgentId, prefix: string): Run[] {
+      const rows = db
+        .prepare(
+          `SELECT runs.* FROM runs JOIN settings ON settings.key = ? || runs.id
+           WHERE runs.agent_id = ? ORDER BY runs.started_at DESC, runs.seq DESC`,
+        )
+        .all(prefix, agentId) as Row[];
+      return rows.map(toRun);
+    },
+
     /** Indexed recent-run bounds for each HUD agent, with older held runs retained. */
     runsForAgents(
       agentIds: readonly AgentId[],

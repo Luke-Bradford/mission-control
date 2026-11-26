@@ -879,6 +879,11 @@ export class Store {
     return this.runQ.runs(agentId, limit);
   }
 
+  /** Every run of a seat with a durable setting named by `prefix` plus its id. */
+  runsWithSettingPrefix(agentId: AgentId, prefix: string): Run[] {
+    return this.runQ.runsWithSettingPrefix(agentId, prefix);
+  }
+
   /** Indexed recent-run bounds for each HUD agent, with older held runs retained. */
   runsForAgents(
     agentIds: readonly AgentId[],

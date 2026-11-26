@@ -1,11 +1,15 @@
 // A stand-in for the `cmux` command. Tests run it as `node fake-cmux.mjs --state <file> <command...>`.
 // All its state lives in the JSON <file>, which a test reads and changes to play cmux and Claude:
-//   workspaces  [{id, name, cwd, command, window}]  made by `new-workspace`; `window` defaults to the
-//                                               current one, CURRENT_WINDOW
+//   workspaces  [{id, ref, name, cwd, command, window}]  made by `new-workspace`; `window` defaults to
+//                                               the current one, CURRENT_WINDOW; `ref` is the
+//                                               `workspace:<n>` handle, printed by `list-workspaces`
+//                                               only under `--id-format both`
 //   sessions    [{session_id, lifecycle, pid, workspace_id, transcript_path}]   kept here; `sessions` prints `lifecycle` as real cmux does, under `agent_lifecycle`
 //   sent        [{ws, text, paste}]             every `send`
 //   keys        [{ws, key, force}]              every `send-key`
 //   closed      [ws]                            every `close-workspace`
+//   closeAttempts [ws]                          every `close-workspace`, including one that refuses
+//   sameName    [ws]                            every listed workspace a `new-workspace` shared its name with
 //   screens     {ws: text}                      what `read-screen` prints
 //   calls       [[argv...]]                     every call that changes something
 //   statuses    {ws: {key: value}}              what `list-status` prints, one `key=value` a line
@@ -14,17 +18,29 @@
 //                                               (`recipient_workspace_id`, `body`, `state`, `read_at`)
 //   messages    [{to, from, text}]              every `agent message`
 //   panes       [{ws, type, url}]               every `new-pane`
+// `new-workspace` prints, as real cmux 0.65.2 does, an alias notice (unless CMUX_QUIET=1) and then
+// `OK workspace:<n>` for the workspace it made: a fresh <n> each time.
 // Every call, read-only ones included, is also appended to `<file>.log`, one JSON argv a line.
 // `list-workspaces` names only one window's workspaces, as real cmux does: the current one, or the
 // one after `--window`. `list-windows` names every window a workspace is in, the current one first.
 // `workspaces` rows may carry `cwd`, and `sessions` rows `cwd`: both are printed as given.
 // Switches a test sets: `down` (no socket until `open` is run), `denied` (access denied), `busy`
-// (`send` refuses: a dialog is open), `noForce` (close-workspace refuses --force), `hideWorkspaces`
+// (`send` refuses: a dialog is open), `noForce` (close-workspace refuses --force), `noClose` (close-workspace
+// refuses, the workspace stays), `linger` (ms a closed workspace is still listed, as real cmux's can be
+// for a few seconds), `listWorkspacesFails` (workspace listing refuses), `hideWorkspaces`
 // (new-workspace makes none), `autoClaude` (new-workspace also starts a Claude: a session record for
 // the id after `--session-id` / `--resume` in the launcher it was given, its pid `claudePid`, its
 // transcript in `transcriptDir`).
 import { randomUUID } from "node:crypto";
-import { appendFileSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 const CURRENT_WINDOW = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
@@ -50,13 +66,31 @@ const save = (s) => {
   writeFileSync(tmp, JSON.stringify(s));
   renameSync(tmp, stateAt);
 };
+// two `new-workspace` calls at once each make their own workspace and ref, as in real cmux: one at
+// a time through a lock file (given up after 5 s, so a crashed call never stops the rest)
+let at = 0;
+while (args[at]?.startsWith("--")) at += args[at] === "--json" ? 1 : 2;
+if (args[at] === "new-workspace") {
+  const lock = `${stateAt}.lock`;
+  for (const t0 = Date.now(); Date.now() - t0 < 5000; ) {
+    try {
+      closeSync(openSync(lock, "wx"));
+      process.on("exit", () => rmSync(lock, { force: true }));
+      break;
+    } catch {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+}
 const state = read();
 state.calls ??= [];
 state.calls.push(args);
 appendFileSync(`${stateAt}.log`, `${JSON.stringify(args)}\n`);
 
 // global options before the command
+let idFormat = "refs";
 while (args[0]?.startsWith("--")) {
+  if (args[0] === "--id-format") idFormat = args[1];
   args = args.slice(args[0] === "--json" ? 1 : 2);
 }
 const [cmd, ...rest] = args;
@@ -81,19 +115,31 @@ if (cmd === "open") {
 }
 if (state.down) fail("No live cmux socket found. Tried:\n  /tmp/cmux.sock");
 if (state.denied && cmd !== "sessions") fail("Access denied");
+// a workspace closed under `linger` is listed until its `goneAt`
+state.workspaces = (state.workspaces ?? []).filter(
+  (w) => w.goneAt === undefined || Date.now() < w.goneAt,
+);
 
 switch (cmd) {
   case "ping":
     ok("PONG");
     break;
   case "new-workspace": {
+    state.workspaces ??= [];
+    const refs = state.workspaces.map((w) =>
+      Number(/^workspace:(\d+)$/.exec(w.ref ?? "")?.[1] ?? 0),
+    );
+    state.nextRef = Math.max(state.nextRef ?? 1, ...refs.map((n) => n + 1));
+    const ref = `workspace:${state.nextRef++}`;
     const ws = {
       id: randomUUID(),
+      ref,
       name: flag("--name"),
       cwd: flag("--cwd"),
       command: flag("--command"),
     };
-    state.workspaces ??= [];
+    const twins = state.workspaces.filter((w) => w.name === ws.name).map((w) => w.id);
+    state.sameName = [...(state.sameName ?? []), ...twins];
     if (!state.hideWorkspaces) state.workspaces.push(ws);
     if (state.autoClaude) {
       const script = readFileSync(
@@ -113,7 +159,9 @@ switch (cmd) {
         });
       }
     }
-    ok("OK workspace:1");
+    if (process.env.CMUX_QUIET !== "1")
+      process.stdout.write("Note: new-workspace is now an alias of `cmux workspace create`.\n");
+    ok(`OK ${ref}`);
     break;
   }
   case "list-windows": {
@@ -125,6 +173,7 @@ switch (cmd) {
     break;
   }
   case "list-workspaces": {
+    if (state.listWorkspacesFails) fail("could not list workspaces");
     const window = flag("--window") ?? CURRENT_WINDOW;
     ok(
       JSON.stringify({
@@ -133,6 +182,7 @@ switch (cmd) {
           .filter((w) => (w.window ?? CURRENT_WINDOW) === window)
           .map((w) => ({
             id: w.id,
+            ...(idFormat === "both" && w.ref ? { ref: w.ref } : {}),
             title: w.name,
             ...(w.cwd ? { cwd: w.cwd } : {}),
           })),
@@ -244,11 +294,18 @@ switch (cmd) {
     ok("OK surface:9");
     break;
   case "close-workspace": {
-    if (state.noForce && rest.includes("--force")) fail("unknown flag --force");
     const id = flag("--workspace");
+    state.closeAttempts ??= [];
+    state.closeAttempts.push(id);
+    if (state.noForce && rest.includes("--force")) fail("unknown flag --force");
+    if (state.noClose) fail("could not close the workspace");
     state.closed ??= [];
     state.closed.push(id);
-    state.workspaces = (state.workspaces ?? []).filter((w) => w.id !== id);
+    if (state.linger)
+      for (const w of state.workspaces) {
+        if (w.id === id) w.goneAt ??= Date.now() + state.linger;
+      }
+    else state.workspaces = state.workspaces.filter((w) => w.id !== id);
     state.sessions = (state.sessions ?? []).filter((r) => r.workspace_id !== id);
     ok();
     break;

@@ -1,3 +1,5 @@
+import type { TokenUsage } from "./types.ts";
+
 /** USD per million tokens of each kind. */
 export interface ModelPrice {
   input: number;
@@ -59,6 +61,21 @@ export function tokensCostUsd(model: string, t: SpendTokens, fast = false): numb
       t.cacheRead * p.cacheRead) /
     1_000_000;
   return fast ? usd * FAST_PRICE_MULTIPLIER : usd;
+}
+
+/**
+ * USD for a run's stored tokens, null when the model has no price. A run keeps cache writes as one
+ * count, so they are priced as 5-minute writes (the lower figure). For runs whose transcript has no
+ * `total_cost_usd`, as in a cmux session.
+ */
+export function usageCostUsd(model: string, t: TokenUsage): number | null {
+  return tokensCostUsd(model, {
+    input: t.input,
+    output: t.output,
+    cacheWrite5m: t.cacheCreate,
+    cacheWrite1h: 0,
+    cacheRead: t.cacheRead,
+  });
 }
 
 /** Tokens are input plus output, as on the Tokens tile; cost is the ~USD API-equivalent. */

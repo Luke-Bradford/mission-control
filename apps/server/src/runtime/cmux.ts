@@ -29,6 +29,9 @@ const PASTE_SETTLE_MS = 150;
 /** How long `newWorkspace` looks for the workspace it made, and how often. */
 const FIND_WAIT_MS = 5000;
 const FIND_RETRY_MS = 500;
+/** How long `close` waits for cmux to stop listing a workspace it closed, and how often it looks. */
+const CLOSE_WAIT_MS = 15_000;
+const CLOSE_RETRY_MS = 250;
 
 export interface CmuxAgent {
   sessionId: string;
@@ -57,8 +60,6 @@ export interface CmuxWorkspaceInput {
   name: string;
   cwd: string;
   command: string;
-  /** Workspace ids another run already holds: a same-named one among them is not this one. */
-  exclude?: ReadonlySet<string>;
 }
 
 export type CmuxEvent = { kind: "created" | "closed"; workspaceId: string | null };
@@ -230,6 +231,25 @@ export function parseWorkspaces(text: string): CmuxWorkspace[] {
   return out;
 }
 
+/**
+ * The workspace `new-workspace` says it made: `OK workspace:<n>` (or `OK <uuid>`) on stdout, after any
+ * notice cmux prints first. Null when it names none.
+ */
+export function madeWorkspace(stdout: string): string | null {
+  const said = [...stdout.matchAll(/^OK\s+(workspace:\d+|[0-9a-f]{8}-[0-9a-f-]{27})\s*$/gim)];
+  return said.at(-1)?.[1] ?? null;
+}
+
+/** The id of the workspace with handle `ref` in a `--id-format both` listing. */
+export function workspaceIdOf(text: string, ref: string): string | null {
+  for (const o of rowsOf(text, "workspaces")) {
+    if (pick(o, "ref", "handle", "workspace_ref", "workspaceRef") !== ref) continue;
+    const id = pick(o, "id", "uuid", "workspace_id", "workspaceId");
+    if (typeof id === "string" && id !== ref) return id;
+  }
+  return null;
+}
+
 /** The ids of the windows `list-windows` names. */
 export function parseWindows(text: string): string[] {
   const out: string[] = [];
@@ -316,8 +336,10 @@ export interface CmuxOptions {
   open?: readonly string[];
   /** How long `ensure` waits after it has asked (default 10 s). */
   startWaitMs?: number;
-  /** How long `newWorkspace` looks for its workspace (default 5 s). */
+  /** How long `newWorkspace` looks for the id of the workspace it made (default 5 s). */
   findWaitMs?: number;
+  /** How long `close` waits for cmux to stop listing the workspace (default 15 s). */
+  closeWaitMs?: number;
   /** The command that brings cmux to the front after `focus` (tests give a stand-in). */
   activate?: readonly string[];
 }
@@ -352,25 +374,28 @@ export function createCmux(
   let agentsAt = 0;
   let agentsCall: Promise<CmuxAgent[]> | null = null;
 
-  const inWindow = async (window?: string) => {
+  const inWindow = async (format: "uuids" | "both", window?: string) => {
     const r = await cmux([
       "--json",
       "--id-format",
-      "uuids",
+      format,
       "list-workspaces",
       ...(window === undefined ? [] : ["--window", window]),
     ]);
     if (r.code !== 0) throw failed("list-workspaces", r);
-    return parseWorkspaces(r.stdout);
+    return r.stdout;
   };
   /** `list-workspaces` names one window's workspaces only, so every window is listed in turn. */
-  async function workspaces() {
+  async function listings(format: "uuids" | "both"): Promise<string[]> {
     const w = await cmux(["--json", "--id-format", "uuids", "list-windows"]);
     const windows = w.code === 0 ? parseWindows(w.stdout) : [];
     // a cmux with no list-windows, or no window named: the current window is all there is to read
-    if (windows.length === 0) return inWindow();
+    if (windows.length === 0) return [await inWindow(format)];
+    return Promise.all(windows.map((id) => inWindow(format, id)));
+  }
+  async function workspaces() {
     const seen = new Set<string>();
-    return (await Promise.all(windows.map(inWindow))).flat().filter((ws) => {
+    return (await listings("uuids")).flatMap(parseWorkspaces).filter((ws) => {
       if (seen.has(ws.id)) return false;
       seen.add(ws.id);
       return true;
@@ -452,11 +477,20 @@ export function createCmux(
           throw new CmuxError(CMUX_REFUSED_TEXT);
         throw failed("new-workspace", r);
       }
+      // never found by name: an old workspace of the same name may still be open (or closing)
+      const made = madeWorkspace(r.stdout);
+      if (made === null)
+        throw new CmuxError(
+          `cmux new-workspace named no workspace: ${r.stdout.trim().slice(0, 300)}`,
+        );
+      if (!made.startsWith("workspace:")) return made;
       const wait = options.findWaitMs ?? FIND_WAIT_MS;
       for (const t0 = Date.now(); ; ) {
-        const found = (await workspaces()).find((w) => w.name === i.name && !i.exclude?.has(w.id));
-        if (found !== undefined) return found.id;
-        if (Date.now() - t0 >= wait) throw new CmuxError("cmux made no workspace we could find");
+        for (const text of await listings("both")) {
+          const id = workspaceIdOf(text, made);
+          if (id !== null) return id;
+        }
+        if (Date.now() - t0 >= wait) throw new CmuxError(`cmux lists no workspace ${made}`);
         await sleep(FIND_RETRY_MS);
       }
     },
@@ -523,13 +557,31 @@ export function createCmux(
     },
     async close(ws) {
       const forced = await cmux(["close-workspace", "--workspace", ws, "--force"]);
-      if (forced.code === 0) return;
-      // an older cmux has no --force; a workspace already gone is as good as closed
-      const plain = await cmux(["close-workspace", "--workspace", ws]);
-      if (plain.code === 0) return;
-      if (!(await workspaces().catch(() => [{ id: ws, name: "" }])).some((w) => w.id === ws))
-        return;
-      throw failed("close-workspace", plain);
+      if (forced.code !== 0) {
+        // an older cmux has no --force; a workspace already gone is as good as closed
+        const plain = await cmux(["close-workspace", "--workspace", ws]);
+        if (plain.code !== 0) {
+          if (!(await workspaces().catch(() => [{ id: ws, name: "" }])).some((w) => w.id === ws))
+            return;
+          throw failed("close-workspace", plain);
+        }
+      }
+      // cmux answers OK and may list the workspace a few seconds more: it is closed once it is gone
+      const wait = options.closeWaitMs ?? CLOSE_WAIT_MS;
+      for (const t0 = Date.now(); ; ) {
+        let listed: boolean;
+        try {
+          listed = (await workspaces()).some((w) => w.id === ws);
+        } catch (e) {
+          throw new CmuxError(
+            `cmux closed workspace ${ws} but would not list its workspaces: ${e}`,
+          );
+        }
+        if (!listed) return;
+        if (Date.now() - t0 >= wait)
+          throw new CmuxError(`cmux still lists workspace ${ws} after closing it`);
+        await sleep(CLOSE_RETRY_MS);
+      }
     },
     async setStatus(ws, key, value) {
       const r = await cmux(["set-status", key, value, "--workspace", ws]);

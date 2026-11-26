@@ -32,7 +32,8 @@ import { pidAlive } from "./keeper.ts";
 import { type CrewSession, SessionControlError } from "./session.ts";
 
 /** The hub's record of a run's workspace: `{"workspace": uuid, "pid": n | null}`. */
-export const cmuxWorkspaceKey = (runId: string) => `cmux.workspace:${runId}`;
+export const CMUX_WORKSPACE_PREFIX = "cmux.workspace:";
+export const cmuxWorkspaceKey = (runId: string) => `${CMUX_WORKSPACE_PREFIX}${runId}`;
 /** How far the hub has read Claude's transcript for a run, kept after its workspace closes (a resume needs it). */
 export const cmuxSourceKey = (runId: string) => `cmux.source:${runId}`;
 /** Set while a Claude run is on the keeper because cmux was down or refused the hub at its start. */
@@ -318,8 +319,6 @@ export interface CmuxSessionInput {
   claudeConfigDir?: string;
   /** The node that runs the hub's own tools: its folder goes first on PATH. */
   nodeDir?: string;
-  /** Workspace ids other runs hold: not this run's. */
-  taken?: () => ReadonlySet<string>;
   /** Called once the workspace exists and again once Claude's pid is known; and when it is closed (null). */
   save?: (state: CmuxSaved | null) => void;
   log?: (m: string) => void;
@@ -462,12 +461,25 @@ function createCmuxDriver(
     i.save?.({ workspace, pid, source: { path: source, lines: sourceLines } });
   }
 
-  /** The Claude process is gone: its workspace is closed (if cmux still has it) and forgotten, then the exit. */
-  async function gone(reason: string): Promise<void> {
+  /**
+   * Closes the workspace and forgets it. One cmux will not close stays saved, so the run's end or
+   * restart closes it: a seat never leaves a bare shell behind under its name.
+   */
+  async function closeWorkspace(): Promise<void> {
     if (workspace !== "") {
-      await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
+      try {
+        await i.cmux.close(workspace);
+      } catch (e) {
+        log(`${i.name}: close failed: ${e}`);
+        return;
+      }
     }
     i.save?.(null);
+  }
+
+  /** The Claude process is gone: its workspace is closed (if cmux still has it) and forgotten, then the exit. */
+  async function gone(reason: string): Promise<void> {
+    await closeWorkspace();
     end({ reason });
   }
 
@@ -730,8 +742,7 @@ function createCmuxDriver(
       if (seen !== undefined && seen.pid !== null && pid !== null && seen.pid !== pid) {
         // cmux restored the agent without the hub's settings: closed, and resumed with the hub's command
         log(`${i.name}: cmux restored Claude under a new process; closing it`);
-        await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
-        i.save?.(null);
+        await closeWorkspace();
         return end({ retake: true, reason: "cmux restored the agent without the hub's settings" });
       }
       if (pid !== null && !pidAlive(pid)) return await gone(CMUX_ENDED);
@@ -1009,15 +1020,12 @@ function createCmuxDriver(
     async close() {
       if (!finished && !closing) {
         closing = true;
-        if (workspace !== "") {
-          await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
-        }
+        await closeWorkspace();
         // closed before Claude was up: its launcher may be mid-start, so it is stopped, then its files go
         if (!readyYet) {
           await stopLaunched();
           removeLaunchFiles();
         }
-        i.save?.(null);
         end({});
       }
       return exited;
@@ -1097,7 +1105,6 @@ export function startCmuxSession(i: CmuxSessionInput): CrewSession {
         name: i.name,
         cwd: i.cwd,
         command: quote(script),
-        ...(i.taken === undefined ? {} : { exclude: i.taken() }),
       });
       i.save?.({ workspace, pid: null });
       core.begin(workspace);
