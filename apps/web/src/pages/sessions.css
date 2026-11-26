@@ -526,10 +526,13 @@ button.sess-inbox[aria-expanded="true"] {
     width: 140px;
   }
   .sess-table .c-for {
-    width: 44px;
+    width: 56px;
   }
   .sess-table .c-status {
     width: 9%;
+  }
+  .sess-table .c-last {
+    width: 10%;
   }
   .sess-table .c-act {
     width: 128px;

@@ -163,6 +163,11 @@ const metrics = (page: RenderedPage) =>
         .filter((el) => !el.querySelector(".sr-only"))
         .filter(clipped)
         .map((el) => el.textContent),
+      clippedAges: [
+        ...document.querySelectorAll<HTMLElement>("#page-sessions tr.sess-row td.num[title]"),
+      ]
+        .filter((el) => el.scrollWidth > el.clientWidth)
+        .map((el) => el.textContent),
       // Words that must read whole: each state pill, owner tag, unread control and each app's
       // address and health, inside
       // their own box and inside their cell's content box.
@@ -280,6 +285,7 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
             if (height >= 900) expect(m.firstScreen).toBe(6);
             for (const h of m.rowHeights) expect(h).toBeLessThanOrEqual(40);
             expect(m.clippedHeadings).toEqual([]);
+            expect(m.clippedAges).toEqual([]);
             expect(m.clippedLabels).toEqual([]);
             expect(m.small).toBe(0);
             // The long last line is cut with an ellipsis and its full text stays in the title.
