@@ -973,6 +973,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } catch (e) {
       log(`could not close the cmux workspace of ${runId}: ${errText(e)}`);
       if (saved.pid !== null && pidAlive(saved.pid)) return false;
+      // After a reboot cmux cannot list the old workspace. With the recorded Claude pid gone,
+      // there is no workspace process left to protect, so resume on the keeper is safe.
+      if ((await cmux?.ping().catch(() => "down")) === "down") {
+        store.deleteSetting(cmuxWorkspaceKey(runId));
+        return true;
+      }
       try {
         if ((await cmux?.workspaces())?.some((w) => w.id === saved.workspace)) return false;
       } catch {
