@@ -61,9 +61,17 @@ export interface RenderedPage {
   hugsContent(selector: string): Promise<boolean[]>;
   /** Per element matching `selector`, whether its content fits inside its own box sideways. */
   unclipped(selector: string): Promise<boolean[]>;
-  /** Writes a PNG of the viewport to `path`. */
-  screenshot(path: string): Promise<void>;
+  /** Writes a PNG of the viewport to `path`; with `clip`, only that region of it. */
+  screenshot(path: string, clip?: ScreenshotClip): Promise<void>;
   close(): Promise<void>;
+}
+
+/** A viewport region in CSS pixels, for a focused capture. */
+export interface ScreenshotClip {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface RenderOptions {
@@ -101,7 +109,7 @@ interface Page {
   evaluate<T, A>(fn: (arg: A) => T, arg: A): Promise<T>;
   click(selector: string): Promise<void>;
   emulateMedia(options: { colorScheme: "light" | "dark" }): Promise<void>;
-  screenshot(options: { path: string }): Promise<unknown>;
+  screenshot(options: { path: string; clip?: ScreenshotClip }): Promise<unknown>;
   close(): Promise<void>;
 }
 interface Browser {
@@ -378,8 +386,8 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
         reachable,
         unclipped,
         hugsContent,
-        screenshot: async (path) => {
-          await page.screenshot({ path });
+        screenshot: async (path, clip) => {
+          await page.screenshot(clip === undefined ? { path } : { path, clip });
         },
         async box(selector) {
           return (await boxes(selector))[0];
