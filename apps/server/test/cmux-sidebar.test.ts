@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
+import type { Cmux } from "../src/runtime/cmux.ts";
 import { applyCmuxSessionEvent, startCmuxEvents } from "../src/sessions/events.ts";
 import { createSessions } from "../src/sessions/sessions.ts";
 import { createSessionSidebar } from "../src/sessions/sidebar.ts";
 import { Store } from "../src/store.ts";
-import { fakeCmux } from "./fake-cmux-harness.ts";
 
 const row = (over: Record<string, unknown> = {}) => ({
   id: "workspace",
@@ -75,17 +75,17 @@ describe("cmux sidebar", () => {
     const dir = mkdtempSync(join(tmpdir(), "mc-cmux-events-"));
     const old = "11111111-1111-4111-8111-111111111111";
     const added = "22222222-2222-4222-8222-222222222222";
-    const fake = fakeCmux(dir, { workspaces: [{ id: old, name: "old" }] });
+    let workspaces = [{ id: old, name: "old", cwd: null }];
     let stall = false;
     let stallAgents = false;
-    const cmux = new Proxy(fake.cmux, {
-      get(target, key, receiver) {
-        if (stallAgents && key === "agents") return () => new Promise(() => {});
-        if (stall && (key === "statuses" || key === "readScreen"))
-          return () => new Promise(() => {});
-        return Reflect.get(target, key, receiver);
-      },
-    });
+    const cmux = {
+      ping: async () => "up" as const,
+      workspaces: async () => workspaces,
+      agents: async () => (stallAgents ? await new Promise<never>(() => {}) : []),
+      inbox: async () => [],
+      statuses: async () => (stall ? await new Promise<never>(() => {}) : {}),
+      readScreen: async () => (stall ? await new Promise<never>(() => {}) : ""),
+    } as unknown as Cmux;
     const sessions = createSessions({
       cmux,
       store: new Store(join(dir, "mc.sqlite")),
@@ -116,16 +116,12 @@ describe("cmux sidebar", () => {
         ),
       ]);
     try {
-      fake.patch((state) => {
-        state.workspaces?.push({ id: added, name: "added" });
-      });
+      workspaces = [...workspaces, { id: added, name: "added", cwd: null }];
       const opened = waitForTopic();
       applyCmuxSessionEvent({ sessions, bus, sidebar });
       expect((await withinTwoSeconds(opened)).sort()).toEqual([old, added].sort());
 
-      fake.patch((state) => {
-        state.workspaces = state.workspaces?.filter((workspace) => workspace.id !== added);
-      });
+      workspaces = workspaces.filter((workspace) => workspace.id !== added);
       const closed = waitForTopic();
       applyCmuxSessionEvent({ sessions, bus, sidebar });
       expect(await withinTwoSeconds(closed)).toEqual([old]);
