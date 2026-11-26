@@ -42,6 +42,7 @@ const READ_ONLY = new Set([
   "list-status",
   "list-windows",
   "agent inbox",
+  "workspace-group list",
 ]);
 // written whole and renamed into place: a test reading the file never meets it half written
 const save = (s) => {
@@ -83,6 +84,33 @@ if (state.down) fail("No live cmux socket found. Tried:\n  /tmp/cmux.sock");
 if (state.denied && cmd !== "sessions") fail("Access denied");
 
 switch (cmd) {
+  case "workspace-group": {
+    const [sub, ...more] = rest;
+    if (sub === "list") ok(JSON.stringify({ groups: state.groups ?? [] }));
+    if (sub === "create") {
+      state.groups ??= [];
+      const externalId = more[more.indexOf("--external-id") + 1];
+      state.groups.push({
+        id: externalId,
+        external_id: externalId,
+        name: more[more.indexOf("--name") + 1],
+        workspace_ids: [],
+      });
+      ok("OK");
+    }
+    if (sub === "add") {
+      const group = more[more.indexOf("--group") + 1];
+      const workspace = more[more.indexOf("--workspace") + 1];
+      const row = (state.groups ?? []).find((candidate) => candidate.id === group);
+      if (!row) fail("unknown group");
+      row.workspace_ids ??= [];
+      if (!row.workspace_ids.includes(workspace)) row.workspace_ids.push(workspace);
+      ok("OK");
+    }
+    if (["pin", "set-color", "set-icon"].includes(sub)) ok("OK");
+    fail(`unknown workspace-group command ${sub}`);
+    break;
+  }
   case "ping":
     ok("PONG");
     break;

@@ -320,6 +320,8 @@ export interface CmuxSessionInput {
   nodeDir?: string;
   /** Workspace ids other runs hold: not this run's. */
   taken?: () => ReadonlySet<string>;
+  /** A durable seat workspace. Claude is launched in its existing terminal and it stays after exit. */
+  workspace?: string;
   /** Called once the workspace exists and again once Claude's pid is known; and when it is closed (null). */
   save?: (state: CmuxSaved | null) => void;
   log?: (m: string) => void;
@@ -462,9 +464,9 @@ function createCmuxDriver(
     i.save?.({ workspace, pid, source: { path: source, lines: sourceLines } });
   }
 
-  /** The Claude process is gone: its workspace is closed (if cmux still has it) and forgotten, then the exit. */
+  /** The Claude process is gone: a per-run workspace closes; a durable seat workspace stays idle. */
   async function gone(reason: string): Promise<void> {
-    if (workspace !== "") {
+    if (workspace !== "" && i.workspace === undefined) {
       await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
     }
     i.save?.(null);
@@ -896,7 +898,7 @@ function createCmuxDriver(
    * is known gone; one that will not stop ends the run instead.
    */
   async function failStart(reason: string): Promise<void> {
-    if (workspace !== "") {
+    if (workspace !== "" && i.workspace === undefined) {
       await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
     }
     const stopped = await stopLaunched();
@@ -1009,7 +1011,7 @@ function createCmuxDriver(
     async close() {
       if (!finished && !closing) {
         closing = true;
-        if (workspace !== "") {
+        if (workspace !== "" && i.workspace === undefined) {
           await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
         }
         // closed before Claude was up: its launcher may be mid-start, so it is stopped, then its files go
@@ -1093,13 +1095,17 @@ export function startCmuxSession(i: CmuxSessionInput): CrewSession {
         }),
         { mode: 0o700 },
       );
-      const workspace = await i.cmux.newWorkspace({
-        name: i.name,
-        cwd: i.cwd,
-        command: quote(script),
-        ...(i.taken === undefined ? {} : { exclude: i.taken() }),
-      });
+      const workspace =
+        i.workspace ??
+        (await i.cmux.newWorkspace({
+          name: i.name,
+          cwd: i.cwd,
+          command: quote(script),
+          ...(i.taken === undefined ? {} : { exclude: i.taken() }),
+        }));
       i.save?.({ workspace, pid: null });
+      if (i.workspace !== undefined)
+        await i.cmux.send(workspace, `cd ${quote(i.cwd)} && ${quote(script)}`);
       core.begin(workspace);
     } catch (e) {
       i.log?.(`${i.name}: could not open a cmux workspace: ${e instanceof Error ? e.message : e}`);
