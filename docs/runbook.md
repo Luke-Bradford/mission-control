@@ -1382,6 +1382,52 @@ seat's ticket.
 
 **Pace.** FLIGHT has no wake on a timer. It wakes for a changed fact, a seat's call or a deadline on one fact (a planned entry, the end of the 30-minute gap), and for the daily retrospective. The next wake time in `/api/flight` is the soonest such deadline, or none.
 
+### FLIGHT mode
+
+One hub setting, `flight.mode`, says how FLIGHT works. The FLIGHT page shows it and changes it
+(`GET`/`POST /api/settings/flight-mode` with `{ mode }`, operator only; a seat's token gets 403), and
+FLIGHT can change it with `set_flight_mode` when the operator asks in Comms. The hub reads it on every
+use, so a change applies at once, with no restart. Each change adds the hub event
+`FLIGHT mode set to <Label> by <who>`.
+
+| Mode | Seats take Ready tickets | What wakes FLIGHT |
+|---|---|---|
+| `crew` (default) | yes | everything above |
+| `watch` | no | only an operator message |
+| `on-call` | no | only an operator message |
+
+Outside crew mode, runs already under way carry on; no seat takes a new ticket (`seatMayTake` and
+`takeNext`), and FLIGHT's `start_seat` refuses every start. The wake facts are cut to `operator`, `owed` and `breaker`, and a FLIGHT that is not
+running starts only for an unread operator message. A seat's Comms message to FLIGHT stays unread
+until the operator's next message wakes it. A missing or unreadable setting reads as `crew`.
+
+**Watch mode's notices.** Hub code, not an agent, reads the Sessions view every 3 seconds
+(`SESSION_WATCH_MS`) while the mode is `watch`. A session that moves to "waiting on you" raises
+`cmux session "<name>" is waiting on you.`; one that goes from working to idle raises
+`cmux session "<name>" finished: it was working and is now idle.` Each is one Needs-you note, keyed
+`cmux-session:<workspace id>`, and it is the operator's at once, never FLIGHT's to triage. A state
+that has not changed raises nothing, and nor does the first sight of a session (after a hub restart
+too). A note lasts only while it holds: "waiting on you" while the session waits, "finished" while
+it is idle. Any other change (an answer, Claude exiting, the session gone) clears it, and so does
+every read of a note an earlier hub left that no longer holds; leaving watch mode clears them all.
+
+**Opening a session.** In on-call mode FLIGHT's `cmux_open` opens a new cmux session, and so does the
+Sessions page's New session button: a plain Claude session under the operator's account, with no
+seat environment and no sandbox. It runs in an existing absolute folder, or with "Fresh worktree" in
+`<repo>-sessions/<role>-<YYYYMMDD-HHmmss>` beside the repo's top folder, on a new
+`session/<role>-<YYYYMMDD-HHmmss>` branch from `origin/HEAD` (no fetch first). The role is a file in
+`roles/`, passed with `--append-system-prompt`; the first message is Claude's opening prompt, after `--`, so a
+message that starts with `-` is never read as an option. The name
+defaults to `<folder name> (<ROLE>)` and never holds a seat's ` · `, so the Sessions page lists it as
+the operator's. The hub event `Opened cmux session "<name>" in <folder> as <ROLE>, asked by <who>`
+logs each one; the message is not logged. The open waits (up to a minute) for Claude to reach its
+input prompt, answering its folder-trust prompt on the way (a fresh worktree always shows it; the
+cursor opens on "No, exit", and the hub moves it to "Yes" before Enter). A bad folder or role, or a
+git failure, is a 400. A cmux failure, or a Claude that quits at the trust prompt or is not up in
+time, is a 503, and the workspace this open made is closed (a same-named older one never is).
+Opens take turns from listing the workspaces to finding the new one, so two at once with the same
+name each get their own.
+
 ### FLIGHT adds a controller check to a ticket
 
 Seats have no tool to edit an issue body, so FLIGHT puts a check under a ticket's `## Controller check`

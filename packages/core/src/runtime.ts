@@ -104,6 +104,8 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.crewTidy,
   MC_TOOL_NAMES.cmuxSessions,
   MC_TOOL_NAMES.cmuxSend,
+  MC_TOOL_NAMES.cmuxOpen,
+  MC_TOOL_NAMES.setFlightMode,
 ];
 
 /**

@@ -53,6 +53,7 @@ import {
   DEFAULT_MAX_OPEN_RUNS_PER_SEAT,
   seatUnavailable,
 } from "../config.ts";
+import { readFlightMode } from "../flight/mode.ts";
 import { matchesConfiguredFocus } from "../instructions/focus.ts";
 import { waitReader } from "../queue/dependencies.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
@@ -152,6 +153,8 @@ export function seatMayTake(
   maxOpenRuns: number = DEFAULT_MAX_OPEN_RUNS_PER_SEAT,
 ): boolean {
   if (pausedSeat(store, seatId, null)) return false;
+  // outside crew mode no seat takes new work; runs already under way carry on
+  if (readFlightMode(store) !== "crew") return false;
   if (wakeDueAsideRun(store, seatId) !== undefined) return false;
   const open = store.offSeatRuns().filter((r) => r.agentId === seatId && r.loop?.phase !== "done");
   if (open.length >= maxOpenRuns) return false;
@@ -487,6 +490,7 @@ async function foreignBranch(
 export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   const { config, store, supervisor } = deps;
   if (!deps.enabled || deps.login === null || pausedSeat(store, seatId, null)) return;
+  if (readFlightMode(store) !== "crew") return;
   const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
   if (storedMachineCapacity(store, deps.now(), capacityConfig).blocked) return;
   const found = writerSeats(config).find((s) => s.seat.id === seatId);

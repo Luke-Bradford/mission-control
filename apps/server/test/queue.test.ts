@@ -8,6 +8,7 @@ import {
   type BoardItem,
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
+  FLIGHT_MODE_SETTING,
   fillLoopText,
   freezeRules,
   type MachineSample,
@@ -965,6 +966,20 @@ describe("takeNext", () => {
     await take();
     expect(started).toHaveLength(1);
   });
+
+  it.each(["watch", "on-call"] as const)(
+    "no seat takes a Ready ticket outside crew mode (%s)",
+    async (mode) => {
+      await queued(card(1));
+      store.setSetting(FLIGHT_MODE_SETTING, mode);
+      expect(seatMayTake(store, SERVER)).toBe(false);
+      await take();
+      expect(started).toEqual([]);
+      store.setSetting(FLIGHT_MODE_SETTING, "crew");
+      await take();
+      expect(started).toHaveLength(1);
+    },
+  );
 
   it("records a seat run start only when a Ready ticket's run actually starts", async () => {
     await queued(card(1));

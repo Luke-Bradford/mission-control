@@ -59,6 +59,7 @@ import { parseJson, rethrowJson } from "../json.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { wakePieces } from "../telemetry/prompt-cost.ts";
+import { operatorOnlyFacts, readFlightMode } from "./mode.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
 import { autoLiftRunaway } from "./runaway.ts";
 import { markFlightSignalsShown } from "./signals.ts";
@@ -393,6 +394,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
   }
 
+  /** Outside crew mode only the operator's own facts wake FLIGHT; read live, so a change needs no restart. */
+  const modeFacts = (facts: string): string =>
+    readFlightMode(store) === "crew" ? facts : operatorOnlyFacts(facts);
+
   async function passOnce(): Promise<void> {
     if (stopped) return;
     // a tripped runaway breaker waits for nobody: the hub lifts it once its wait has passed
@@ -472,6 +477,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       // The same start path still enforces operator Stop, unavailable seats and runtime guards.
       if (row?.state === "stopped" || row?.state === "parked" || (atStop && !operatorWaiting))
         return;
+      // outside crew mode only the operator's message starts FLIGHT
+      if (readFlightMode(store) !== "crew" && !operatorWaiting) return;
       // A run left without a session must settle before a new start, which would refuse it.
       if (await settleGhost(id, row, alive, t)) return;
       // the handover guard's cooldown is over: FLIGHT starts again, and a trip soon after is the second in a row
@@ -559,7 +566,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotationRequested = false; // the fresh session already sees the current config
       try {
         const { digest, snapshot } = flightWake(state, undefined, store.flightMemory(state.repo));
-        const causes = changedWakeFacts(lastFacts, wakeFacts(state));
+        const causes = changedWakeFacts(lastFacts, modeFacts(wakeFacts(state)));
         const note = store
           .flightMemory(state.repo)
           .find((m) => memoryTopicKey(m.topic) === FLIGHT_HANDOVER_TOPIC);
@@ -594,7 +601,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markRetrospectiveShown(store, state);
         markAuditShown(store, state);
         markPointersShown(store, config, state, t);
-        lastFacts = deliveredFacts(state);
+        lastFacts = modeFacts(deliveredFacts(state));
         lastWakeAt = t;
         const woke = causes.length > 0 ? causes : ["initial"];
         recordFlightWake(store, found.session.repoId, t, woke);
@@ -708,7 +715,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       areas: await deps.areas?.(found.session.repoId),
       conflicts: await deps.conflicts?.(found.session.repoId),
     });
-    const wake = wakeFacts(state);
+    const wake = modeFacts(wakeFacts(state));
     const listed = hasFacts(wake);
     recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t));
     // FLIGHT's writes are stopped until the operator lifts the breaker: a wake could only idle
@@ -756,7 +763,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markAuditShown(store, state);
         markPointersShown(store, config, state, t);
         const woke = causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER];
-        lastFacts = deliveredFacts(state);
+        lastFacts = modeFacts(deliveredFacts(state));
         lastWakeAt = t;
         recordFlightWake(store, found.session.repoId, t, woke);
         recordWakeReasons(store, runId, t, woke, flightWakeId(runId, n + 1));

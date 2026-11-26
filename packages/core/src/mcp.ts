@@ -77,6 +77,8 @@ export const MC_TOOL_NAMES = {
   crewTidy: "crew_tidy",
   cmuxSessions: "cmux_sessions",
   cmuxSend: "cmux_send",
+  cmuxOpen: "cmux_open",
+  setFlightMode: "set_flight_mode",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -156,6 +158,8 @@ export const MC_TOOLS = {
   crewTidy: mcTool(MC_TOOL_NAMES.crewTidy),
   cmuxSessions: mcTool(MC_TOOL_NAMES.cmuxSessions),
   cmuxSend: mcTool(MC_TOOL_NAMES.cmuxSend),
+  cmuxOpen: mcTool(MC_TOOL_NAMES.cmuxOpen),
+  setFlightMode: mcTool(MC_TOOL_NAMES.setFlightMode),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */
