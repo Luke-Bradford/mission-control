@@ -1773,6 +1773,10 @@ describe("Cost and tokens tab", () => {
     // the account total stays in view while the rows scroll
     expect((p.querySelector("tfoot th") as HTMLElement).style.position).toBe("sticky");
     expect(p.textContent).toContain("20 rows: scroll the table for the rest.");
+    // its grid row grows to the panel's content, never capped at the grid's 240 px rows
+    expect((p.parentElement as HTMLElement).style.gridTemplateRows).toBe(
+      "minmax(min-content, auto)",
+    );
     // a pass that missed a transcript never reads as fresh
     expect(p.textContent).toMatch(/Last full read \d\d:\d\d · 1 transcript could not be read\./);
   });

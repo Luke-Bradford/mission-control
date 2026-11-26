@@ -891,6 +891,13 @@ function StepTable({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   );
 }
 
+/**
+ * The first row, Totals beside Spend by owner, is at least as tall as its panels' content. The
+ * grid's 240 px rows stay at 240 px once the page overflows, which cut the account total off; the
+ * owner table caps its own height at 8 whole rows and scrolls past that.
+ */
+const TABLES_ROWS: CSSProperties = { gridTemplateRows: "minmax(min-content, auto)" };
+
 /** The panels the earlier page held that the table view keeps whole: the allowance reader and the two history charts. */
 const QUOTA_HISTORY = new Set(["quotaP", "tQuota"]);
 const MERGED_COST = new Set(["tCostMerged"]);
@@ -909,7 +916,12 @@ export function CostPanels({
 }) {
   if (view === "table")
     return (
-      <div className={`grid cost-tables${dim ? " dim" : ""}`} data-view="table" data-cost="tables">
+      <div
+        className={`grid cost-tables${dim ? " dim" : ""}`}
+        data-view="table"
+        data-cost="tables"
+        style={TABLES_ROWS}
+      >
         <Totals t={t} scope={scope} />
         <SpendByOwner t={t} scope={scope} />
         <CostTable t={t} scope={scope} />
