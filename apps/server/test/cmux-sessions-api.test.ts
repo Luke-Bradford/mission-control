@@ -1,12 +1,17 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   OPERATOR_HEADER,
   SESSION_BUSY_TEXT,
+  SESSION_CHECKS_SETTING,
+  SESSION_CREW_CHECKS_TEXT,
   SESSION_FOLDER_TEXT,
+  SESSION_NO_CHECKS_TEXT,
   SESSION_ROLE_TEXT,
+  SESSION_UNKNOWN_REPO_TEXT,
   SESSIONS_OFF_TEXT,
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
@@ -14,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type AppDeps, buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
+import { createSessionChecks, type SessionChecks } from "../src/sessions/checks.ts";
 import { createSessions } from "../src/sessions/sessions.ts";
 import { Store } from "../src/store.ts";
 import { commandOf, type FakeCmux, type FakeState, fakeCmux } from "./fake-cmux-harness.ts";
@@ -217,5 +223,115 @@ describe("the sessions routes", () => {
     const r = await operator().get("/api/sessions");
     expect(r.statusCode).toBe(503);
     expect(r.json()).toEqual({ error: SESSIONS_OFF_TEXT });
+  });
+});
+
+describe("the session checks routes", () => {
+  let main: string;
+  let checks: SessionChecks;
+
+  /** A git repo `pricing`, the PRICING workspace in it, and the checks service on the same cmux. */
+  beforeEach(async () => {
+    await app.close();
+    main = join(realpathSync(dir), "pricing");
+    mkdirSync(main);
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: main });
+    git("init", "-q", "-b", "main");
+    writeFileSync(join(main, "README.md"), "hello\n");
+    const state = structuredClone(STATE);
+    for (const w of state.workspaces ?? []) w.cwd = main;
+    fake = fakeCmux(dir, state);
+    checks = createSessionChecks({
+      cmux: fake.cmux,
+      store,
+      seatIds: () => ["GUIDO-1"],
+      crewRoots: () => [],
+      configuredChecks: () => [],
+      notify: () => {},
+      lowPriority: [],
+      load: () => 0,
+      cores: () => 8,
+    });
+    start({
+      sessions: createSessions({
+        cmux: fake.cmux,
+        store,
+        seatIds: () => ["GUIDO-1"],
+        probe: async () => true,
+        checks,
+      }),
+      sessionChecks: checks,
+    });
+  });
+  afterEach(async () => {
+    await checks.stop();
+  });
+
+  it("lists the operator's repo with its switch off, and switches it on with page commands", async () => {
+    const view = (await operator().get("/api/sessions")).json();
+    expect(view.repos).toEqual([
+      { repo: main, name: "pricing", on: false, source: null, commands: [], pageCommands: [] },
+    ]);
+    const row = view.sessions.find((s: { name: string }) => s.name === "pricing");
+    expect(row).toMatchObject({ repo: "pricing", repoKey: main, check: null });
+    const set = await operator().post("/api/sessions/checks", {
+      repo: main,
+      on: true,
+      commands: ["node -v"],
+    });
+    expect(set.statusCode).toBe(200);
+    expect(JSON.parse(store.getSetting(SESSION_CHECKS_SETTING) ?? "{}")).toEqual({
+      [main]: { on: true, commands: ["node -v"] },
+    });
+    expect(store.hubEvents(0).map((e) => e.text)).toContain(
+      'Checks turned on for repo "pricing" by operator',
+    );
+  });
+
+  it("refuses an unknown repo, a chained or long command, too many, and a seat's token", async () => {
+    await operator().get("/api/sessions");
+    const unknown = await operator().post("/api/sessions/checks", { repo: "/nowhere", on: true });
+    expect(unknown.statusCode).toBe(404);
+    expect(unknown.json()).toEqual({ error: SESSION_UNKNOWN_REPO_TEXT });
+    for (const commands of [["a && b"], ["x".repeat(201)], Array(11).fill("pnpm -s lint"), [""]])
+      expect(
+        (await operator().post("/api/sessions/checks", { repo: main, commands })).statusCode,
+      ).toBe(400);
+    expect(
+      (await operator().post("/api/sessions/checks", { repo: main, extra: 1 })).statusCode,
+    ).toBe(400);
+    const seat = as({ [OPERATOR_HEADER]: KEY, authorization: "Bearer seat-token" });
+    expect((await seat.post("/api/sessions/checks", { repo: main, on: true })).statusCode).toBe(
+      403,
+    );
+    expect((await seat.post(`/api/sessions/${PRICING}/checks`)).statusCode).toBe(403);
+    expect(store.getSetting(SESSION_CHECKS_SETTING)).toBeNull();
+  });
+
+  it("runs a row's checks when asked, or says why not", async () => {
+    const none = await operator().post(`/api/sessions/${PRICING}/checks`);
+    expect(none.statusCode).toBe(400);
+    expect(none.json()).toEqual({ error: SESSION_NO_CHECKS_TEXT });
+    const crew = await operator().post(`/api/sessions/${WAITING}/checks`);
+    expect(crew.statusCode).toBe(400);
+    expect(crew.json()).toEqual({ error: SESSION_CREW_CHECKS_TEXT });
+    expect((await operator().post(`/api/sessions/${UNKNOWN}/checks`)).statusCode).toBe(404);
+    expect((await operator().post("/api/sessions/workspace:1/checks")).statusCode).toBe(404);
+    expect((await operator().post(`/api/sessions/${PRICING}/checks`, { x: 1 })).statusCode).toBe(
+      400,
+    );
+    await operator().get("/api/sessions");
+    // the switch stays off: an operator's run ignores it
+    await operator().post("/api/sessions/checks", { repo: main, commands: ["node -v"] });
+    const ran = await operator().post(`/api/sessions/${PRICING}/checks`);
+    expect(ran.statusCode).toBe(200);
+    expect(checks.checkOf(PRICING)).toMatchObject({ why: "operator" });
+  });
+
+  it("answers 503 for the checks routes on a hub without them", async () => {
+    await app.close();
+    start({ sessionChecks: undefined });
+    expect((await operator().post(`/api/sessions/${PRICING}/checks`)).statusCode).toBe(503);
+    expect((await operator().post("/api/sessions/checks", { repo: main })).statusCode).toBe(503);
   });
 });

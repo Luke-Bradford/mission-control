@@ -65,11 +65,13 @@ function demoSessions(): CmuxSessionsView {
     owner: "operator",
     folder: "/Users/demo/Dev/shop-app",
     repo: "shop-app",
+    repoKey: "/Users/demo/Dev/shop-app",
     since: now - 10 * min,
     lastLine: null,
     status: null,
     app: null,
     inbox: { unread: 0, newest: null },
+    check: null,
     ...over,
   });
   return {
@@ -82,6 +84,7 @@ function demoSessions(): CmuxSessionsView {
         since: now - 4 * min,
         lastLine: "Allow the migration to drop the old price_rules table?",
         status: "Moving prices to the new table",
+        check: { state: "failed", at: now - 5 * min, command: "pnpm test", why: "idle" },
       }),
       row(2, {
         name: "storefront",
@@ -91,6 +94,7 @@ function demoSessions(): CmuxSessionsView {
         status: "Basket redesign",
         app: { url: "http://localhost:5173", answers: true },
         inbox: { unread: 1, newest: "The pricing API is back, rebase when free." },
+        check: { state: "passed", at: now - 30 * min, command: "pnpm test", why: "idle" },
       }),
       row(3, {
         name: "DEV-1 · #101",
@@ -107,6 +111,7 @@ function demoSessions(): CmuxSessionsView {
         since: now - 11 * min,
         folder: "/Users/demo/Dev/mission-control",
         repo: "mission-control",
+        repoKey: "/Users/demo/Dev/mission-control",
         lastLine: "Two PRs wait on review; nothing needs you.",
       }),
       row(5, {
@@ -117,6 +122,24 @@ function demoSessions(): CmuxSessionsView {
         lastLine: "GET /api/prices 200 in 14 ms",
         app: { url: "http://localhost:8080", answers: false },
       }),
+    ],
+    repos: [
+      {
+        repo: "/Users/demo/Dev/shop-app",
+        name: "shop-app",
+        on: true,
+        source: "repo",
+        commands: ["pnpm lint", "pnpm test"],
+        pageCommands: [],
+      },
+      {
+        repo: "/Users/demo/Dev/mission-control",
+        name: "mission-control",
+        on: false,
+        source: "config",
+        commands: ["pnpm -s lint", "pnpm -s typecheck"],
+        pageCommands: [],
+      },
     ],
   };
 }

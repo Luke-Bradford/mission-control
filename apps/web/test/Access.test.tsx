@@ -26,6 +26,7 @@ export const PREFS: NotificationPreferences = {
     capcom: true,
     awayDigest: true,
     quota: false,
+    checks: true,
   },
   quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
   softChime: true,
@@ -66,8 +67,12 @@ it("saves and reloads categories, quiet hours and chime without asking permissio
   const quota = await screen.findByLabelText("Quota above 90%");
   const preferences = screen.getByRole("region", { name: "Notify me about" });
   const boxes = within(preferences).getAllByRole("checkbox") as HTMLInputElement[];
-  expect(boxes).toHaveLength(11);
-  expect(boxes.filter((box) => box.checked)).toHaveLength(10);
+  expect(boxes).toHaveLength(12);
+  expect(boxes.filter((box) => box.checked)).toHaveLength(11);
+  expect(screen.getByLabelText("Checks that fail in my cmux sessions")).toHaveProperty(
+    "checked",
+    true,
+  );
   expect(boxes.every((box) => !box.disabled)).toBe(true);
   fireEvent.click(quota);
   fireEvent.change(screen.getByLabelText("Quiet hours start"), { target: { value: "20:00" } });

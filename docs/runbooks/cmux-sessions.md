@@ -23,6 +23,8 @@ The page reads `GET /api/sessions`. Each row is one workspace:
   `[::1]`: one GET, 2 s timeout, no redirects. Any HTTP answer counts. Other hosts are never
   requested.
 - **Inbox:** unread `cmux agent inbox` messages and the newest one.
+- **Checks:** the session's latest repo check (see [Repo checks](#repo-checks)): Queued,
+  Running, Passed, Failed, Timed out or Stopped. Its title is the command and the time.
 
 One read is shared for 2 s. The actions:
 
@@ -41,6 +43,50 @@ files but the README, and the open sessions' distinct folders. It opens one with
 `{ id, name }`. FLIGHT's `cmux_open` takes the same input, in on-call mode only and with
 `asked_by` naming the operator's message. What the session runs, its name and its worktree are in
 the main runbook (`docs/runbook.md`, FLIGHT mode, "Opening a session").
+
+## Repo checks
+
+The hub runs a repo's checks when an operator session there finishes a piece of work. No agent
+runs them and no tokens are spent.
+
+- **Switch:** one per repo, in the Repo checks list under the table. Only a repo with a session
+  of the operator's open is listed. A repo that is not switched on never runs a check by itself.
+  Each switch adds a hub event: `Checks turned on for repo "<name>" by operator` (or `off`).
+  `POST /api/sessions/checks` with `{ repo, on?, commands? }` sets it. `repo` is the main
+  checkout's path; an unknown one gets 404.
+- **Which checks:** the first that names any. The repo's own Mission Control block at
+  `origin/HEAD`, never the working copy. Else the hub config's `rules.checks` for the repo whose
+  `github` matches its origin. Else the list set on the page: at most 10 commands of at most 200
+  characters, each one plain command (no `&&`, `|`, `;` or line break). The list is read again
+  after 60 s.
+- **When:** the hub reads cmux every 3 s while a repo is on or a check is live. A session that
+  goes from working to idle with changed files since its last check queues one. Changed means
+  HEAD, `git status` or a changed file's size or time differs. A session that starts working
+  again stops its check, with no message. Crew seats never run here: their push gate runs checks.
+  Neither does a checkout inside the crew's worktrees, its session checkouts or the hub's data
+  folder.
+- **How:** one check at a time on the Mac, in its checkout, at low priority
+  (`/usr/sbin/taskpolicy -b` on macOS, `nice -n 19` elsewhere). A check waits while the 1-minute
+  load is at or above the core count. Commands run in order and stop at the first failure.
+  Each is stopped after 15 minutes. The environment has no `MC_*` variable.
+- **A failure:** the session gets one `cmux agent message` from "Mission Control" with the
+  command, its exit code and its last 40 lines. The operator gets one `checks` notice
+  (Settings → Access, on by default), and there is a hub event:
+  `Checks failed in cmux session "<name>": <command>` (or `Checks timed out in …`).
+- **Run checks:** the row's button, `POST /api/sessions/:id/checks` with `{}`. It runs whether or
+  not the switch is on and whatever changed. A crew row, or a repo with no checks, answers 400.
+- A preview hub (`MC_NO_LOOP_WRITES=1`) never runs a check by itself.
+
+The controller's live check runs a repo's checks the way the hub does and samples the load every
+2 s. It exits 1 if the peak reaches the core count. Given a workspace id, it also sends that
+session a 40-line message, to show how one arrives:
+
+```sh
+~/.local/mc-node/<version>/bin/node --experimental-strip-types apps/server/test/live/cmux-checks-live-check.ts <repo> [<workspace id>] [-- <command>...]
+```
+
+Before merge, the controller also runs two cmux sessions in one switched-on repo on the Mac. Both
+edit a file and go idle, and their checks run one after the other.
 
 ## Who may write
 

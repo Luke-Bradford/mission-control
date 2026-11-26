@@ -360,6 +360,10 @@ export const ACTIONS = {
   sessionApp: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/app`,
   /** Body: an OpenSessionInput; answers 201 `{ id, name }`. */
   sessionOpen: RESOURCES.sessions.path,
+  /** Body `{}`; queues the session's repo checks. 400 with the reason when it has none or is a crew seat. */
+  sessionChecks: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/checks`,
+  /** Body `{ repo, on?, commands? }`; turns a repo's checks on or off, or sets the page's own list. */
+  sessionRepoChecks: `${RESOURCES.sessions.path}/checks`,
   saveInstruction: (seatId: string | null) =>
     seatId === null ? "/api/flight/orders" : `/api/seats/${enc(seatId)}/instructions`,
   revokeInstruction: (seatId: string | null, id: number) =>

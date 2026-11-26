@@ -9,6 +9,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
+import { LocalNotifications } from "../src/attention/local-notifications.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import * as hud from "../src/hud/hud.ts";
@@ -170,6 +171,7 @@ it("defaults to briefed asks, FLIGHT down and the away digest, and validates gua
       capcom: false,
       awayDigest: true,
       quota: false,
+      checks: true,
     },
     quietHours: { start: "19:00", end: "08:00", timezone: "Europe/London", stallsBypass: true },
   });
@@ -599,6 +601,8 @@ it("resets categories saved before briefed asks, keeping the operator's own opt-
     ["flightDown", true],
     ["awayDigest", true],
     ["quota", true],
+    // added after briefed asks: it takes its default
+    ["checks", true],
   ]);
 });
 
@@ -624,7 +628,40 @@ it("keeps an away-digest opt-out saved before briefed asks", async () => {
   expect(Object.entries((await preferences()).categories).filter(([, on]) => on)).toEqual([
     ["asks", true],
     ["flightDown", true],
+    ["checks", true],
   ]);
+});
+
+it("raises one checks notice, none with the category off, and reads a client from before it", async () => {
+  await app.ready();
+  // a client from before the category (no `checks` key) still saves, taking its default
+  const p = await preferences();
+  const { checks: _added, ...before } = p.categories;
+  expect(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/api/notification-preferences",
+        payload: { ...p, categories: before },
+      })
+    ).statusCode,
+  ).toBe(200);
+  expect((await preferences()).categories.checks).toBe(true);
+  // the hub's one instance, shared with the session checks
+  await app.close();
+  const notifications = new LocalNotifications(store, config, bus, Date.now);
+  app = buildApp({ config, store, bus, notifications });
+  notifications.notice("checks", 'Checks failed in cmux session "pricing": pnpm -s lint');
+  expect(await events()).toMatchObject([
+    { category: "checks", text: 'Checks failed in cmux session "pricing": pnpm -s lint' },
+  ]);
+  await app.inject({
+    method: "POST",
+    url: "/api/notification-preferences",
+    payload: { ...p, categories: { ...p.categories, checks: false } },
+  });
+  expect(notifications.notice("checks", "again")).toBeNull();
+  expect(await events()).toHaveLength(1);
 });
 
 it("keeps saved choices across a category added or removed later", async () => {
