@@ -1177,10 +1177,12 @@ function botFindings(
 
 function commentVerdict(body: string): "approved" | "changes" | null {
   const text = body.toLowerCase();
-  if (/\b(no issues found|no findings|approved|looks good)\b/.test(text)) return "approved";
-  if (/\b(changes? requested|request changes|issues? found|needs? changes)\b/.test(text)) {
+  if (
+    /\b(not approved|changes? requested|request changes|issues? found|needs? changes)\b/.test(text)
+  ) {
     return "changes";
   }
+  if (/\b(no issues found|no findings|approved|looks good)\b/.test(text)) return "approved";
   return null;
 }
 

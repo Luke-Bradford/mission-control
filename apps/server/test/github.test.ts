@@ -1784,7 +1784,7 @@ describe("collectGithub pull requests", () => {
                 { author: { login: "claude[bot]" }, body: `${"b".repeat(40)}\nApproved` },
                 {
                   author: { login: "claude[bot]" },
-                  body: `${head}\nChanges requested: validate input`,
+                  body: `${head}\nNot approved: approved earlier, but changes requested: validate input`,
                 },
               ],
             },
@@ -1797,7 +1797,52 @@ describe("collectGithub pull requests", () => {
       actor: "claude[bot]",
       sha: head,
       verdict: "changes",
-      findings: [{ scenario: `${head}\nChanges requested: validate input` }],
+      findings: [
+        {
+          scenario: `${head}\nNot approved: approved earlier, but changes requested: validate input`,
+        },
+      ],
+    });
+  });
+
+  it("accepts a clean configured bot approval comment on the current head", async () => {
+    const head = "a".repeat(40);
+    const botRepo = {
+      ...repo,
+      review: {
+        kind: "repo-bot" as const,
+        check: "Claude Code Review",
+        verdict: "comment" as const,
+        actor: "claude[bot]",
+      },
+    };
+    const { gql } = stub({
+      prPages: [
+        prPage([
+          pull(10, {
+            commits: {
+              nodes: [
+                {
+                  commit: {
+                    oid: head,
+                    statusCheckRollup: {
+                      state: "SUCCESS",
+                      contexts: { nodes: [checkRun("Claude Code Review", "SUCCESS")] },
+                    },
+                  },
+                },
+              ],
+            },
+            comments: { nodes: [{ author: { login: "claude[bot]" }, body: `${head}\nApproved` }] },
+          }),
+        ]),
+      ],
+    });
+    await collectGithub(botRepo, store, gql, NOW);
+    expect(prs()[0]?.repoBotReview).toMatchObject({
+      actor: "claude[bot]",
+      sha: head,
+      verdict: "approved",
     });
   });
 
