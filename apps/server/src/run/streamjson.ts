@@ -81,6 +81,11 @@ const DURATIONS_KEEP = 50;
  */
 export const STREAM_EVENT_PREFIX = '{"type":"stream_event"';
 /**
+ * The field the cmux driver sets on the `system`/`init` line it writes into a run's transcript at an
+ * operator's /clear: the new session's context is unknown until its first reply.
+ */
+export const CMUX_CLEAR_MARK = "mc_cmux_clear";
+/**
  * `task_updated` / `task_notification` status → SubagentInfo status; others leave it unchanged.
  * Looked up with Object.hasOwn, so `__proto__` / `constructor` are just unknown statuses.
  */
@@ -860,6 +865,8 @@ export function foldTranscript(
         facts.model = cleanStr(ev.model) ?? facts.model;
         facts.permissionMode = str(ev.permissionMode) ?? facts.permissionMode;
         d.cwd = cleanStr(ev.cwd) ?? d.cwd;
+        // an operator's /clear in cmux starts the context over; a resume's init carries it on
+        if (ev[CMUX_CLEAR_MARK] === true) d.contextTokens = null;
       } else if (ev.subtype === "vcs_state_changed") {
         src.vcs = cleanStr(ev.branch) ?? src.vcs;
       } else if (ev.subtype === "code_change_published") {

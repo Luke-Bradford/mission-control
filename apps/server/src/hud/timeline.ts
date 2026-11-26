@@ -52,21 +52,27 @@ export function overviewTimeline(config: CcConfig, store: Store, now: number): O
       .filter((a) => a.kind === "crew")
       .map((a) => a.id),
   );
+  // A crew seat waiting on the operator in cmux is still in its turn: its row is `needs-input`, and
+  // its events say `blocked` (crewHudState).
   const running = new Map<string, number>();
   const seen = new Set<string>();
   for (const event of sources.events) {
     if (!crewIds.has(event.agentId)) continue;
-    if (!seen.has(event.agentId) && event.from === "running") running.set(event.agentId, from);
+    if (!seen.has(event.agentId) && (event.from === "running" || event.from === "blocked"))
+      running.set(event.agentId, from);
     seen.add(event.agentId);
     const start = running.get(event.agentId);
     if (["idle", "stopped", "error", "parked"].includes(event.to) && start !== undefined) {
       add(event.agentId, "turn", start, event.at);
       running.delete(event.agentId);
     }
-    if (event.to === "running") running.set(event.agentId, event.at);
+    // an answered question carries on the turn it paused
+    const resumed = event.from === "blocked" && running.has(event.agentId);
+    if (event.to === "running" && !resumed) running.set(event.agentId, event.at);
   }
   for (const [agentId, start] of running) {
-    if (store.seatSession(agentId)?.state === "running") add(agentId, "turn", start, null);
+    const state = store.seatSession(agentId)?.state;
+    if (state === "running" || state === "needs-input") add(agentId, "turn", start, null);
   }
   for (const hold of sources.holds) add(hold.agentId, "lock", hold.from, hold.to);
   for (const review of sources.reviews) {
