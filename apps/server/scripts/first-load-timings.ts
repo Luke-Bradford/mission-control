@@ -31,7 +31,7 @@ import { Store } from "../src/store.ts";
  * Routes left out: the event stream and the live update log do not answer once and end, and the
  * Sessions page's list reads cmux live with the operator's token, not the database.
  */
-const SKIP = new Set(["/api/stream", "/api/update/log", "/api/sessions"]);
+const SKIP = new Set(["/api/stream", "/api/update/log", "/api/sessions", "/api/sessions/sidebar"]);
 /** Routes that read config.yaml itself: timed only when --config names one. */
 const CONFIG_FILE_ROUTES = new Set(["/api/config/settings"]);
 /** A request still running after this long is reported, not waited for. */

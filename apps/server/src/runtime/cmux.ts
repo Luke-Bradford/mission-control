@@ -541,9 +541,16 @@ export function createCmux(
         remaining = lines.pop() ?? "";
         for (const line of lines) onLine(line);
       });
+      const ended = new Promise<void>((resolve) => {
+        child.once("close", resolve);
+        child.once("error", (error) => {
+          log(`cmux events could not start: ${String(error)}`);
+          resolve();
+        });
+      });
       return {
         stop: () => child.kill(),
-        ended: new Promise((resolve) => child.once("close", () => resolve())),
+        ended,
       };
     },
   };
