@@ -188,6 +188,10 @@ describe("the sessions routes", () => {
 
   it("POST /api/sessions opens a workspace", async () => {
     const input = { folder: dir, worktree: false, role: "GUIDO", message: "Fix the login test" };
+    // the new Claude comes up at its input prompt
+    fake.patch((s) => {
+      s.screen = "│ ❯ │\n  ? for shortcuts\n";
+    });
     const r = await operator().post("/api/sessions", input);
     expect(r.statusCode).toBe(201);
     expect(r.json()).toMatchObject({ name: expect.stringMatching(/ \(GUIDO\)$/) });

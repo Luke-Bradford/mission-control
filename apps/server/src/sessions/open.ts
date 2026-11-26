@@ -17,6 +17,8 @@ import {
 import { z } from "zod";
 import { cleanText } from "../repo/clean.ts";
 import type { Cmux } from "../runtime/cmux.ts";
+import { answerTrustPrompt } from "../runtime/cmux-session.ts";
+import { pidAlive } from "../runtime/keeper.ts";
 import type { Store } from "../store.ts";
 
 const run = promisify(execFile);
@@ -41,8 +43,11 @@ export class SessionOpenError extends Error {
   }
 }
 
-/** What opening needs of cmux: a new workspace running `command` in `cwd`. */
-export type SessionCmux = Pick<Cmux, "newWorkspace">;
+/**
+ * What opening needs of cmux: a new workspace running `command` in `cwd`, its screen and keys to
+ * answer Claude's folder-trust prompt, and a close for a start that failed.
+ */
+export type SessionCmux = Pick<Cmux, "newWorkspace" | "readScreen" | "sendKey" | "close">;
 
 /** The roles a session may take: the `roles/*.md` files but the README, sorted, without `.md`. */
 export function sessionRoles(rolesDir: string): string[] {
@@ -112,12 +117,32 @@ async function freshWorktree(folder: string, role: string, at: number): Promise<
   }
 }
 
+/** The pid the launch script wrote, or null while it has not. */
+const pidOf = (pidFile: string): number | null => {
+  try {
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Checks the input, makes the worktree when asked, writes the launch script and opens the
- * workspace. Logs a hub event naming who asked; the message itself is never logged.
+ * workspace, then waits for Claude to be up, answering its folder-trust prompt (a fresh worktree
+ * always shows it). A start that fails closes its workspace and is a 503. Logs a hub event naming
+ * who asked; the message itself is never logged.
  */
 export async function openSession(
-  deps: { cmux: SessionCmux; store: Store; rolesDir: string; now?: () => number },
+  deps: {
+    cmux: SessionCmux;
+    store: Store;
+    rolesDir: string;
+    now?: () => number;
+    /** How long Claude has to be up, and how often its screen is read: the trust step's defaults when unset. */
+    startWaitMs?: number;
+    pollMs?: number;
+  },
   input: OpenSessionInput,
   askedBy: string,
 ): Promise<{ id: string; name: string; folder: string; pidFile: string }> {
@@ -146,6 +171,19 @@ export async function openSession(
   try {
     id = await deps.cmux.newWorkspace({ name, cwd, command: quote(script) });
   } catch (e) {
+    throw new SessionOpenError(503, e instanceof Error ? e.message : String(e));
+  }
+  try {
+    await answerTrustPrompt(deps.cmux, id, {
+      alive: () => {
+        const pid = pidOf(pidFile);
+        return pid === null ? null : pidAlive(pid);
+      },
+      waitMs: deps.startWaitMs,
+      pollMs: deps.pollMs,
+    });
+  } catch (e) {
+    await deps.cmux.close(id).catch(() => {});
     throw new SessionOpenError(503, e instanceof Error ? e.message : String(e));
   }
   deps.store.addHubEvent(

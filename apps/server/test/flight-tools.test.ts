@@ -12307,6 +12307,8 @@ describe("cmux sessions", () => {
   });
 
   it("cmux_open opens one session per call with its role and first message", async () => {
+    // each new Claude comes up at its input prompt
+    cmuxScreen = "│ ❯ │\n  ? for shortcuts\n";
     const open = (role: string, message: string, asked_by?: string) =>
       call("cmux_open", {
         folder: dir,

@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SESSION_FOLDER_TEXT, SESSION_ROLE_TEXT } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CMUX_TRUST_QUIT, CMUX_TRUST_STUCK } from "../src/runtime/cmux-session.ts";
 import {
   openSession,
   SessionOpenError,
@@ -25,13 +26,42 @@ let dir: string;
 let roles: string;
 let store: Store;
 let opened: { name: string; cwd: string; command: string }[];
+/** Claude's input prompt: a session at it has started. */
+const CLAUDE_UP = "╭────╮\n│ ❯ │\n╰────╯\n  ? for shortcuts\n";
+/** Claude's folder-trust prompt as a fresh worktree shows it, the cursor on its "No, exit" option. */
+const trustScreen = (onYes: boolean) =>
+  [
+    " Accessing workspace:",
+    "",
+    " /Users/op/Dev/repo-sessions/guido-20261125-195500",
+    "",
+    " Quick safety check: Is this a project you created or one you trust?",
+    "",
+    ` ${onYes ? "❯" : " "} 1. Yes, I trust this folder`,
+    ` ${onYes ? " " : "❯"} 2. No, exit`,
+    "",
+    " Enter to confirm · Esc to cancel",
+  ].join("\n");
+/** What the workspace shows now; sendKey may change it. */
+let screen: () => string;
+let keys: string[];
+let closed: string[];
+let onKey: (key: string) => void;
 const cmux = {
   newWorkspace: async (i: { name: string; cwd: string; command: string }) => {
     opened.push(i);
     return `ws-${opened.length}`;
   },
+  readScreen: async () => screen(),
+  sendKey: async (_ws: string, key: string) => {
+    keys.push(key);
+    onKey(key);
+  },
+  close: async (ws: string) => {
+    closed.push(ws);
+  },
 };
-const deps = () => ({ cmux, store, rolesDir: roles, now: () => T0 });
+const deps = () => ({ cmux, store, rolesDir: roles, now: () => T0, pollMs: 1 });
 /** The script path a workspace command names: the command is that path, single-quoted. */
 const scriptOf = (command: string) => readFileSync(command.slice(1, -1), "utf8");
 
@@ -45,6 +75,10 @@ beforeEach(() => {
   writeFileSync(join(roles, "README.md"), "not a role");
   store = new Store(":memory:");
   opened = [];
+  screen = () => CLAUDE_UP;
+  keys = [];
+  closed = [];
+  onKey = () => {};
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -133,6 +167,7 @@ describe("opening a session", () => {
       {
         ...deps(),
         cmux: {
+          ...cmux,
           newWorkspace: async () => {
             throw new Error("cmux is not running");
           },
@@ -143,6 +178,50 @@ describe("opening a session", () => {
     ).catch((x: unknown) => x);
     expect((e as SessionOpenError).status).toBe(503);
     expect(store.hubEvents(0)).toEqual([]);
+  });
+
+  it("answers Claude's folder-trust prompt before the start counts", async () => {
+    // a fresh worktree: Claude asks with the cursor on "No, exit"; Yes is above it
+    let state: "no" | "yes" | "up" = "no";
+    screen = () => (state === "up" ? CLAUDE_UP : trustScreen(state === "yes"));
+    onKey = (key) => {
+      if (key === "up" && state === "no") state = "yes";
+      else if (key === "enter" && state === "yes") state = "up";
+    };
+    const r = await openSession(
+      deps(),
+      { folder: dir, worktree: false, role: "GUIDO", message: "m" },
+      "operator",
+    );
+    expect(r.id).toBe("ws-1");
+    expect(keys).toEqual(["up", "enter"]);
+    expect(closed).toEqual([]);
+  });
+
+  it("a Claude that quits at the trust prompt is a 503 and its workspace is closed", async () => {
+    screen = () => "Claude Code will exit: this folder isn't trusted.\n% ";
+    const e = await openSession(
+      deps(),
+      { folder: dir, worktree: false, role: "GUIDO", message: "m" },
+      "operator",
+    ).catch((x: unknown) => x);
+    expect((e as SessionOpenError).status).toBe(503);
+    expect((e as SessionOpenError).message).toBe(CMUX_TRUST_QUIT);
+    expect(keys).toEqual([]);
+    expect(closed).toEqual(["ws-1"]);
+    expect(store.hubEvents(0)).toEqual([]);
+  });
+
+  it("a trust prompt the hub cannot answer in time is a 503", async () => {
+    screen = () => trustScreen(false);
+    const e = await openSession(
+      { ...deps(), startWaitMs: 20 },
+      { folder: dir, worktree: false, role: "GUIDO", message: "m" },
+      "operator",
+    ).catch((x: unknown) => x);
+    expect((e as SessionOpenError).status).toBe(503);
+    expect((e as SessionOpenError).message).toBe(CMUX_TRUST_STUCK);
+    expect(closed).toEqual(["ws-1"]);
   });
 
   it("worktree makes a session/<slug> worktree from origin's default branch", async () => {

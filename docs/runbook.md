@@ -1418,8 +1418,11 @@ seat environment and no sandbox. It runs in an existing absolute folder, or with
 message that starts with `-` is never read as an option. The name
 defaults to `<folder name> (<ROLE>)` and never holds a seat's ` · `, so the Sessions page lists it as
 the operator's. The hub event `Opened cmux session "<name>" in <folder> as <ROLE>, asked by <who>`
-logs each one; the message is not logged. A bad folder or role, or a git failure, is a 400; a cmux
-failure is a 503.
+logs each one; the message is not logged. The open waits (up to a minute) for Claude to reach its
+input prompt, answering its folder-trust prompt on the way (a fresh worktree always shows it; the
+cursor opens on "No, exit", and the hub moves it to "Yes" before Enter). A bad folder or role, or a
+git failure, is a 400. A cmux failure, or a Claude that quits at the trust prompt or is not up in
+time, is a 503, and that workspace is closed.
 
 ### FLIGHT adds a controller check to a ticket
 
