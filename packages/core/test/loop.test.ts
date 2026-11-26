@@ -2502,6 +2502,23 @@ describe("review decisions", () => {
     expect(sends(r.actions)).toEqual(["fix:r1:0:3"]);
   });
 
+  it("caps an unattended repository bot at three rounds, while other repositories keep their profile cap", () => {
+    const rows = [
+      fact({ id: 1, blocking: 1 }),
+      fact({ id: 2, blocking: 1, sha: SHA }),
+      fact({ id: 3, blocking: 1 }),
+    ];
+    const s = inReview(withReview(rows, [finding]), {
+      claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 },
+      limits: { tries: 3, rounds: 5 },
+    });
+    expect(reconcile({ ...s, repoBotReview: true }).loop.hold).toMatchObject({
+      kind: "review",
+      reason: reviewParkText(RETRO, SHA, 3),
+    });
+    expect(sends(reconcile(s).actions)).toEqual(["fix:r1:0:3"]);
+  });
+
   it("withholds the plain ready note until the PR is mergeable", () => {
     const s = inReview(withReview([fact({ id: 4, minor: 2 })]));
     if (!s.pr) throw new Error("missing PR fixture");

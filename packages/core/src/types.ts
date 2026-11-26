@@ -585,6 +585,19 @@ export interface PullRequestView {
   closingIssues?: number[];
   isDraft: boolean;
   review: "approved" | "changes" | "requested" | null;
+  /** The configured repository bot's latest review on this head, if the collector could verify it. */
+  repoBotReview?: {
+    actor: string;
+    sha: string;
+    verdict: "approved" | "changes";
+    findings: {
+      file: string;
+      line: number;
+      summary: string;
+      scenario: string;
+      fix: string;
+    }[];
+  } | null;
   ci: "passing" | "failing" | "pending" | null;
   createdAt: number;
   updatedAt: number;
