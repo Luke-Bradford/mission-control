@@ -914,8 +914,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /** A Claude run lives in a cmux workspace, not under a keeper. */
   const viaCmux = (run: Pick<Run, "id" | "vendor">) =>
     cmux !== null && run.vendor !== "codex" && store.getSetting(cmuxKeeperKey(run.id)) === null;
-  /** The workspaces this hub's runs hold: a same-named one is not a new run's. */
-  const claimedWorkspaces = new Set<string>();
   const savedWorkspace = (runId: string): CmuxSaved | null => {
     try {
       const v = parseJson<unknown>(store.getSetting(cmuxWorkspaceKey(runId)), null) as {
@@ -950,13 +948,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * read outlives the workspace until the run ends: a resume in a new workspace starts from it.
    */
   function keepWorkspace(runId: string, state: CmuxSaved | null): void {
-    const prior = savedWorkspace(runId);
-    if (prior !== null) claimedWorkspaces.delete(prior.workspace);
     if (state === null) {
       store.deleteSetting(cmuxWorkspaceKey(runId));
       return;
     }
-    claimedWorkspaces.add(state.workspace);
     store.setSetting(cmuxWorkspaceKey(runId), JSON.stringify(state));
     if (state.source !== undefined)
       store.setSetting(cmuxSourceKey(runId), JSON.stringify(state.source));
@@ -975,7 +970,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       log(`could not close the cmux workspace of ${runId}: ${errText(e)}`);
       if (saved.pid !== null && pidAlive(saved.pid)) return false;
     }
-    claimedWorkspaces.delete(saved.workspace);
     store.deleteSetting(cmuxWorkspaceKey(runId));
     return true;
   }
@@ -2506,7 +2500,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             transcriptPath: run.transcriptPath,
             cliSessionId,
             messageDir: join(tmp, "mc-messages"),
-            taken: () => claimedWorkspaces,
             source: resume ? savedSource(run.id) : null,
             save: (saved) => keepWorkspace(run.id, saved),
             log,
@@ -3407,7 +3400,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       log(`${row.seatId}: cmux would not say what runs in its workspace: ${errText(e)}`);
       return gone;
     }
-    claimedWorkspaces.add(saved.workspace);
     let messageDir = join(seatTmp(runId), "mc-messages");
     try {
       messageDir = join(realpathSync(seatTmp(runId)), "mc-messages");

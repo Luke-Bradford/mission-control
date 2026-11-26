@@ -32,6 +32,11 @@ will not stop ends the run instead, so two Claudes never work one worktree.
 
 - One workspace per run, named `<seat> · <ticket>` (`PR n` for a review, the role for FLIGHT), opened
   on the run's worktree.
+- The hub binds the run to the workspace `cmux new-workspace` says it made (`OK workspace:<n>`),
+  resolved to its id with `list-workspaces --id-format both`; never to one found by name, so an old
+  workspace of the same name never gets the run's messages.
+- When the run ends or restarts, its workspace closes, even when Claude has already exited. If cmux
+  will not close it, the hub keeps it saved and closes it at the run's end or next start.
 - It runs `claude` by name from a launcher script in the run's folder, so cmux's shim wraps it with
   its hooks. The launcher keeps cmux's shim folder first on PATH, ahead of the hub's node folder
   (which may hold its own `claude`). The hub's own `--settings`, `--mcp-config`, `--strict-mcp-config`, `--restricted`, tool

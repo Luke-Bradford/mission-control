@@ -8,7 +8,7 @@ const FAKE = fileURLToPath(new URL("./fixtures/fake-cmux.mjs", import.meta.url))
 
 /** What fake-cmux.mjs keeps (see its header). */
 export interface FakeState {
-  workspaces?: { id: string; name: string; cwd?: string; window?: string }[];
+  workspaces?: { id: string; ref?: string; name: string; cwd?: string; window?: string }[];
   sessions?: {
     session_id: string;
     lifecycle: string;
