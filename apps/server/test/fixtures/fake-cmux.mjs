@@ -26,7 +26,7 @@
 // Switches a test sets: `down` (no socket until `open` is run), `denied` (access denied), `busy`
 // (`send` refuses: a dialog is open), `noForce` (close-workspace refuses --force), `noClose` (close-workspace
 // refuses, the workspace stays), `linger` (ms a closed workspace is still listed, as real cmux's can be
-// for a few seconds), `hideWorkspaces`
+// for a few seconds), `listWorkspacesFails` (workspace listing refuses), `hideWorkspaces`
 // (new-workspace makes none), `autoClaude` (new-workspace also starts a Claude: a session record for
 // the id after `--session-id` / `--resume` in the launcher it was given, its pid `claudePid`, its
 // transcript in `transcriptDir`).
@@ -172,6 +172,7 @@ switch (cmd) {
     break;
   }
   case "list-workspaces": {
+    if (state.listWorkspacesFails) fail("could not list workspaces");
     const window = flag("--window") ?? CURRENT_WINDOW;
     ok(
       JSON.stringify({

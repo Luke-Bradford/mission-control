@@ -347,6 +347,21 @@ describe("a Claude run in cmux", () => {
     expect(store.run(runId)?.endedAt).not.toBeNull();
   });
 
+  it("keeps a closed workspace when cmux cannot verify that it disappeared", async () => {
+    fakeCmux({ claudePid: 999_999 });
+    const { sup } = make({ cmuxState: stateFile() });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(cmuxState().sent).toHaveLength(1));
+    patch((s) => {
+      s.listWorkspacesFails = true;
+    });
+
+    await sup.endRun("guido-1");
+
+    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
+  });
+
   it("a workspace cmux will not close after Claude exits keeps the seat's next start until it closes", async () => {
     const claude = spawn("sleep", ["60"], { stdio: "ignore" });
     fakeCmux({ claudePid: claude.pid });

@@ -973,11 +973,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } catch (e) {
       log(`could not close the cmux workspace of ${runId}: ${errText(e)}`);
       if (saved.pid !== null && pidAlive(saved.pid)) return false;
-      const listed = await (cmux?.workspaces() ?? Promise.resolve([])).then(
-        (all) => all.some((w) => w.id === saved.workspace),
-        () => false,
-      );
-      if (listed) return false;
+      try {
+        if ((await cmux?.workspaces())?.some((w) => w.id === saved.workspace)) return false;
+      } catch {
+        // cmux's close result cannot prove removal while its workspace list is unavailable
+        return false;
+      }
     }
     store.deleteSetting(cmuxWorkspaceKey(runId));
     return true;
