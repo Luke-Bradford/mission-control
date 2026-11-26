@@ -1428,8 +1428,8 @@ input prompt, answering its folder-trust prompt on the way (a fresh worktree alw
 cursor opens on "No, exit", and the hub moves it to "Yes" before Enter). A bad folder or role, or a
 git failure, is a 400. A cmux failure, or a Claude that quits at the trust prompt or is not up in
 time, is a 503, and the workspace this open made is closed (a same-named older one never is).
-Opens take turns from listing the workspaces to finding the new one, so two at once with the same
-name each get their own.
+The open takes the workspace cmux says it made, never one found by name, so two at once with the
+same name each get their own.
 
 ### FLIGHT adds a controller check to a ticket
 
