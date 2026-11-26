@@ -360,8 +360,7 @@ function createCmuxDriver(
   const configDir = i.claudeConfigDir ?? claudeConfigDir(i.env);
   /** Whether Claude's last top-level line leaves it a turn to finish (a prompt, a tool call or a result). */
   let turn: "pending" | "done" | null = null;
-  /** The project folder of the transcript being read, and the transcripts in it that are not this run's. */
-  let projectDir: string | null = null;
+  /** The transcripts in Claude's project folder that are not this run's. */
   const notOurs = new Set<string>();
   let grewAt = 0;
 
@@ -515,9 +514,10 @@ function createCmuxDriver(
 
   /**
    * A transcript Claude began after /clear, found with no cmux record: in the same project folder as
-   * the session being read (Claude's folder for this worktree), new since the hub first looked there,
-   * begun after this start, and whose own lines name this worktree as their folder and the file's
-   * name as their session. Files that are not it are not read again. Null when there is none yet.
+   * the session being read (Claude's folder for this worktree), begun after this start, and whose own
+   * lines name this worktree as their folder and the file's name as their session. Files that are not
+   * it are not read again; files from before the start are ruled out by their creation time alone.
+   * Null when there is none yet.
    */
   function clearedTo(current: string): { id: string; path: string } | null {
     const dir = dirname(current);
@@ -525,12 +525,6 @@ function createCmuxDriver(
     try {
       names = readdirSync(dir).filter((n) => n.endsWith(".jsonl"));
     } catch {
-      return null;
-    }
-    if (projectDir !== dir) {
-      projectDir = dir;
-      for (const n of names) notOurs.add(n);
-      notOurs.delete(`${sessionId}.jsonl`);
       return null;
     }
     for (const n of names) {

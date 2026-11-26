@@ -1223,6 +1223,30 @@ describe("with no cmux record of the session", () => {
     },
   );
 
+  it("a /clear before the first look at the project folder is still followed", async () => {
+    const h = await bare();
+    const dir = join(root, "config", "projects", "-some-folder");
+    const fresh = "33333333-3333-4333-8333-333333333333";
+    // the old and the fresh transcript both exist before the hub first scans the folder
+    own(h, { type: "user", cwd: root, sessionId: h.sessionId, message: { content: "brief" } });
+    writeFileSync(
+      join(dir, `${fresh}.jsonl`),
+      `${JSON.stringify({ type: "user", cwd: root, sessionId: fresh, message: { content: "after clear" } })}\n`,
+    );
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${launched()}\n`);
+    await h.session.ready;
+    await wait(() => h.events.some((e) => e.kind === "init"));
+    expect(h.events.find((e) => e.kind === "init")).toMatchObject({ sessionId: fresh });
+    await wait(() => readFileSync(h.transcript, "utf8").includes("after clear"));
+    appendFileSync(
+      join(dir, `${fresh}.jsonl`),
+      `${JSON.stringify({ type: "user", cwd: root, sessionId: fresh, message: { content: "later" } })}\n`,
+    );
+    await wait(() => readFileSync(h.transcript, "utf8").includes("later"));
+    expect(h.events.filter((e) => e.kind === "init")).toHaveLength(1);
+    h.session.detach();
+  });
+
   it("a failed start leaves no secret environment file or launcher behind", async () => {
     patch((s) => {
       s.denied = true;

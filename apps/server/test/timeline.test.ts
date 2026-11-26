@@ -163,6 +163,52 @@ it("clips both edges and preserves an open span, including a turn begun before t
   ]);
 });
 
+it("keeps a turn open while the seat waits on the operator in cmux", () => {
+  seat("needs-input");
+  store.addAgentEvent({ agentId: "dev", at: FROM + 10, from: "idle", to: "running", text: "" });
+  store.addAgentEvent({
+    agentId: "dev",
+    at: FROM + 20,
+    from: "running",
+    to: "needs-input",
+    text: "",
+  });
+  expect(view().lanes[1]?.spans).toEqual([{ kind: "turn", from: FROM + 10, to: null }]);
+});
+
+it("an answered question continues the turn it paused", () => {
+  seat("idle");
+  store.addAgentEvent({ agentId: "dev", at: FROM + 10, from: "idle", to: "running", text: "" });
+  store.addAgentEvent({
+    agentId: "dev",
+    at: FROM + 20,
+    from: "running",
+    to: "needs-input",
+    text: "",
+  });
+  store.addAgentEvent({
+    agentId: "dev",
+    at: FROM + 30,
+    from: "needs-input",
+    to: "running",
+    text: "",
+  });
+  store.addAgentEvent({ agentId: "dev", at: FROM + 40, from: "running", to: "idle", text: "" });
+  expect(view().lanes[1]?.spans).toEqual([{ kind: "turn", from: FROM + 10, to: FROM + 40 }]);
+});
+
+it("a turn waiting on the operator since before the window starts at the window's edge", () => {
+  seat("needs-input");
+  store.addAgentEvent({
+    agentId: "dev",
+    at: FROM + 30,
+    from: "needs-input",
+    to: "running",
+    text: "",
+  });
+  expect(view().lanes[1]?.spans).toEqual([{ kind: "turn", from: FROM, to: null }]);
+});
+
 it("sums a seat's tokens per minute across every run in the window", () => {
   const minute = Math.floor(NOW / 60_000) * 60_000;
   const base = foldTranscript(null, [], NOW).digest;
