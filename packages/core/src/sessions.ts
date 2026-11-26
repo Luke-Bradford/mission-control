@@ -3,6 +3,7 @@
  * cmux with no agent. The hub lists, reads, focuses and writes to them; it never closes one.
  */
 import type { SessionCheck, SessionRepoChecks } from "./session-checks.ts";
+import type { SessionSpendCell } from "./session-spend.ts";
 
 /** What a workspace's agent is doing; `no-agent` is a plain shell (or an agent cmux does not know). */
 export const CMUX_SESSION_STATES = ["working", "idle", "waiting", "no-agent"] as const;
@@ -41,6 +42,11 @@ export interface CmuxSessionRow {
   inbox: { unread: number; newest: string | null };
   /** The workspace's latest repo check (queued, running or how it ended); null: none this hub run. */
   check: SessionCheck | null;
+  /**
+   * The Claude session's tokens and ~cost today and over the last 7 local days, read from its
+   * transcript by the hub; null with no agent or no usage yet (shown as —).
+   */
+  spend?: SessionSpendCell | null;
 }
 
 export type CmuxSessionsView =

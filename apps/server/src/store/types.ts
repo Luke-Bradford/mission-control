@@ -81,7 +81,13 @@ export interface SeatQuestion {
 }
 
 /** The seat states that still hold a run: the supervisor reattaches these after a restart. */
-export const ACTIVE_SEAT_STATES: readonly SeatState[] = ["idle", "starting", "running", "parked"];
+export const ACTIVE_SEAT_STATES: readonly SeatState[] = [
+  "idle",
+  "starting",
+  "running",
+  "needs-input",
+  "parked",
+];
 
 /** One held call of the test lock, as stored. */
 export interface LockHoldRow {

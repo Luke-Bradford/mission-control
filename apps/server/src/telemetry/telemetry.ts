@@ -29,6 +29,7 @@ import { agentIds, type CcConfig, configuredAgents, crewSeatDef } from "../confi
 import { crew } from "../hud/hud.ts";
 import { clippedMs, dayFormatter, endOf, lastDays, lockLabel } from "../hud/views.ts";
 import { type PrCache, runPrs, runTicket } from "../run/view.ts";
+import { sessionSpendSplit } from "../spend/sessions.ts";
 import { runSpend } from "../spend/spend.ts";
 import type { Store } from "../store.ts";
 
@@ -972,6 +973,7 @@ export function telemetry(
     machine,
     tokensByTicket,
     tokensByStep: tokensByStep.map((row) => ({ ...row, tokens: Math.round(row.tokens) })),
+    sessionSpend: sessionSpendSplit(config, store, now),
     capcom,
     totals: totalRows,
   };

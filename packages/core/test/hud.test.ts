@@ -532,7 +532,12 @@ describe("crewHudState", () => {
     updatedAt,
   });
 
-  it("never reads blocked for a seat, whatever its state", () => {
+  it("a seat waiting on the operator in cmux is blocked, never stalled", () => {
+    expect(crewHudState(seat("needs-input"), now - STALL_MS, now)).toBe("blocked");
+    expect(crewHudState(seat("needs-input"), null, now + 10 * STALL_MS)).toBe("blocked");
+  });
+
+  it("never reads blocked for a seat that does not wait on the operator, whatever its state", () => {
     const states: SeatState[] = ["starting", "running", "idle", "parked", "stopped", "error"];
     for (const lock of [false, true]) {
       expect(crewHudState(null, null, now, lock)).not.toBe("blocked");

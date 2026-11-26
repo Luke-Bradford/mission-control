@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { CcConfig } from "../src/config.ts";
 import { CMUX_REFUSED_TEXT } from "../src/runtime/cmux.ts";
 import {
   CMUX_NOT_RUNNING_TEXT,
@@ -12,6 +13,7 @@ import {
   repoOf,
   type SessionsDeps,
 } from "../src/sessions/sessions.ts";
+import { readSessionSpend } from "../src/spend/sessions.ts";
 import { Store } from "../src/store.ts";
 import { commandOf, type FakeState, fakeCmux } from "./fake-cmux-harness.ts";
 
@@ -188,6 +190,57 @@ describe("sessions view", () => {
     expect(fake.state().closed ?? []).toEqual([]);
     expect(fake.state().sent ?? []).toEqual([]);
     expect(fake.state().messages ?? []).toEqual([]);
+  });
+
+  it("an operator's session shows its spend today and over 7 days once its turn is read", async () => {
+    const state = threeSessions();
+    const config = {
+      operator: { id: "operator", timezone: "Europe/London" },
+      accounts: [],
+      repos: [],
+      loops: [],
+      poll: { usageMinutes: 30, githubSeconds: 60 },
+    } as unknown as CcConfig;
+    const turn = (id: string, at: number, input: number, output: number) =>
+      `${JSON.stringify({
+        type: "assistant",
+        sessionId: "s1",
+        cwd: dir,
+        timestamp: new Date(at).toISOString(),
+        message: {
+          id,
+          model: "claude-opus-5-5",
+          content: [{ type: "text", text: "Tests pass" }],
+          usage: { input_tokens: input, output_tokens: output },
+        },
+      })}\n`;
+    writeFileSync(
+      join(projects, "p", "s1.jsonl"),
+      turn("m0", nowMs - 3 * 86_400_000, 1000, 1000) + turn("m1", nowMs - 60_000, 1000, 500),
+    );
+    // written "now" on the test's clock
+    utimesSync(join(projects, "p", "s1.jsonl"), nowMs / 1000, (nowMs - 60_000) / 1000);
+    const { sessions } = setup(state, { timeZone: () => "Europe/London" });
+    const before = await sessions.view();
+    if (!before.ok) throw new Error(before.error);
+    // not read yet: no figures, a dash on the page
+    expect(before.sessions.find((r) => r.name === "pricing")?.spend).toBeNull();
+    readSessionSpend({ config, store, root: projects, now: nowMs });
+    nowMs += 3000; // past the shared read
+    const view = await sessions.view();
+    if (!view.ok) throw new Error(view.error);
+    const by = Object.fromEntries(view.sessions.map((r) => [r.name, r]));
+    expect(by.pricing?.owner).toBe("operator");
+    expect(by.pricing?.spend?.today.tokens).toBe(1500);
+    expect(by.pricing?.spend?.today.costUsd).toBeCloseTo((1000 * 4 + 500 * 20) / 1e6, 12);
+    expect(by.pricing?.spend?.week.tokens).toBe(3500);
+    expect(by.pricing?.spend?.week.costUsd).toBeCloseTo(
+      (1000 * 4 + 500 * 20 + 1000 * 4 + 1000 * 20) / 1e6,
+      12,
+    );
+    // an agent with no usage, and a plain shell, have none
+    expect(by["GUIDO-1 · PR 12"]?.spend).toBeNull();
+    expect(by["dev server"]?.spend).toBeNull();
   });
 
   it("keeps since while the state holds and resets it on a change; shares one read for 2 s", async () => {

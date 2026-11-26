@@ -687,6 +687,8 @@ export async function main(): Promise<void> {
           log: (line) => log(line),
         });
   const supervisor = createSupervisor({
+    // every Claude seat runs as a cmux workspace the operator can see, type into and clear
+    cmuxCommand: [CMUX_COMMAND],
     auditPack: (seatId) =>
       buildAuditPack({ config, store, busy: supervisor.busy(), now: Date.now(), seatId }),
     flightEnvironment: async () => ({
@@ -1065,6 +1067,7 @@ export async function main(): Promise<void> {
     store,
     seatIds,
     checks: sessionChecks,
+    timeZone: () => config.operator.timezone,
     tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
     rolesDir: hubRoot === null ? undefined : join(hubRoot, ROLE_PROMPT_DIR),
     log: (m) => log(m),

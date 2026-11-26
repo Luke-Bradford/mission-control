@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { LAST_TEXT_MAX, LIVE_DETAIL_MAX, NO_REPORT_REASON_MAX, NO_REPORT_TEXT_MAX } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
-import { foldTranscript } from "../src/run/streamjson.ts";
+import { CMUX_CLEAR_MARK, foldTranscript } from "../src/run/streamjson.ts";
 
 const lines = readFileSync(resolve(import.meta.dirname, "fixtures/iteration.sample.log"), "utf8")
   .split("\n")
@@ -454,6 +454,33 @@ describe("foldTranscript digest", () => {
     expect(running.contextWindow).toBeNull();
     // The subagent's frames do not move the (top-level) context.
     expect(running.contextTokens).toBe(3 + 6200 + 100);
+  });
+
+  it("forgets the context at a cmux /clear, until the new session's first reply", () => {
+    const reply = (id: string, input: number) =>
+      JSON.stringify({
+        type: "assistant",
+        message: { id, content: [{ type: "text", text: "ok" }], usage: { input_tokens: input } },
+      });
+    const clear = JSON.stringify({
+      type: "system",
+      subtype: "init",
+      session_id: "s2",
+      [CMUX_CLEAR_MARK]: true,
+    });
+    const user = JSON.stringify({ type: "user", message: { content: "hello" } });
+    const cleared = foldTranscript(null, [reply("m1", 90_000), clear, user], 1);
+    expect(cleared.digest.contextTokens).toBeNull();
+    expect(cleared.sessionId).toBe("s2");
+    expect(
+      foldTranscript(null, [reply("m1", 90_000), clear, user, reply("m2", 4)], 1).digest
+        .contextTokens,
+    ).toBe(4);
+    // a resume's init in print mode carries the session's context on
+    const resumed = JSON.stringify({ type: "system", subtype: "init", session_id: "s1" });
+    expect(foldTranscript(null, [reply("m1", 90_000), resumed], 1).digest.contextTokens).toBe(
+      90_000,
+    );
   });
 
   it("tracks local_agent subagents only, ending on the notification's final numbers", () => {

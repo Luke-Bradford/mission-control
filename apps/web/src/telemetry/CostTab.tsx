@@ -3,15 +3,16 @@ import {
   type ConfigView,
   LIVE_MINUTES,
   type LimitRow,
+  type SpendCell,
   TELEMETRY_RANGES,
   type Telemetry,
 } from "@mc/core";
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ticketRef } from "../board/cards.ts";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource, useResources } from "../data.ts";
-import { cost, kTokens, minutesAgo, percent, plural } from "../fmt.ts";
+import { cost, dayLabel, hhmm, kTokens, minutesAgo, percent, plural } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { Legend } from "../hud/charts/Hover.tsx";
@@ -656,6 +657,147 @@ function Totals({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   );
 }
 
+/** One owner's share of a day and repo: ~USD over its tokens, both visible; `—` when it used none. */
+function SpendTd({ c, strong = false }: { c: SpendCell; strong?: boolean }) {
+  if (c.tokens === 0 && c.costUsd === 0) return <td className="r num muted">{DASH}</td>;
+  return (
+    <td className={`r num${strong ? "" : " fg2"}`}>
+      {cost(c.costUsd)}
+      <span className="s muted" style={{ display: "block" }}>
+        {kTokens(c.tokens)} tok
+      </span>
+    </td>
+  );
+}
+
+/**
+ * The owner rows' box: the header and eight 40 px rows show, the rest scroll. Its gutter is kept
+ * whether or not it scrolls, and the footer's box keeps the same one, so the two tables' fixed
+ * columns line up.
+ */
+const OWNER_ROWS = {
+  "--table-row": "40px",
+  flex: "none",
+  maxHeight: "calc(9 * var(--table-row))",
+  overflowY: "auto",
+  scrollbarGutter: "stable",
+} as CSSProperties;
+const OWNER_FOOT: CSSProperties = { flex: "none", overflow: "hidden", scrollbarGutter: "stable" };
+const OWNER_TABLE = { "--table-row": "40px", tableLayout: "fixed" } as CSSProperties;
+const OWNER_HEAD: CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 1,
+  background: "var(--surface)",
+};
+
+/** The owner tables' columns: Day and the four figures fixed, Repo takes the rest. */
+function OwnerCols() {
+  return (
+    <colgroup>
+      <col style={{ width: 96 }} />
+      <col />
+      <col style={{ width: 92 }} />
+      <col style={{ width: 92 }} />
+      <col style={{ width: 92 }} />
+      <col style={{ width: 92 }} />
+    </colgroup>
+  );
+}
+
+/** Every Claude session on this Mac by day and repo: the operator's, the crew's and FLIGHT's. */
+function SpendByOwner({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
+  const tz = useTz();
+  const split = t?.sessionSpend;
+  const at = split?.readAt == null || tz === null ? null : hhmm(split.readAt, tz);
+  const readAt = split?.failed
+    ? `${at === null ? "No full read yet" : `Last full read ${at}`} · ${split.failed}`
+    : at === null
+      ? "Not read yet"
+      : `Read ${at}`;
+  return (
+    <Panel
+      id="tSpendOwner"
+      title="Spend by owner"
+      sub="~USD · last 7 days · whole Mac, not filtered"
+      actions={<span className="s muted">{split ? readAt : ""}</span>}
+    >
+      {!t ? (
+        <Wait scope={scope} />
+      ) : split === undefined ? (
+        <p className="pb s muted">Not tracked yet.</p>
+      ) : split.rows.length === 0 ? (
+        <p className="pb s muted">No Claude sessions in the last 7 days.</p>
+      ) : (
+        <>
+          {/* the rows scroll in their own box, the header held at its top; the account total and
+              the note sit below it, outside the scroll, so no row can pass behind them */}
+          <section
+            className="pb tw"
+            style={OWNER_ROWS}
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll the bounded rows.
+            tabIndex={0}
+            aria-label="Spend by owner rows"
+          >
+            <table style={OWNER_TABLE}>
+              <OwnerCols />
+              <thead>
+                <tr>
+                  <th style={OWNER_HEAD}>Day</th>
+                  <th style={OWNER_HEAD}>Repo</th>
+                  <th className="r" style={OWNER_HEAD}>
+                    Yours
+                  </th>
+                  <th className="r" style={OWNER_HEAD}>
+                    Crew
+                  </th>
+                  <th className="r" style={OWNER_HEAD}>
+                    FLIGHT
+                  </th>
+                  <th className="r" style={OWNER_HEAD}>
+                    Total
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {split.rows.map((r) => (
+                  <tr key={`${r.day}\n${r.repo ?? ""}`}>
+                    <td className="muted">{dayLabel(r.day)}</td>
+                    <td className="wrap" style={{ overflowWrap: "anywhere" }}>
+                      {r.repo ?? DASH}
+                    </td>
+                    <SpendTd c={r.operator} />
+                    <SpendTd c={r.crew} />
+                    <SpendTd c={r.flight} />
+                    <SpendTd c={r.total} strong />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+          <div className="pb tw" style={OWNER_FOOT}>
+            <table style={OWNER_TABLE}>
+              <OwnerCols />
+              <tfoot>
+                <tr>
+                  <th colSpan={5}>Account total</th>
+                  <SpendTd c={split.total} strong />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="pnote">
+            Priced from each transcript's token counts at API list rates. Crew figures can differ a
+            little from the runs' reported cost.
+            {split.unpricedTokens > 0 &&
+              ` ${kTokens(split.unpricedTokens)} tokens from models without a price are counted in tokens, not cost.`}
+          </p>
+        </>
+      )}
+    </Panel>
+  );
+}
+
 /** The table view's ticket list: every ticket with its cost and tokens, costliest first. */
 function CostTable({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const rows = [...(t?.tokensByTicket ?? [])].sort(
@@ -741,6 +883,13 @@ function StepTable({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   );
 }
 
+/**
+ * The first row, Totals beside Spend by owner, is at least as tall as its panels' content. The
+ * grid's 240 px rows stay at 240 px once the page overflows, which cut the account total off; the
+ * owner panel grows to its eight-row box, the account total and the note.
+ */
+const TABLES_ROWS: CSSProperties = { gridTemplateRows: "minmax(min-content, auto)" };
+
 /** The panels the earlier page held that the table view keeps whole: the allowance reader and the two history charts. */
 const QUOTA_HISTORY = new Set(["quotaP", "tQuota"]);
 const MERGED_COST = new Set(["tCostMerged"]);
@@ -759,8 +908,14 @@ export function CostPanels({
 }) {
   if (view === "table")
     return (
-      <div className={`grid cost-tables${dim ? " dim" : ""}`} data-view="table" data-cost="tables">
+      <div
+        className={`grid cost-tables${dim ? " dim" : ""}`}
+        data-view="table"
+        data-cost="tables"
+        style={TABLES_ROWS}
+      >
         <Totals t={t} scope={scope} />
+        <SpendByOwner t={t} scope={scope} />
         <CostTable t={t} scope={scope} />
         <StepTable t={t} scope={scope} />
         <VisiblePanels.Provider value={QUOTA_HISTORY}>

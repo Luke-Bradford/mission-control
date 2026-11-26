@@ -218,6 +218,7 @@ vi.mock("../src/runtime/session.ts", async (importOriginal) => {
 });
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
+const FAKE_CMUX = fileURLToPath(new URL("./fixtures/fake-cmux.mjs", import.meta.url));
 const OLD_KEEPER = fileURLToPath(new URL("./fixtures/old-keeper-cli.mjs", import.meta.url));
 const HUB_ROLES = fileURLToPath(new URL("../../../roles", import.meta.url));
 const HUB_ROOT = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
@@ -334,6 +335,10 @@ function make(
     flightEnvironment?: SupervisorDeps["flightEnvironment"];
     externalReviewSubject?: SupervisorDeps["externalReviewSubject"];
     command?: string;
+    /** The state file of a fake cmux (fixtures/fake-cmux.mjs): every Claude run is a workspace of it. */
+    cmuxState?: string;
+    /** How long a cmux start may take to show Claude (default 5 s). */
+    cmuxStartWaitMs?: number;
     /** The fake CLI script to run in place of fake-claude.mjs. */
     fake?: string;
     cliCheckTimeoutMs?: number;
@@ -420,6 +425,15 @@ function make(
     rules: over.rules ?? (async () => START_RULES),
     login: () => (over.login === undefined ? "me" : over.login),
     command: over.command ?? process.execPath,
+    ...(over.cmuxState === undefined
+      ? {}
+      : {
+          cmuxCommand: [process.execPath, FAKE_CMUX, "--state", over.cmuxState],
+          cmuxPollMs: 20,
+          cmuxStartWaitMs: over.cmuxStartWaitMs ?? 5000,
+          // never the real cmux app: a stand-in that starts nothing, and a short wait for it
+          cmuxOptions: { open: ["/usr/bin/true"], startWaitMs: 300 },
+        }),
     codexCommand: over.codexCommand,
     codexAuthPath,
     commandArgs:
@@ -591,6 +605,7 @@ export {
   dbPath,
   dir,
   FAKE,
+  FAKE_CMUX,
   type FetchTicket,
   git,
   HUB_PORT,

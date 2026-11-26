@@ -110,7 +110,7 @@ import {
   flightToolsDigest,
 } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud/hud.ts";
-import { foldTranscript } from "../src/run/streamjson.ts";
+import { CMUX_CLEAR_MARK, foldTranscript } from "../src/run/streamjson.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { weeklyProjection } from "../src/spend/projection.ts";
@@ -2877,6 +2877,37 @@ describe("the FLIGHT watcher", () => {
       expect(endCalls).toEqual(["r-flight"]);
       await watch.check();
       expect(startCalls).toHaveLength(1);
+    });
+
+    it("an operator's /clear in cmux is no handover: the cleared context is not read as the new session's", async () => {
+      liveCrew();
+      watch.start();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS - FLIGHT_CONTEXT_GROWTH_TOKENS);
+      await watch.check();
+      // the run's transcript as the cmux driver writes it: the full session, the /clear, the new prompt
+      const full = JSON.stringify({
+        type: "assistant",
+        message: {
+          id: "m1",
+          content: [{ type: "text", text: "working" }],
+          usage: { input_tokens: FLIGHT_CONTEXT_ROTATE_TOKENS + 1000 },
+        },
+      });
+      const clear = JSON.stringify({
+        type: "system",
+        subtype: "init",
+        session_id: "s2",
+        [CMUX_CLEAR_MARK]: true,
+      });
+      const user = JSON.stringify({ type: "user", message: { content: "hello" } });
+      store.setDigest("r-flight", foldTranscript(null, [full, clear, user], nowMs).digest);
+      for (let k = 0; k < 3; k++) {
+        nowMs += MIN;
+        idle();
+        await watch.check();
+      }
+      expect(sendCalls.map((c) => c.text)).not.toContain(FLIGHT_HANDOVER_ASK);
+      expect(endCalls).toEqual([]);
     });
 
     it("keeps first-turn context for at most 200 sessions: an older one starts over", async () => {

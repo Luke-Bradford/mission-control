@@ -14,6 +14,7 @@ import {
   type PullRequestView,
   REPO_UNWATCHED_REASON,
   type Run,
+  SESSION_SPEND_INTERVAL_MS,
   type TestLockState,
   type UsageSample,
 } from "@mc/core";
@@ -180,6 +181,7 @@ function stubs(over: Partial<Collectors> = {}): Collectors {
       cpus: [],
       errors: [],
     })),
+    sessionSpend: vi.fn(() => ({ files: 0, added: 0 })),
     ...over,
   };
 }
@@ -854,6 +856,49 @@ describe("scheduler", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(prune).toHaveBeenCalledTimes(2);
     await t.stop();
+  });
+
+  it("sessionSpend runs every 30 s", async () => {
+    expect(JOBS).toContain("sessionSpend");
+    expect(SESSION_SPEND_INTERVAL_MS).toBeLessThanOrEqual(60_000);
+    vi.spyOn(hud, "crew").mockReturnValue({ rows: [], firstRunToday: null });
+    vi.spyOn(hud, "attentionItems").mockReturnValue([]);
+    vi.useFakeTimers();
+    const read = vi.fn((_now: number) => ({ files: 1, added: 2 }));
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ sessionSpend: read }),
+    });
+    s.start();
+    const first = STAGGERED_FIRST_DELAY_MS.sessionSpend as number;
+    await vi.advanceTimersByTimeAsync(first - 1);
+    expect(read).toHaveBeenCalledTimes(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledWith(NOW);
+    await vi.advanceTimersByTimeAsync(SESSION_SPEND_INTERVAL_MS);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(row("sessionSpend")?.ok).toBe(true);
+    await s.stop();
+  });
+
+  it("a failed sessionSpend pass is reported as its status", async () => {
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({
+        sessionSpend: () => {
+          throw new Error("disk gone");
+        },
+      }),
+    });
+    expect(await s.tick("sessionSpend")).toBe("ran");
+    expect(row("sessionSpend")).toMatchObject({ ok: false, error: "disk gone" });
   });
 
   it("maintenance prunes recorded state changes older than 30 days", async () => {
