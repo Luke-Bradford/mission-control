@@ -176,6 +176,7 @@ import type { Move, MoveResult } from "../github/board.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
+import { REPO_BOT_SEAT, repoBotVerdict } from "../review/repo-bot.ts";
 import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
@@ -1146,6 +1147,7 @@ export function createEngine(deps: EngineDeps): Engine {
       // a question FLIGHT passed to the operator: the run waits off its seat for the answer
       operatorAsk: store.openQuestions().some((q) => q.runId === run.id && q.passedAt !== null),
       ...(run.profile ? { limits: profileLimits(run.profile.profile) } : {}),
+      repoBotReview: repo?.review !== undefined,
     };
   }
 
@@ -1766,8 +1768,6 @@ export function createEngine(deps: EngineDeps): Engine {
         );
         return;
       case "request-review": {
-        const reviewer = reviewerFor(run);
-        if (reviewer === null) return;
         if (cur.prNumber === null) {
           log(`${run.id}: no PR number to review`);
           return;
@@ -1777,6 +1777,56 @@ export function createEngine(deps: EngineDeps): Engine {
           out.parked = true;
           return;
         }
+        const repo = config.repos.find((candidate) => candidate.id === run.repoId);
+        const pr = findPr(run, cur);
+        if (repo?.review !== undefined) {
+          if (pr === null || pr.headSha !== a.sha) return;
+          const verdict = repoBotVerdict(repo.review, pr);
+          if (verdict === "pending") return;
+          const round =
+            1 +
+            store
+              .reviewsOfRun(run.id)
+              .filter((r) => r.epoch === cur.epoch && r.state === "reported" && r.blocking > 0)
+              .length;
+          const id = store.requestReview({
+            authorRunId: run.id,
+            repoId: run.repoId,
+            seatId: REPO_BOT_SEAT,
+            prNumber: cur.prNumber,
+            sha: a.sha,
+            epoch: cur.epoch,
+            attempt: a.attempt,
+            round,
+            at,
+          });
+          if (id === null) return;
+          const botRun = `${REPO_BOT_SEAT}:${run.id}:${a.sha}`;
+          store.setReviewState(id, ["queued"], "running", { at, runId: botRun });
+          const changes: ReviewFinding[] = [
+            {
+              severity: "Important",
+              file: ".github/workflows",
+              line: 0,
+              summary: `The ${repo.review.check} review bot did not approve this head.`,
+              scenario: "The repository's configured review bot is the review gate for this PR.",
+              fix: "Address the bot's review, push a new commit, and report the result.",
+              category: "spec",
+            },
+          ];
+          store.recordFindings(id, botRun, {
+            verdict: verdict === "approved" ? { spec: "pass", quality: "pass" } : { spec: "fail", quality: "pass" },
+            summary:
+              verdict === "approved"
+                ? `${repo.review.check} approved this head.`
+                : `${repo.review.check} requested changes on this head.`,
+            findings: verdict === "approved" ? [] : changes,
+            at,
+          });
+          return;
+        }
+        const reviewer = reviewerFor(run);
+        if (reviewer === null) return;
         // a settle starts a new epoch. Only the epoch a FLIGHT rework grant covers counts the rounds
         // across epochs (the granted review is the next round, and a fail past it parks again);
         // every other epoch counts its own

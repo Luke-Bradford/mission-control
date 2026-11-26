@@ -161,6 +161,20 @@ describe("loadConfig", () => {
     expect(c.poll).toEqual({ usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 });
   });
 
+  it("loads a repository review bot policy", () => {
+    const path = tmpConfig((yaml) =>
+      yaml.replace(
+        "    project: 2\n",
+        "    project: 2\n    review: { kind: repo-bot, check: Claude Code Review, verdict: comment }\n",
+      ),
+    );
+    expect(loadConfig(path).repos[0]?.review).toEqual({
+      kind: "repo-bot",
+      check: "Claude Code Review",
+      verdict: "comment",
+    });
+  });
+
   it("accepts audit.controller_sessions and controller_checkout but ignores them, and refuses unknown audit keys", () => {
     expect(loadConfig(EXAMPLE).audit).toEqual({});
     const old = tmpConfig(

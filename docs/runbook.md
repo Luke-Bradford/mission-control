@@ -1009,6 +1009,24 @@ Setup's board action also creates the board's fields and the repo's type labels,
   - The merge gate still waits for `mc/review` to pass on GitHub, apart from CI.
   - A CI failure or a long pending names the checks in the Activity line and the park note. Only
     the first 50 checks of a head are read. A change needs a hub restart.
+- **`repos[].review`** is optional. Set it when the repository's own bot is the review gate:
+
+  ```yaml
+  review: { kind: repo-bot, check: Claude Code Review, verdict: comment }
+  ```
+
+  `check` names the bot workflow check. `verdict: comment` waits for its GitHub review decision;
+  `verdict: check` treats a passing check as approval. The bot check is not also a CI gate: a failed
+  check becomes an Important finding for the author, and approval plus the remaining green CI skips
+  the crew reviewer. The bot gets at most three blocking rounds before FLIGHT decides. Add these
+  live-config settings for the current repositories:
+
+  ```yaml
+  # eBull
+  review: { kind: repo-bot, check: Claude Code Review, verdict: comment }
+  # autonomy-engine
+  review: { kind: repo-bot, check: review, verdict: check }
+  ```
 - **`repos[].keep_branches`** (default `[]`) lists branches the hub never deletes, on top of the
   default branch and `archive/*`: an exact name, or a prefix ending in `*` (`release/*`). See
   "Branch tidying". A change needs a hub restart.

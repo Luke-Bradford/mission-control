@@ -1185,7 +1185,12 @@ function mapPr(
     state: lookup(PR_STATES, n.state) ?? "closed",
     isDraft: n.isDraft === true,
     review: lookup(REVIEWS, n.reviewDecision),
-    ci: ciVerdict(checks, repo.requiredChecks ?? []).ci,
+    // A configured repository bot is its own review gate. Its failed check must reach the author
+    // as review findings, rather than parking the run as an ordinary CI failure.
+    ci: ciVerdict(
+      repo.review === undefined ? checks : checks.filter((check) => check.name !== repo.review?.check),
+      (repo.requiredChecks ?? []).filter((check) => check !== repo.review?.check),
+    ).ci,
     checks,
     createdAt: ms(n.createdAt),
     updatedAt: ms(n.updatedAt),

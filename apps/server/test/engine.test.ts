@@ -4672,6 +4672,33 @@ describe("the engine runs reviews", () => {
     expect(reviewRows().map((r) => r.seatId)).toEqual(["other-1"]);
   });
 
+  it("uses an approved repository bot instead of starting a crew review", async () => {
+    config.repos[0]!.review = { kind: "repo-bot", check: "review", verdict: "check" };
+    report();
+    await h.engine.reconcileRun(RUN);
+    setPr({
+      ci: "passing",
+      checks: [{ name: "review", state: "passing", kind: "check", conclusion: "success", attempt: 1, url: null }],
+    });
+    await h.engine.reconcileRun(RUN);
+    expect(reviewRows()).toMatchObject([{ seatId: "repo-bot", state: "reported", blocking: 0 }]);
+    expect(h.starts).toEqual([]);
+  });
+
+  it("sends a repository bot change request to the author as a finding", async () => {
+    config.repos[0]!.review = { kind: "repo-bot", check: "review", verdict: "check" };
+    report();
+    await h.engine.reconcileRun(RUN);
+    setPr({
+      ci: "passing",
+      checks: [{ name: "review", state: "failing", kind: "check", conclusion: "failure", attempt: 1, url: null }],
+    });
+    await h.engine.reconcileRun(RUN);
+    await h.engine.reconcileRun(RUN);
+    expect(reviewRows()).toMatchObject([{ seatId: "repo-bot", state: "reported", blocking: 1 }]);
+    expect(h.sent[0]?.text).toContain("review bot did not approve this head");
+  });
+
   it("reviewerOf prefers the review seat with the profile's role, else the first", () => {
     seats().push({ ...retroSeat(), id: "other-1", role: "AUDIT", def: seatDef(retroSeat()) });
     expect(reviewerOf(config, "guido-1", "AUDIT")?.id).toBe("other-1");
