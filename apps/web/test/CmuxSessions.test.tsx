@@ -117,6 +117,32 @@ describe("Sessions page", () => {
     expect(within(bodyRows()[3] as HTMLElement).getAllByText("—").length).toBeGreaterThan(0);
   });
 
+  it("shows each session's cost today, the week on hover and focus, and a dash with no use", async () => {
+    const spend = {
+      today: { tokens: 412_000, costUsd: 1.234 },
+      week: { tokens: 2_100_000, costUsd: 6.8 },
+      unpriced: false,
+    };
+    const rows = ROWS.map((r) =>
+      r.id === ID.pricing ? { ...r, spend } : r.id === ID.store ? { ...r, spend: null } : r,
+    );
+    const fetch = stubFetch({ [PATH]: { ...VIEW, sessions: rows } });
+    render(<Sessions />);
+    await settled(fetch, PATH);
+    expect(screen.getByRole("columnheader", { name: "Today" }).className).toContain("num");
+    const first = bodyRows()[0] as HTMLElement;
+    const today = within(first).getByText("~$1.23");
+    const tip = "Today ~$1.23 · 412k tok · Last 7 days ~$6.80 · 2.10M tok";
+    expect(today.getAttribute("title")).toBe(tip);
+    expect(today.getAttribute("aria-label")).toBe(tip);
+    expect(today.tabIndex).toBe(0);
+    expect(today.closest("td")?.className).toContain("num");
+    // No spend reads as a dash, whether the row has none or no agent.
+    const cells = (i: number) => within(bodyRows()[i] as HTMLElement).getAllByRole("cell");
+    expect(cells(1)[4]?.textContent).toBe("—");
+    expect(cells(3)[4]?.textContent).toBe("—");
+  });
+
   it("clicking a row opens it in cmux", async () => {
     const focus = vi.fn(() => ({ status: 200, body: { ok: true } }));
     const fetch = stubFetch({ [PATH]: VIEW, [`POST ${PATH}/${ID.pricing}/focus`]: focus });

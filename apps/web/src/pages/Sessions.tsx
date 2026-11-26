@@ -12,7 +12,7 @@ import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useState } from
 import { apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
-import { clockTime, plural } from "../fmt.ts";
+import { clockTime, cost, kTokens, plural } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { toast } from "../shell/Toast.tsx";
 import "./sessions.css";
@@ -26,7 +26,7 @@ const STATE_TONE: Record<CmuxSessionState, PillTone> = {
   "no-agent": "plain",
 };
 
-const COLUMNS = 8;
+const COLUMNS = 9;
 
 /** Time in a state as this hub saw it: `4m`, `3h`, `2d`. */
 export function forLabel(ms: number): string {
@@ -41,6 +41,10 @@ const shortFolder = (folder: string): string => folder.replace(/^\/Users\/[^/]+(
 
 /** The address without its scheme: `localhost:5173`. */
 const shortUrl = (url: string): string => url.replace(/^[a-z]+:\/\//i, "").replace(/\/$/, "");
+
+/** The Today cell's hover and focus text: today's and the last 7 local days' ~cost and tokens. */
+export const spendTitle = (s: NonNullable<CmuxSessionRow["spend"]>): string =>
+  `Today ${cost(s.today.costUsd)} · ${kTokens(s.today.tokens)} tok · Last 7 days ${cost(s.week.costUsd)} · ${kTokens(s.week.tokens)} tok`;
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : "The hub did not answer.";
@@ -129,6 +133,8 @@ function SessionTable({ rows, now }: { rows: readonly CmuxSessionRow[]; now: num
         <col className="c-folder" />
         <col className="c-state" />
         <col className="c-for" />
+        {/* sessions.css has no rule for it: "~$12.34" in tabular figures plus the cell padding */}
+        <col style={{ width: 84 }} />
         <col />
         <col className="c-status" />
         <col className="c-app" />
@@ -143,6 +149,13 @@ function SessionTable({ rows, now }: { rows: readonly CmuxSessionRow[]; now: num
           </th>
           <th scope="col" className="num">
             For
+          </th>
+          <th
+            scope="col"
+            className="num"
+            title="Priced from each transcript's token counts at API list rates. Local midnight to now."
+          >
+            Today
           </th>
           <th scope="col">Last line</th>
           <th scope="col">Status</th>
@@ -252,6 +265,16 @@ function SessionRow({
         </td>
         <td className="num" title={`In this state since this hub first saw it`}>
           {forLabel(now - r.since)}
+        </td>
+        <td className="num">
+          {r.spend && (r.spend.today.tokens > 0 || r.spend.week.tokens > 0) ? (
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: focus shows the week, as hover does
+            <span tabIndex={0} title={spendTitle(r.spend)} aria-label={spendTitle(r.spend)}>
+              {r.spend.today.tokens > 0 ? cost(r.spend.today.costUsd) : "—"}
+            </span>
+          ) : (
+            <Dash />
+          )}
         </td>
         <td className="sess-last" title={r.lastLine ?? undefined}>
           {r.lastLine ?? <span className="sess-dash">—</span>}
