@@ -105,7 +105,9 @@ const message = (error: unknown): string =>
  */
 export function Sessions() {
   const res = useResource<CmuxSessionsView>(RESOURCES.sessions);
-  const crewApps = useResource<{ id: string; name: string; running: boolean }[]>(RESOURCES.crewApps);
+  const crewApps = useResource<{ id: string; name: string; running: boolean }[]>(
+    RESOURCES.crewApps,
+  );
   const sidebar = useResource<{ on: boolean }>(RESOURCES.sessionsSidebar);
   const [writesOverride, setWritesOverride] = useState<boolean | null>(null);
   const tz = useTz();
@@ -207,7 +209,8 @@ function CrewApps({ apps }: { apps: { id: string; name: string; running: boolean
     }
   };
   return (
-    <div className="sess-crew-apps" aria-label="Crew apps">
+    <fieldset className="sess-crew-apps">
+      <legend className="sr-only">Crew apps</legend>
       {apps.map((app) => (
         <div className="sess-crew-app" key={app.id}>
           <span>{app.name}</span>
@@ -224,7 +227,7 @@ function CrewApps({ apps }: { apps: { id: string; name: string; running: boolean
           </button>
         </div>
       ))}
-    </div>
+    </fieldset>
   );
 }
 

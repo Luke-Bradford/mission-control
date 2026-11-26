@@ -88,7 +88,16 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     const worktree = join(deps.root, repo.id);
     await deps.run("git", ["-C", repo.checkout, "fetch", "origin", "main"]);
     const main = (await deps.run("git", ["-C", repo.checkout, "rev-parse", "origin/main"])).trim();
-    await deps.run("git", ["-C", repo.checkout, "worktree", "add", "--force", "--detach", worktree, "origin/main"]);
+    await deps.run("git", [
+      "-C",
+      repo.checkout,
+      "worktree",
+      "add",
+      "--force",
+      "--detach",
+      worktree,
+      "origin/main",
+    ]);
     await deps.cmux.ensure();
     const repos = deps.repos();
     const first = repo.commands[0] as CrewAppCommand;
@@ -122,7 +131,9 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
         const app = running.get(repo.id);
         if (!app) continue;
         await deps.run("git", ["-C", repo.checkout, "fetch", "origin", "main"]);
-        const main = (await deps.run("git", ["-C", repo.checkout, "rev-parse", "origin/main"])).trim();
+        const main = (
+          await deps.run("git", ["-C", repo.checkout, "rev-parse", "origin/main"])
+        ).trim();
         if (main !== app.main) {
           deps.log?.(`Restarting ${appName(repo.id)} on the new origin/main.`);
           await start(repo.id);

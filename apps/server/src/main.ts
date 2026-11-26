@@ -160,8 +160,8 @@ import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
-import { createSessionChecks } from "./sessions/checks.ts";
 import { CREW_APP_DEFAULTS, createCrewApps } from "./sessions/apps.ts";
+import { createSessionChecks } from "./sessions/checks.ts";
 import { applyCmuxSessionEvent, startCmuxEvents } from "./sessions/events.ts";
 import { createBranchPrs } from "./sessions/pr.ts";
 import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
@@ -1050,11 +1050,11 @@ export async function main(): Promise<void> {
       ),
     repos: () =>
       config.repos.flatMap((repo) => {
-        const checkout = config.crew?.sessions.find((session) => session.repoId === repo.id)?.checkout;
+        const checkout = config.crew?.sessions.find(
+          (session) => session.repoId === repo.id,
+        )?.checkout;
         const commands = repo.appCommands ?? CREW_APP_DEFAULTS[repo.id.toLowerCase()];
-        return checkout && commands?.length
-          ? [{ id: repo.id, checkout, commands }]
-          : [];
+        return checkout && commands?.length ? [{ id: repo.id, checkout, commands }] : [];
       }),
     root: `${config.crew?.worktrees ?? dirname(dbPath)}-apps`,
     log: (m) => log(m),
@@ -1332,7 +1332,8 @@ export async function main(): Promise<void> {
   if (process.env.MC_NO_LOOP_WRITES !== "1") sessionChecks.start();
   app.addHook("onClose", async () => sessionChecks.stop());
   if (process.env.MC_NO_LOOP_WRITES !== "1") {
-    for (const crewApp of crewApps.view()) void crewApps.start(crewApp.id).catch((error) => log(String(error)));
+    for (const crewApp of crewApps.view())
+      void crewApps.start(crewApp.id).catch((error) => log(String(error)));
     trackTimer(setInterval(() => void crewApps.tick(), 60_000)).unref();
   }
   app.addHook("onClose", async () => {
