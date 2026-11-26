@@ -1,7 +1,42 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { gitPlace } from "../src/sessions/branch.ts";
 import { createBranchPrs } from "../src/sessions/pr.ts";
 
+const folders: string[] = [];
+afterEach(() => {
+  for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
+});
+
 describe("branch pull requests", () => {
+  it("reads a checkout's branch and GitHub origin without git", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "mc-session-branch-"));
+    folders.push(folder);
+    mkdirSync(join(folder, ".git"));
+    writeFileSync(join(folder, ".git", "HEAD"), "ref: refs/heads/feature/2262-cmux-sidebar\n");
+    writeFileSync(join(folder, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:Acme/App.git\n');
+    await expect(gitPlace(folder)).resolves.toEqual({
+      branch: "feature/2262-cmux-sidebar",
+      github: "acme/app",
+    });
+  });
+
+  it("follows a worktree gitdir and returns no branch for detached HEAD", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "mc-session-worktree-"));
+    folders.push(folder);
+    const common = join(folder, "common");
+    const worktree = join(folder, "worktree");
+    mkdirSync(common);
+    mkdirSync(worktree);
+    writeFileSync(join(worktree, ".git"), "gitdir: ../gitdir\n");
+    mkdirSync(join(folder, "gitdir"));
+    writeFileSync(join(folder, "gitdir", "HEAD"), "f00ba4\n");
+    writeFileSync(join(folder, "gitdir", "commondir"), "../common\n");
+    writeFileSync(join(common, "config"), '[remote "origin"]\n\turl = https://github.com/acme/app.git\n');
+    await expect(gitPlace(worktree)).resolves.toEqual({ branch: null, github: "acme/app" });
+  });
   it("uses a configured repository's stored open PR without gh", async () => {
     const gh = vi.fn();
     const prs = createBranchPrs({

@@ -18,7 +18,8 @@ export function startCmuxEvents(deps: {
     });
     child.ended.then(() => {
       if (stopped) return;
-      setTimeout(start, delay).unref();
+      const retry = setTimeout(start, delay);
+      retry.unref?.();
       delay = Math.min(delay * 2, 60_000);
     });
   };

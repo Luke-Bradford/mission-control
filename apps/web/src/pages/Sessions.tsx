@@ -42,7 +42,7 @@ const CHECK_TONE: Record<SessionCheckState, PillTone> = {
   stopped: "plain",
 };
 
-const COLUMNS = 9;
+const COLUMNS = 10;
 
 /** Time in a state as this hub saw it: `4m`, `3h`, `2d`. */
 export function forLabel(ms: number): string {

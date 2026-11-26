@@ -265,6 +265,10 @@ describe("sessions view", () => {
     const view = await sessions.view();
     if (!view.ok) throw new Error(view.error);
     expect(view.sessions.find((row) => row.id === PRICING)?.status).toBe("build");
+    const onlyHub = setup({ ...threeSessions(), statuses: { [PRICING]: { "mc-ci": "CI running" } } });
+    const onlyHubView = await onlyHub.sessions.view();
+    if (!onlyHubView.ok) throw new Error(onlyHubView.error);
+    expect(onlyHubView.sessions.find((row) => row.id === PRICING)?.status).toBeNull();
   });
 
   it("twelve slow apps that are down all keep their address and read as not answering", async () => {

@@ -171,7 +171,7 @@ describe("Sessions page", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Write to cmux" }));
     await waitFor(() => expect(sidebar).toHaveBeenCalledTimes(1));
     expect(JSON.parse(String(sidebar.mock.calls[0]?.[0]?.body))).toEqual({ on: false });
-    expect(screen.getByText(/cmux writes off/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/cmux writes off/)).toBeTruthy());
   });
 
   it("refetches sessions when the sessions topic changes", async () => {

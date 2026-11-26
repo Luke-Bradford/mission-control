@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { startCmuxEvents } from "../src/sessions/events.ts";
 import { createSessionSidebar } from "../src/sessions/sidebar.ts";
 
 const row = (over: Record<string, unknown> = {}) => ({
@@ -28,6 +29,31 @@ const row = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("cmux sidebar", () => {
+  it("refreshes sessions from lifecycle events and restarts a stopped stream", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveEnd!: () => void;
+      const starts = vi.fn(() => ({
+        stop: vi.fn(),
+        ended: new Promise<void>((resolve) => {
+          resolveEnd = resolve;
+        }),
+      }));
+      const changed = vi.fn();
+      const events = startCmuxEvents({ cmux: { events: starts }, cursorFile: "/tmp/cursor", onChange: changed });
+      expect(starts).toHaveBeenCalledTimes(1);
+      const firstLine = starts.mock.calls[0]?.[1] as (line: string) => void;
+      firstLine('{"type":"workspace.created","workspace_id":"new"}');
+      expect(changed).toHaveBeenCalledWith({ kind: "created", workspaceId: "new" });
+      resolveEnd();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(starts).toHaveBeenCalledTimes(2);
+      events.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("writes a pull request and only changed CI state", async () => {
     const current = [row()];
     const cmux = {
