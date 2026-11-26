@@ -1,3 +1,4 @@
+import { REPO_REQUIRED_TEXT } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
@@ -108,6 +109,44 @@ describe("App", () => {
       .queryAllByRole("link")
       .filter((a) => a.getAttribute("aria-current"));
     expect(current.map((a) => a.textContent)).toEqual(tabName ? [tabName] : []);
+  });
+
+  describe("on a hub with no repository", () => {
+    beforeEach(() => {
+      stubFetch({ "/api/repos": [], "/api/config": CONFIG, "/api/settings/crew-pause": null });
+    });
+
+    it("/ lands on the Sessions page", async () => {
+      const { container } = at("/");
+      await vi.waitFor(() => expect(window.location.pathname).toBe("/sessions"));
+      await waitFor(() =>
+        expect(container.querySelector("main > section#page-sessions")).not.toBeNull(),
+      );
+    });
+
+    it.each(["/board", "/planner", "/qa"])(
+      "%s says in one line that it needs a repository, linking to Setup › Repos",
+      async (path) => {
+        const { container } = at(path);
+        const line = await screen.findByText(
+          (_, el) => el?.tagName === "P" && el.textContent === REPO_REQUIRED_TEXT,
+        );
+        const link = within(line).getByRole("link", { name: "Setup › Repos" });
+        expect(link.getAttribute("href")).toBe("/setup/repos");
+        expect(window.location.pathname).toBe(path);
+        expect(container.querySelectorAll("h1")).toHaveLength(1);
+        expect(screen.getByRole("main")).toBeTruthy();
+      },
+    );
+  });
+
+  it("with a repository, / stays on the Overview", async () => {
+    const { container } = at("/");
+    await waitFor(() =>
+      expect(container.querySelector("main > section#page-overview")).not.toBeNull(),
+    );
+    expect(window.location.pathname).toBe("/");
+    expect(screen.queryByText(REPO_REQUIRED_TEXT)).toBeNull();
   });
 
   it("names the current page in the tab title", async () => {
