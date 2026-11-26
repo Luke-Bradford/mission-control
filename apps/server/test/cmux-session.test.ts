@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -8,6 +8,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,6 +26,8 @@ import {
 import {
   attachCmuxSession,
   CMUX_ENDED,
+  CMUX_ENV_FILE,
+  CMUX_LAUNCHER_FILE,
   CMUX_PID_FILE,
   CMUX_QUIT_EARLY,
   CMUX_START_FAILED,
@@ -143,6 +146,8 @@ describe("launcherScript", () => {
       envFile: "/run/env",
     });
     expect(text.indexOf(". '/run/env'")).toBeGreaterThan(-1);
+    // a start the hub gave up on has removed the file: the launcher then starts nothing
+    expect(text).toContain(". '/run/env' || exit 1");
     expect(text.indexOf("rm -f '/run/env'")).toBeGreaterThan(text.indexOf(". '/run/env'"));
     expect(text.indexOf("exec ")).toBeGreaterThan(text.indexOf("rm -f"));
     expect(envFileText({ TOKEN: "a'b", "bad name": "x" })).toBe("export TOKEN='a'\\''b'\n");
@@ -262,8 +267,20 @@ function start(overrides: Partial<Parameters<typeof startCmuxSession>[0]> = {}):
   };
 }
 
-// the fake's Claude process is the vitest worker: alive for the whole test
+// the fake's Claude process is the vitest worker: alive for the whole test. Never the launcher's pid:
+// a start the hub gives up on stops the process the launcher names.
 const ALIVE = process.pid;
+
+/** Stand-ins for the Claude a launcher ran: a child per call, killed after each test. */
+const children: ChildProcess[] = [];
+const launched = () => {
+  const c = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  children.push(c);
+  return c.pid as number;
+};
+afterEach(() => {
+  for (const c of children.splice(0)) c.kill("SIGKILL");
+});
 
 /** A pid that has ended: a child that exited at once. */
 const deadPid = () =>
@@ -364,7 +381,7 @@ describe("startCmuxSession", () => {
     });
     const h = start();
     // the launcher's pid: Claude, at its prompt
-    writeFileSync(join(root, "run", CMUX_PID_FILE), `${ALIVE}\n`);
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${launched()}\n`);
     await wait(() => (state().keys ?? []).length > 0);
     expect(state().keys[0]).toMatchObject({ key: "down", force: false });
     // the cursor still shows on "No, exit": no Enter
@@ -1047,10 +1064,11 @@ describe("with no cmux record of the session", () => {
     patch((s) => {
       s.screen = PROMPT_SCREEN;
     });
-    writeFileSync(join(root, "run", CMUX_PID_FILE), `${ALIVE}\n`);
+    const pid = launched();
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${pid}\n`);
     await h.session.ready;
     expect(h.session.alive).toBe(true);
-    expect(h.session.pid).toBe(ALIVE);
+    expect(h.session.pid).toBe(pid);
     h.session.send("hello");
     await wait(() => (state().sent ?? []).length === 1);
     expect(state().sent[0]).toMatchObject({ text: "hello" });
@@ -1059,7 +1077,7 @@ describe("with no cmux record of the session", () => {
 
   it("starts on Claude's transcript written since the start", async () => {
     const h = await bare();
-    writeFileSync(join(root, "run", CMUX_PID_FILE), `${ALIVE}\n`);
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${launched()}\n`);
     own(h, { type: "system", subtype: "init" });
     await h.session.ready;
     expect(h.session.alive).toBe(true);
@@ -1071,7 +1089,7 @@ describe("with no cmux record of the session", () => {
     patch((s) => {
       s.screen = trustScreen("no");
     });
-    writeFileSync(join(root, "run", CMUX_PID_FILE), `${ALIVE}\n`);
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${launched()}\n`);
     await wait(() => (state().keys ?? []).length > 0);
     let ready = false;
     void h.session.ready.then(() => {
@@ -1087,7 +1105,7 @@ describe("with no cmux record of the session", () => {
     patch((s) => {
       s.screen = PROMPT_SCREEN;
     });
-    writeFileSync(join(root, "run", CMUX_PID_FILE), `${ALIVE}\n`);
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${launched()}\n`);
     await h.session.ready;
     h.session.send("do it");
     patch((s) => {
@@ -1121,7 +1139,7 @@ describe("with no cmux record of the session", () => {
     patch((s) => {
       s.screen = PROMPT_SCREEN;
     });
-    writeFileSync(join(root, "run", CMUX_PID_FILE), `${ALIVE}\n`);
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${launched()}\n`);
     await h.session.ready;
     const question = [
       "────────────────────────────────────────────────────────────",
@@ -1138,6 +1156,86 @@ describe("with no cmux record of the session", () => {
     await wait(() => h.events.some((e) => e.kind === "needs-input"));
     expect(state().keys ?? []).toEqual([]);
     h.session.detach();
+  });
+
+  it("an operator's /clear with no record: the new transcript is read from its start and the run holds the new id", async () => {
+    const h = await bare();
+    patch((s) => {
+      s.screen = PROMPT_SCREEN;
+    });
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${launched()}\n`);
+    await h.session.ready;
+    const dir = join(root, "config", "projects", "-some-folder");
+    // another session in the same project folder, from before this start: never taken for the new one
+    mkdirSync(dir, { recursive: true });
+    const before = join(dir, "99999999-9999-4999-8999-999999999999.jsonl");
+    writeFileSync(before, `${JSON.stringify({ type: "user", cwd: root, sessionId: "x" })}\n`);
+    const old = Date.now() / 1000 - 3600;
+    utimesSync(before, old, old);
+    own(h, { type: "user", cwd: root, sessionId: h.sessionId, message: { content: "brief" } });
+    await wait(
+      () => existsSync(h.transcript) && readFileSync(h.transcript, "utf8").includes("brief"),
+    );
+    // a Claude in another folder writes beside it: not this run's
+    const stranger = join(dir, "88888888-8888-4888-8888-888888888888.jsonl");
+    writeFileSync(
+      stranger,
+      `${JSON.stringify({ type: "user", cwd: "/elsewhere", sessionId: "88888888-8888-4888-8888-888888888888", message: { content: "not ours" } })}\n`,
+    );
+    // /clear: the same process, a new session and transcript
+    const fresh = "22222222-2222-4222-8222-222222222222";
+    writeFileSync(
+      join(dir, `${fresh}.jsonl`),
+      `${[
+        { type: "user", cwd: root, sessionId: fresh, message: { content: "after clear" } },
+        {
+          type: "assistant",
+          cwd: root,
+          sessionId: fresh,
+          message: { content: [{ type: "text", text: "ok" }], usage: { input_tokens: 7 } },
+        },
+      ]
+        .map((l) => JSON.stringify(l))
+        .join("\n")}\n`,
+    );
+    await wait(() => h.events.some((e) => e.kind === "init"));
+    expect(h.events.find((e) => e.kind === "init")).toMatchObject({ sessionId: fresh });
+    await wait(() => readFileSync(h.transcript, "utf8").includes("after clear"));
+    const copied = readFileSync(h.transcript, "utf8");
+    expect(copied).not.toContain("not ours");
+    expect(copied).toContain('"text":"ok"');
+    // its context use is the new session's
+    await expect(h.session.control("get_context_usage")).resolves.toMatchObject({ totalTokens: 7 });
+    // it stays tracked: later lines of the new transcript are copied too
+    appendFileSync(
+      join(dir, `${fresh}.jsonl`),
+      `${JSON.stringify({ type: "user", cwd: root, sessionId: fresh, message: { content: "later" } })}\n`,
+    );
+    await wait(() => readFileSync(h.transcript, "utf8").includes("later"));
+    expect(h.session.alive).toBe(true);
+    expect(h.events.filter((e) => e.kind === "init")).toHaveLength(1);
+    h.session.detach();
+  });
+
+  it("a failed start leaves no secret environment file or launcher behind", async () => {
+    patch((s) => {
+      s.denied = true;
+    });
+    const h = start({ privateEnv: { GH_TOKEN: "secret-value" } });
+    await wait(() => h.events.some((e) => e.kind === "exit"));
+    expect(h.events.find((e) => e.kind === "exit")).toMatchObject({ startFailed: true });
+    expect(existsSync(join(root, "run", CMUX_ENV_FILE))).toBe(false);
+    expect(existsSync(join(root, "run", CMUX_LAUNCHER_FILE))).toBe(false);
+  });
+
+  it("a close before Claude is up stops the launched Claude, then removes the secret file", async () => {
+    const h = await bare({ privateEnv: { GH_TOKEN: "secret-value" } });
+    const c = sleeper();
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${c.pid}\n`);
+    expect(existsSync(join(root, "run", CMUX_ENV_FILE))).toBe(true);
+    await h.session.close();
+    expect(gonePid(c.pid as number)).toBe(true);
+    expect(existsSync(join(root, "run", CMUX_ENV_FILE))).toBe(false);
   });
 
   it("ends when Claude's process ends", async () => {

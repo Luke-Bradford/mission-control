@@ -23,7 +23,8 @@ Claude in cmux still runs and cmux will not answer, so two CLIs never run one se
 The same goes for a start that cmux takes but that never comes up: the workspace cannot be found,
 Claude is not up within 60 s, or Claude quits first (at its folder-trust prompt, say). The hub
 closes the workspace, stops the Claude its launcher ran (by the pid the launcher wrote: SIGTERM,
-then SIGKILL), and the run goes on under the keeper with the brief and any message cmux's Claude
+then SIGKILL), removes the launcher and FLIGHT's secret environment file (a launcher cmux
+runs late then starts nothing), and the run goes on under the keeper with the brief and any message cmux's Claude
 never got. If Claude has already written to its session, the keeper resumes it. Only a Claude that
 will not stop ends the run instead, so two Claudes never work one worktree.
 
@@ -74,8 +75,10 @@ closes it and resumes the run with its own command.
 With no cmux record, the hub reads the state itself, each second: a dialog with numbered options
 and "Esc to cancel" is Waiting; Claude's spinner ("esc to interrupt") is Running, as is a message
 sent or a turn Claude's transcript left open in the last 10 s; anything else is Idle. The run ends
-when Claude's process ends or the workspace closes. With no record an operator's `/clear` is not
-followed: the hub keeps reading the old session's transcript.
+when Claude's process ends or the workspace closes. An operator's `/clear` with no record is found
+by its new transcript: in the same project folder as the session being read, begun since the start,
+and whose own lines name this worktree and the new session. The hub reads it from its start and the
+run and the seat take the new session id.
 
 ## Limits
 

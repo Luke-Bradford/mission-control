@@ -15,6 +15,7 @@ import {
   readdirSync,
   readFileSync,
   readSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -63,6 +64,11 @@ export const CMUX_TRUST_STUCK =
   "Claude waited at its folder-trust prompt and the hub could not answer it";
 /** The file in the run's folder the launcher writes Claude's pid to. */
 export const CMUX_PID_FILE = "claude.pid";
+/** The launcher script, and FLIGHT's secret environment it sources and removes, in the run's folder. */
+export const CMUX_LAUNCHER_FILE = "launch.zsh";
+export const CMUX_ENV_FILE = "env";
+/** How much of a new transcript is read to learn whose it is. */
+const HEAD_BYTES = 64 * 1024;
 /** Keys to the trust prompt go one a poll at most: each after a fresh read of the screen. */
 const TRUST_KEY_GAP_MS = 500;
 /** Claude's input prompt, up and taking text: its shortcuts hint, or a `❯` line that is no menu option. */
@@ -91,6 +97,16 @@ export function claudeTranscript(configDir: string, sessionId: string): string |
     if (existsSync(path)) return path;
   }
   return null;
+}
+
+/** Whether two paths name one folder, links resolved. */
+function samePath(a: string, b: string): boolean {
+  if (a === b) return true;
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
+  }
 }
 
 /** Claude's config folder for an environment: its CLAUDE_CONFIG_DIR, or `.claude` in its home. */
@@ -212,7 +228,8 @@ export function launcherScript(i: {
     `export PATH="\${CMUX_CLAUDE_WRAPPER_SHIM_ROOT:+$CMUX_CLAUDE_WRAPPER_SHIM_ROOT:}"${quote(i.nodeDir)}":$PATH"`,
   );
   if (i.envFile !== null) {
-    lines.push(`. ${quote(i.envFile)}`, `rm -f ${quote(i.envFile)}`);
+    // a start the hub has given up on removes the file first: this launcher then runs no Claude
+    lines.push(`. ${quote(i.envFile)} || exit 1`, `rm -f ${quote(i.envFile)}`);
   }
   if (i.pidFile != null) lines.push(`echo $$ > ${quote(i.pidFile)}`);
   lines.push(`exec ${[i.command, ...i.args].map(quote).join(" ")}`, "");
@@ -343,6 +360,9 @@ function createCmuxDriver(
   const configDir = i.claudeConfigDir ?? claudeConfigDir(i.env);
   /** Whether Claude's last top-level line leaves it a turn to finish (a prompt, a tool call or a result). */
   let turn: "pending" | "done" | null = null;
+  /** The project folder of the transcript being read, and the transcripts in it that are not this run's. */
+  let projectDir: string | null = null;
+  const notOurs = new Set<string>();
   let grewAt = 0;
 
   let resolveReady: () => void = () => {};
@@ -493,6 +513,70 @@ function createCmuxDriver(
     return "idle";
   }
 
+  /**
+   * A transcript Claude began after /clear, found with no cmux record: in the same project folder as
+   * the session being read (Claude's folder for this worktree), new since the hub first looked there,
+   * begun after this start, and whose own lines name this worktree as their folder and the file's
+   * name as their session. Files that are not it are not read again. Null when there is none yet.
+   */
+  function clearedTo(current: string): { id: string; path: string } | null {
+    const dir = dirname(current);
+    let names: string[];
+    try {
+      names = readdirSync(dir).filter((n) => n.endsWith(".jsonl"));
+    } catch {
+      return null;
+    }
+    if (projectDir !== dir) {
+      projectDir = dir;
+      for (const n of names) notOurs.add(n);
+      notOurs.delete(`${sessionId}.jsonl`);
+      return null;
+    }
+    for (const n of names) {
+      if (n === `${sessionId}.jsonl` || notOurs.has(n)) continue;
+      const path = join(dir, n);
+      const id = n.slice(0, -".jsonl".length);
+      const whose = transcriptOwner(path, id);
+      if (whose === "ours") {
+        notOurs.add(`${sessionId}.jsonl`);
+        return { id, path };
+      }
+      if (whose === "other") notOurs.add(n);
+    }
+    return null;
+  }
+
+  /** Whether a transcript is this run's Claude's: begun since the start, in this worktree, under its own name. */
+  function transcriptOwner(path: string, id: string): "ours" | "other" | "unknown" {
+    try {
+      const st = statSync(path);
+      if ((st.birthtimeMs > 0 ? st.birthtimeMs : st.mtimeMs) < startedAt) return "other";
+      const fd = openSync(path, "r");
+      let head = "";
+      try {
+        const buf = Buffer.alloc(Math.min(HEAD_BYTES, st.size));
+        head = buf.toString("utf8", 0, readSync(fd, buf, 0, buf.length, 0));
+      } finally {
+        closeSync(fd);
+      }
+      for (const line of head.split("\n")) {
+        if (!line.startsWith("{")) continue;
+        let ev: unknown;
+        try {
+          ev = parseJson<unknown>(line, undefined, rethrowJson);
+        } catch {
+          continue;
+        }
+        if (!isObj(ev) || typeof ev.cwd !== "string") continue;
+        return samePath(ev.cwd, i.cwd) && ev.sessionId === id ? "ours" : "other";
+      }
+      return "unknown";
+    } catch {
+      return "unknown";
+    }
+  }
+
   /** Whether cmux still has the workspace open; true when it cannot say. */
   async function workspaceOpen(): Promise<boolean> {
     try {
@@ -606,8 +690,18 @@ function createCmuxDriver(
         return await gone(CMUX_ENDED);
       if (finished || detached) return;
       grew = false;
-      const path = seen?.transcriptPath ?? claudeTranscript(configDir, sessionId);
+      let path = seen?.transcriptPath ?? claudeTranscript(configDir, sessionId);
       if (path !== null) copyTranscript(path);
+      if (seen === undefined && path !== null) {
+        // /clear with no record: the same process starts a new transcript beside the old one
+        const next = clearedTo(path);
+        if (next !== null) {
+          sessionId = next.id;
+          emit({ kind: "init", sessionId, model: null });
+          path = next.path;
+          copyTranscript(path);
+        }
+      }
       persist();
       if (grew) growth++;
       const now = seen?.lifecycle ?? (await guessLifecycle());
@@ -757,11 +851,20 @@ function createCmuxDriver(
       await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
     }
     const stopped = await stopLaunched();
+    removeLaunchFiles();
     if (finished) return;
     i.save?.(null);
     if (stopped) return end({ reason, startFailed: true });
     log(`${i.name}: the Claude cmux started would not stop`);
     end({ reason: `${reason}; the Claude it started would not stop` });
+  }
+
+  /**
+   * The launcher and FLIGHT's secret file go once the start is over without a Claude: a launcher cmux
+   * runs late finds neither, so it starts nothing, and no secret stays on disk.
+   */
+  function removeLaunchFiles(): void {
+    for (const f of [CMUX_ENV_FILE, CMUX_LAUNCHER_FILE]) rmSync(join(i.dir, f), { force: true });
   }
 
   /** Stops the launcher's Claude if it runs: SIGTERM, then SIGKILL. True once none runs. */
@@ -860,6 +963,11 @@ function createCmuxDriver(
         if (workspace !== "") {
           await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
         }
+        // closed before Claude was up: its launcher may be mid-start, so it is stopped, then its files go
+        if (!readyYet) {
+          await stopLaunched();
+          removeLaunchFiles();
+        }
         i.save?.(null);
         end({});
       }
@@ -916,10 +1024,10 @@ export function startCmuxSession(i: CmuxSessionInput): CrewSession {
   void (async () => {
     try {
       mkdirSync(i.dir, { recursive: true, mode: 0o700 });
-      const script = join(i.dir, "launch.zsh");
+      const script = join(i.dir, CMUX_LAUNCHER_FILE);
       let envFile: string | null = null;
       if (i.privateEnv !== undefined && Object.keys(i.privateEnv).length > 0) {
-        envFile = join(i.dir, "env");
+        envFile = join(i.dir, CMUX_ENV_FILE);
         writeFileSync(envFile, envFileText(i.privateEnv), { mode: 0o600 });
       }
       const pidFile = join(i.dir, CMUX_PID_FILE);
