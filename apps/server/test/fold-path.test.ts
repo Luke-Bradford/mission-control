@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { usageCostUsd } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyFacts, type FoldState, foldPath } from "../src/collectors/common.ts";
 import { foldTranscript } from "../src/run/streamjson.ts";
@@ -143,5 +144,55 @@ describe("applyFacts branch", () => {
     const r = { ...base, agentId: "loop" };
     applyFacts(r, facts);
     expect(r.branch).toBe("feature/1941-x");
+  });
+});
+
+describe("applyFacts cost", () => {
+  const usage = { input: 1000, output: 2000, cacheRead: 30_000, cacheCreate: 4000 };
+  const base = {
+    id: "r",
+    agentId: "guido-1",
+    repoId: "mc",
+    seq: 1,
+    startedAt: 0,
+    endedAt: null,
+    status: "running" as const,
+    sessionId: null,
+    model: null,
+    branch: null,
+    ticket: null,
+    costUsd: null,
+    tokens: null,
+    transcriptPath: "",
+    prs: [],
+    summary: null,
+  };
+  const cmuxFacts = {
+    ...foldTranscript(null, [], 0),
+    model: "claude-opus-5-5",
+    costUsd: null,
+    tokens: usage,
+  };
+
+  it("prices a Claude run's tokens when its transcript has no result cost (a cmux session)", () => {
+    const r = { ...base };
+    applyFacts(r, cmuxFacts);
+    expect(r.costUsd).not.toBeNull();
+    expect(r.costUsd).toBeCloseTo(usageCostUsd("claude-opus-5-5", usage) as number, 10);
+  });
+
+  it("keeps the transcript's own cost when it has one", () => {
+    const r = { ...base };
+    applyFacts(r, { ...cmuxFacts, costUsd: 1.23 });
+    expect(r.costUsd).toBe(1.23);
+  });
+
+  it("leaves a Codex run and an unpriced model without a cost", () => {
+    const codex = { ...base, vendor: "codex" as const };
+    applyFacts(codex, cmuxFacts);
+    expect(codex.costUsd).toBeNull();
+    const unpriced = { ...base };
+    applyFacts(unpriced, { ...cmuxFacts, model: "gpt-9" });
+    expect(unpriced.costUsd).toBeNull();
   });
 });
