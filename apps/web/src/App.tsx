@@ -1,4 +1,12 @@
-import type { AttentionItem, ConfigView, Crew } from "@mc/core";
+import {
+  type AttentionItem,
+  type ConfigView,
+  type Crew,
+  homePath,
+  needsRepo,
+  REPO_REQUIRED_TEXT,
+  type RepoView,
+} from "@mc/core";
 import {
   lazy,
   Profiler,
@@ -143,6 +151,15 @@ function Shell({
   useEffect(() => {
     if (moved) navigate(moved, { replace: true });
   }, [moved]);
+  // A hub with no repository (sessions only) opens on Sessions: the Overview is the crew's.
+  const repoCount = useResource<RepoView[]>(RESOURCES.repos).data?.length;
+  const home =
+    r?.page === "overview" && repoCount !== undefined && homePath(repoCount) !== path
+      ? homePath(repoCount)
+      : null;
+  useEffect(() => {
+    if (home) navigate(home, { replace: true });
+  }, [home]);
   const shown: Route = r ?? { page: "overview" };
   const notFound = r === null && moved === null;
   useShellKeys(shown, popout);
@@ -355,6 +372,8 @@ function useItemUrl(popout: boolean) {
 }
 
 function PageView({ route: r }: { route: Route }) {
+  const repos = useResource<RepoView[]>(RESOURCES.repos).data;
+  if (repos?.length === 0 && needsRepo(tabOf(r))) return <p>{REPO_REQUIRED_TEXT}</p>;
   let page: ReactNode;
   switch (r.page) {
     case "overview":
