@@ -77,8 +77,10 @@ describe("cmux sidebar", () => {
     const added = "22222222-2222-4222-8222-222222222222";
     const fake = fakeCmux(dir, { workspaces: [{ id: old, name: "old" }] });
     let stall = false;
+    let stallAgents = false;
     const cmux = new Proxy(fake.cmux, {
       get(target, key, receiver) {
+        if (stallAgents && key === "agents") return () => new Promise(() => {});
         if (stall && (key === "statuses" || key === "readScreen"))
           return () => new Promise(() => {});
         return Reflect.get(target, key, receiver);
@@ -94,6 +96,7 @@ describe("cmux sidebar", () => {
     const initial = await sessions.view();
     expect(initial.ok && initial.sessions.map((r) => r.id)).toEqual([old]);
     stall = true;
+    stallAgents = true;
     const bus = new ChangeBus();
     const sidebar = { tick: vi.fn(async () => {}) };
     const waitForTopic = () =>

@@ -370,12 +370,17 @@ export function createSessions(deps: SessionsDeps): SessionsService {
   }
 
   /** A row for a lifecycle refresh: existing details win while the full read enriches it later. */
-  function membershipRow(ws: CmuxWorkspace, agent: CmuxAgent | null): CmuxSessionRow {
-    const state: CmuxSessionState = agent === null ? "no-agent" : STATE_OF[agent.lifecycle];
+  function membershipRow(ws: CmuxWorkspace, agent: CmuxAgent | null | undefined): CmuxSessionRow {
     const previous = lastRows.get(ws.id);
+    const state: CmuxSessionState =
+      agent === undefined
+        ? (previous?.state ?? "no-agent")
+        : agent === null
+          ? "no-agent"
+          : STATE_OF[agent.lifecycle];
     const since = previous?.state === state ? previous.since : now();
     seen.set(ws.id, { state, since });
-    const folder = agent?.cwd ?? ws.cwd;
+    const folder = agent === undefined ? (previous?.folder ?? ws.cwd) : (agent?.cwd ?? ws.cwd);
     if (previous !== undefined)
       return {
         ...previous,
@@ -642,12 +647,11 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     cached = null;
     try {
       const at = now();
-      const [workspaces, agents] = await Promise.all([cmux.workspaces(), cmux.agents()]);
-      const rows = workspaces.map((ws) => membershipRow(ws, agentOf(agents, ws.id)));
+      const workspaces = await cmux.workspaces();
+      const rows = workspaces.map((ws) => membershipRow(ws, undefined));
       const ids = new Set(rows.map((row) => row.id));
       for (const id of seen.keys()) if (!ids.has(id)) seen.delete(id);
       for (const id of lastRows.keys()) if (!ids.has(id)) lastRows.delete(id);
-      withSpend(rows, agents, at);
       const view = { ok: true as const, at, sessions: sortSessions(rows), repos: lastRepos };
       cached = { at, view: Promise.resolve(view) };
     } catch {
