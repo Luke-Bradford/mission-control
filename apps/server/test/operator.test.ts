@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CREW_MODES, crewSandboxSettings } from "@mc/core";
+import { CREW_MODES, crewSandboxSettings, SEAT_DENIED_RESOLVED_ADDRESSES } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import {
   newOperatorToken,
@@ -34,7 +34,9 @@ describe("operator token", () => {
       );
       expect(denied, mode).toBe(true);
       expect(sandbox.network.allowedDomains).toEqual(["*"]);
-      expect(sandbox.network.deniedDomains).toContain("127.0.0.0/8");
+      expect(sandbox.network.deniedResolvedAddresses).toContain(
+        SEAT_DENIED_RESOLVED_ADDRESSES[0],
+      );
       expect(text).not.toContain("tok-1");
     }
   });
