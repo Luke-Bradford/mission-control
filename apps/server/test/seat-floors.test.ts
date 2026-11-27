@@ -536,6 +536,18 @@ const loopbackProbe = (port: number, hosts: readonly string[] = ["127.0.0.1"]) =
     )
     .join("; ")}`;
 
+/** Reach one declared local service before attempting two loopback ports that must stay closed. */
+const localServiceProbe = (servicePort: number, hubPort: number, otherPort: number) =>
+  [
+    "echo ran",
+    `/usr/bin/curl -fsS -m 3 http://127.0.0.1:${servicePort}/ >/dev/null`,
+    'echo "service=$?"',
+    `/usr/bin/curl -s -m 3 -o /dev/null http://127.0.0.1:${hubPort}/api/operator/bootstrap`,
+    'echo "hub=$?"',
+    `/usr/bin/curl -s -m 3 -o /dev/null http://127.0.0.1:${otherPort}/`,
+    'echo "other=$?"',
+  ].join("; ");
+
 /**
  * Every spelling a seat could use for this Mac: the number, the short and decimal forms, the
  * IPv4-mapped IPv6 form, a trailing-dot name and a public name that resolves to 127.0.0.1. The seat
@@ -742,4 +754,68 @@ describe.skipIf(claudeCli === null)("a Claude seat cannot reach the hub on loopb
     },
     120_000,
   );
+
+  it("reaches its declared local service but never the hub or another loopback port", async () => {
+    const service = await listenOnLoopback();
+    const hub = await listenOnLoopback();
+    const other = await listenOnLoopback();
+    const input: CrewSandboxInput = {
+      ...l,
+      tempRoot,
+      denyRead: [],
+      pnpmStoreDir: join(l.root, ".mc-pnpm-store", "shared"),
+      localServices: [`127.0.0.1:${service.port}`],
+    };
+    const store = crewPnpmStoreDir(tempRoot, "seat");
+    mkdirSync(store, { recursive: true });
+    api = await startFakeAnthropic(localServiceProbe(service.port, hub.port, other.port));
+    const settings = crewSandboxSettings(input, "writer", {
+      command: "/usr/bin/true",
+      timeoutS: 5,
+    });
+    let output = "";
+    try {
+      output = await runToEnd(
+        claudeCli as string,
+        [
+          "-p",
+          "run the probe",
+          "--output-format",
+          "json",
+          "--model",
+          "claude-fake",
+          ...CREW_ISOLATION_FLAGS,
+          "--tools",
+          "Bash",
+          "--settings",
+          settings,
+          "--allowedTools",
+          "Bash",
+        ],
+        {
+          cwd: l.cwd,
+          env: {
+            PATH: process.env.PATH,
+            HOME: l.home,
+            TMPDIR: tempRoot,
+            CLAUDE_CODE_TMPDIR: tempRoot,
+            [PNPM_STORE_ENV]: store,
+            ANTHROPIC_BASE_URL: api.url,
+            ANTHROPIC_API_KEY: "sk-ant-fake",
+            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+            ...CREW_CLI_ENV,
+            ...CREW_PNPM_ENV,
+            ...CREW_GIT_ENV,
+          },
+        },
+        90_000,
+      );
+    } finally {
+      await Promise.all([service.close(), hub.close(), other.close()]);
+    }
+    expect(api.bashCalls(), output).toBe(1);
+    expect(service.hits(), "requests that reached the declared service").toBe(1);
+    expect(hub.hits(), "requests that reached the hub").toBe(0);
+    expect(other.hits(), "requests that reached another loopback service").toBe(0);
+  }, 120_000);
 });

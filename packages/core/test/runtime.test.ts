@@ -55,6 +55,7 @@ import {
   SANDBOX_DENY_READ_HOME,
   SCRATCH_TOOLS,
   SEAT_DENIED_HOSTS,
+  SEAT_DENIED_RESOLVED_ADDRESSES,
   SEAT_STATES,
   SKILL_FILE_MAX,
   SKILLS_DIR,
@@ -129,7 +130,11 @@ describe("crewCliArgs", () => {
     expect(args).toContain("--disallowedTools");
     const seat = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook)).sandbox;
     expect(seat.enabled).toBe(true);
-    expect(seat.network).toEqual({ allowedDomains: ["*"], deniedDomains: [...SEAT_DENIED_HOSTS] });
+    expect(seat.network).toEqual({
+      allowedDomains: ["*"],
+      deniedDomains: [...SEAT_DENIED_HOSTS],
+      deniedResolvedAddresses: [...SEAT_DENIED_RESOLVED_ADDRESSES],
+    });
     expect(seat.filesystem.denyRead).toContain(base.sandbox.home);
   });
 
@@ -144,6 +149,7 @@ describe("crewCliArgs", () => {
     expect(seat.network).toEqual({
       allowedDomains: ["*", "127.0.0.1:5432", "127.0.0.1:6379"],
       deniedDomains: [...SEAT_DENIED_HOSTS],
+      deniedResolvedAddresses: [...SEAT_DENIED_RESOLVED_ADDRESSES],
     });
   });
 
@@ -1231,7 +1237,11 @@ describe("crew sandbox and scoped edits", () => {
       enabled: true,
       failIfUnavailable: true,
       allowUnsandboxedCommands: false,
-      network: { allowedDomains: ["*"], deniedDomains: [...SEAT_DENIED_HOSTS] },
+      network: {
+        allowedDomains: ["*"],
+        deniedDomains: [...SEAT_DENIED_HOSTS],
+        deniedResolvedAddresses: [...SEAT_DENIED_RESOLVED_ADDRESSES],
+      },
     });
     // commits are the hub's (the mc commit tool): nothing in either git dir is granted (#31 R19/R24)
     expect(j.sandbox.filesystem.allowWrite).toEqual([]);

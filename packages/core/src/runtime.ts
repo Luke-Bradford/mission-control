@@ -1169,8 +1169,15 @@ function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
  * sandbox's allow list. The hub's own routes trust loopback callers more than the open internet,
  * so config validation never permits its port.
  */
-export const SEAT_DENIED_HOSTS = [
-  "localhost",
+export const SEAT_DENIED_HOSTS = ["localhost"] as const;
+
+/**
+ * Loopback and link-local addresses which a permitted hostname may not resolve to. Claude's
+ * sandbox permits a precise IP-and-port in `allowedDomains` to bypass this resolution check;
+ * unlike `deniedDomains`, it therefore leaves a repo's declared local service reachable without
+ * opening the rest of loopback.
+ */
+export const SEAT_DENIED_RESOLVED_ADDRESSES = [
   "127.0.0.0/8",
   "::1",
   "0.0.0.0",
@@ -1212,11 +1219,13 @@ export function crewSandboxSettings(
       allowUnsandboxedCommands: false,
       // Defaults to true: every Bash not explicitly denied would be allowed, bypassing the allowlist.
       autoAllowBashIfSandboxed: false,
-      // A bare "*" matches every host. Exact repo-local services override the loopback denial;
-      // no other loopback address or port is allowed.
+      // A bare "*" matches every host. Claude applies deniedDomains before allowedDomains, so
+      // loopback lives in the resolution deny list instead: an exact repo-local IP-and-port is
+      // the sandbox's documented exception, while every other loopback destination stays shut.
       network: {
         allowedDomains: ["*", ...(i.localServices ?? [])],
         deniedDomains: [...SEAT_DENIED_HOSTS],
+        deniedResolvedAddresses: [...SEAT_DENIED_RESOLVED_ADDRESSES],
       },
       filesystem: {
         // Nothing under a git dir. When the cwd is a linked worktree the CLI itself opens most of
