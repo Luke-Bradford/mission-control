@@ -7,7 +7,7 @@ const cmux = () => ({
   newPane: vi.fn().mockResolvedValue("pane"),
   closePane: vi.fn().mockResolvedValue(undefined),
   setStatus: vi.fn(),
-  readScreen: vi.fn().mockResolvedValue("ready"),
+  readPane: vi.fn().mockResolvedValue("ready"),
 });
 describe("crew apps", () => {
   it("adds eBull panes to its seat workspace on distinct ports without jobs", async () => {
@@ -95,7 +95,7 @@ describe("crew apps", () => {
   it("reads each retained app pane rather than the selected workspace surface", async () => {
     const pane = cmux();
     pane.newPane.mockResolvedValueOnce("backend-pane").mockResolvedValueOnce("frontend-pane");
-    pane.readScreen.mockImplementation(async (surface: string) => `${surface} lines`);
+    pane.readPane.mockImplementation(async (surface: string) => `${surface} lines`);
     const apps = createCrewApps({
       cmux: pane,
       run: vi.fn(),
@@ -106,8 +106,8 @@ describe("crew apps", () => {
     await expect(apps.status(seat.id)).resolves.toBe(
       "App 1 (http://127.0.0.1:5173):\nbackend-pane lines\n\nApp 2 (http://127.0.0.1:5174):\nfrontend-pane lines",
     );
-    expect(pane.readScreen).toHaveBeenCalledWith("backend-pane", 40);
-    expect(pane.readScreen).toHaveBeenCalledWith("frontend-pane", 40);
+    expect(pane.readPane).toHaveBeenCalledWith("backend-pane", 40);
+    expect(pane.readPane).toHaveBeenCalledWith("frontend-pane", 40);
   });
   it("restarts a stopped endpoint once in five minutes and stops it when its run ends", async () => {
     let seats = [seat];

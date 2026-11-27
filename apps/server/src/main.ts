@@ -167,6 +167,7 @@ import { applyCmuxSessionEvent, startCmuxEvents } from "./sessions/events.ts";
 import { createBranchPrs } from "./sessions/pr.ts";
 import { createSessions, probeLocal, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
 import { createSessionSidebar } from "./sessions/sidebar.ts";
+import { createSeatTerminal, type SeatTerminal } from "./sessions/terminal.ts";
 import { createSessionWatch } from "./sessions/watch.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
@@ -819,21 +820,13 @@ export async function main(): Promise<void> {
     });
   };
   let crewApps: ReturnType<typeof createCrewApps> | null = null;
+  let seatTerminal: SeatTerminal | null = null;
   const mcDeps: McToolsDeps = {
     crewApps: () => crewApps,
-    terminalRun: (worktree, command) =>
-      new Promise((resolve) =>
-        execFile(
-          "sh",
-          ["-lc", command],
-          { cwd: worktree, maxBuffer: 64 * 1024 },
-          (error, stdout, stderr) =>
-            resolve({
-              output: `${stdout}${stderr}`.slice(-64 * 1024),
-              exitCode: error === null ? 0 : typeof error.code === "number" ? error.code : 1,
-            }),
-        ),
-      ),
+    terminalRun: async (input) => {
+      if (seatTerminal === null) throw new Error("The seat terminal is unavailable.");
+      return seatTerminal.run(input);
+    },
     qaReports,
     rules: engineRules,
     qaReportBaseUrl: `http://${HOST}:${port}`,
@@ -1077,6 +1070,12 @@ export async function main(): Promise<void> {
           worktree === null ? [] : [{ id: seatId, repoId: run.repoId, worktree }],
         ),
     probe: probeLocal,
+    log: (m) => log(m),
+  });
+  seatTerminal = createSeatTerminal({
+    cmux,
+    dir: join(dirname(dbPath), "seat-terminal"),
+    checks: checkRecorder,
     log: (m) => log(m),
   });
   const seatIds = () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];
@@ -1365,7 +1364,12 @@ export async function main(): Promise<void> {
   if (process.env.MC_NO_LOOP_WRITES !== "1") {
     for (const crewApp of crewApps.view())
       void crewApps.start(crewApp.id).catch((error) => log(String(error)));
-    trackTimer(setInterval(() => void crewApps.tick(), 60_000)).unref();
+    trackTimer(
+      setInterval(() => {
+        void crewApps?.tick();
+        void seatTerminal?.tick(store.liveSeatRuns().map(({ seatId }) => seatId));
+      }, 60_000),
+    ).unref();
   }
   app.addHook("onClose", async () => {
     for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);

@@ -382,6 +382,26 @@ function modelsView(): ModelsView {
   };
 }
 
+/** Crew seats' app panes, as GET /api/sessions/apps answers: every health state, running and stopped. */
+function demoCrewApps() {
+  const app = (seat: string, repo: string, running: boolean, apps: [number, boolean | null][]) => ({
+    id: seat,
+    name: `${seat} · ${repo}`,
+    repo,
+    seat,
+    running,
+    apps: apps.map(([port, answers]) => ({ url: `http://127.0.0.1:${port}`, answers })),
+  });
+  return [
+    app("guido-eb", "ebull", true, [
+      [5173, true],
+      [5174, false],
+    ]),
+    app("guido-ae", "autonomy-engine-studio-preview-workspace", true, [[5183, null]]),
+    app("guido-sh", "shop-app", false, [[5193, null]]),
+  ];
+}
+
 export function answer(path: string): Response {
   const api = getState().api;
   const key = path in ALIASES ? (ALIASES[path] as string) : path;
@@ -392,7 +412,7 @@ export function answer(path: string): Response {
   if (diff !== undefined) return json(diff);
   if (/^\/api\/audit\/models\?range=/.test(path)) return json(modelsView());
   if (path === "/api/sessions") return json(demoSessions());
-  if (path === "/api/sessions/apps") return json([]);
+  if (path === "/api/sessions/apps") return json(demoCrewApps());
   if (path === "/api/sessions/roles")
     return json({
       roles: ["FIDO", "GUIDO", "INCO", "RETRO"],

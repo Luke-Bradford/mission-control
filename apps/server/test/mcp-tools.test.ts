@@ -316,12 +316,67 @@ describe("seat terminal tools", () => {
       worktree: "/crew/seat",
       updatedAt: NOW,
     });
-    const terminalRun = vi.fn().mockResolvedValue({ output: "ok\n", exitCode: 0 });
-    const result = await tool("terminal_run", make({ terminalRun })).call(CTX, {
-      command: "pnpm test",
+    const terminalRun = vi.fn().mockResolvedValue({ output: "ok\n", exitCode: 0, timedOut: false });
+    const ts = make({ terminalRun, knownSecrets: async () => ["local-secret-0123456789"] });
+    const result = await tool("terminal_run", ts).call(CTX, {
+      command: "DB_PASSWORD=hunter2 uv run pytest -m db --dsn local-secret-0123456789",
+      timeoutSeconds: 90,
     });
-    expect(terminalRun).toHaveBeenCalledWith("/crew/seat", "pnpm test");
-    expect(result.text).toBe('{"output":"ok\\n","exitCode":0}');
+    expect(terminalRun).toHaveBeenCalledWith({
+      seatId: "guido-1",
+      runId: RUN,
+      worktree: "/crew/seat",
+      command: "DB_PASSWORD=hunter2 uv run pytest -m db --dsn local-secret-0123456789",
+      timeoutMs: 90_000,
+    });
+    expect(result).toEqual({ text: "Exit code 0.\nok\n" });
+    const trace = store.commsForCrew().at(-1);
+    expect(trace).toMatchObject({ from: "guido-1", to: "crew", ticket: "mc#42" });
+    expect(trace?.text).toBe(
+      "Typed in guido-1's terminal: `DB_PASSWORD=[redacted] uv run pytest -m db --dsn [redacted]`",
+    );
+  });
+
+  it("answers with the output so far when the command passes its timeout", async () => {
+    liveSeat("guido-1", RUN);
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: RUN,
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: "/crew/seat",
+      updatedAt: NOW,
+    });
+    const terminalRun = vi
+      .fn()
+      .mockResolvedValue({ output: "booting\n", exitCode: null, timedOut: true });
+    const result = await tool("terminal_run", make({ terminalRun })).call(CTX, {
+      command: "make up",
+    });
+    expect(terminalRun).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 600_000 }));
+    expect(result.text).toBe(
+      "Still running after 600 s; it keeps running in this seat's terminal pane.\nbooting\n",
+    );
+  });
+
+  it("names a terminal refusal as an error", async () => {
+    liveSeat("guido-1", RUN);
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: RUN,
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: "/crew/seat",
+      updatedAt: NOW,
+    });
+    const terminalRun = vi
+      .fn()
+      .mockRejectedValue(new Error("No live cmux workspace for this seat."));
+    await expect(
+      tool("terminal_run", make({ terminalRun })).call(CTX, { command: "make up" }),
+    ).resolves.toEqual({ text: "No live cmux workspace for this seat.", isError: true });
   });
 });
 

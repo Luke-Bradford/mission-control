@@ -17,6 +17,7 @@ import type { AppDeps } from "../api.ts";
 import { checkCommand } from "../engine/rule-config.ts";
 import { operatorTokenMatches } from "../operator.ts";
 import { CmuxError } from "../runtime/cmux.ts";
+import { CrewAppError } from "./apps.ts";
 import { type SessionChecks, SessionChecksError } from "./checks.ts";
 import { OpenSessionArgs, SessionOpenError } from "./open.ts";
 import { SessionError, type SessionsService } from "./sessions.ts";
@@ -66,6 +67,7 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
     )
       return reply.code(error.status).send({ error: error.message });
     if (error instanceof CmuxError) return reply.code(503).send({ error: error.message });
+    if (error instanceof CrewAppError) return reply.code(409).send({ error: error.message });
     throw error;
   };
 
@@ -91,8 +93,8 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
   // Reader: apps/web/src/pages/Sessions.tsx (the app workspace Start and Stop controls)
   api.get("/sessions/apps", { preHandler: auth }, async () => deps.crewApps?.view() ?? []);
   // Reader: apps/web/src/pages/Sessions.tsx (the app workspace Start and Stop controls)
-  api.post<{ Params: { repo: string; action: "start" | "stop" } }>(
-    "/sessions/apps/:repo/:action",
+  api.post<{ Params: { seat: string; action: string } }>(
+    "/sessions/apps/:seat/:action",
     { preHandler: auth },
     async (req, reply) => {
       if (!noBody.safeParse(req.body).success)
@@ -100,10 +102,10 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
       const action = AppAction.safeParse(req.params.action);
       if (!action.success) return reply.code(404).send({ error: "No app action has that name." });
       if (!deps.crewApps) return reply.code(503).send({ error: SESSIONS_OFF_TEXT });
-      const found = deps.crewApps.view().some((app) => app.id === req.params.repo);
-      if (!found) return reply.code(404).send({ error: "No configured app has that repository." });
+      const found = deps.crewApps.view().some((app) => app.id === req.params.seat);
+      if (!found) return reply.code(404).send({ error: "No crew app runs for that seat." });
       try {
-        await deps.crewApps[action.data](req.params.repo);
+        await deps.crewApps[action.data](req.params.seat);
         return { ok: true };
       } catch (error) {
         return failure(error, reply);

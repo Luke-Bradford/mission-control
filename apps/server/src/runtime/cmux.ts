@@ -99,11 +99,14 @@ export interface Cmux {
   /** Opens `url` in a browser pane of the workspace. */
   openBrowser(ws: string, url: string): Promise<void>;
   newWorkspace(i: CmuxWorkspaceInput): Promise<string>;
-  /** Opens another terminal pane in a workspace. */
-  /** Opens a terminal pane and returns its surface identifier. */
+  /** Opens a terminal pane in `cwd` running `command`, unfocused, and returns its surface. */
   newPane(ws: string, cwd: string, command: string): Promise<string>;
-  /** Closes one terminal pane. A pane already gone is not an error. */
-  closePane(pane: string): Promise<void>;
+  /** Closes one pane's surface, even with a process still running. A surface already gone is not an error. */
+  closePane(surface: string): Promise<void>;
+  /** Pastes `text` into one pane's surface and presses Enter. */
+  sendPane(surface: string, text: string): Promise<void>;
+  /** The last `lines` lines of one pane's surface. */
+  readPane(surface: string, lines: number): Promise<string>;
   /** The Claude records cmux holds (`cmux sessions`), from one shared call per second. */
   agents(): Promise<CmuxAgent[]>;
   /** "busy": a dialog is open or a draft is typed; nothing was sent. */
@@ -242,6 +245,18 @@ export function madeWorkspace(stdout: string): string | null {
   const said = [...stdout.matchAll(/^OK\s+(workspace:\d+|[0-9a-f]{8}-[0-9a-f-]{27})\s*$/gim)];
   return said.at(-1)?.[1] ?? null;
 }
+
+/** The surface `new-pane` says it made: its `surface:<n>` ref, else the first UUID on stdout. Null when it names none. */
+export function madeSurface(stdout: string): string | null {
+  return (
+    /\bsurface:\d+\b/.exec(stdout)?.[0] ??
+    /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.exec(stdout)?.[0] ??
+    null
+  );
+}
+
+/** `value` as one single-quoted shell word. */
+export const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
 /** The id of the workspace with handle `ref` in a `--id-format both` listing. */
 export function workspaceIdOf(text: string, ref: string): string | null {
@@ -498,24 +513,40 @@ export function createCmux(
       }
     },
     async newPane(ws, cwd, command) {
+      // `new-pane` takes no folder: the command starts with its own `cd`
       const r = await cmux([
         "new-pane",
         "--type",
         "terminal",
         "--workspace",
         ws,
-        "--cwd",
-        cwd,
+        "--focus",
+        "false",
         "--command",
-        command,
+        `cd ${shellQuote(cwd)} && ${command}`,
       ]);
       if (r.code !== 0) throw failed("new-pane", r);
-      return r.stdout.trim() || ws;
+      const surface = madeSurface(r.stdout);
+      if (surface === null)
+        throw new CmuxError(`cmux new-pane named no surface: ${r.stdout.trim().slice(0, 300)}`);
+      return surface;
     },
-    async closePane(pane) {
-      const r = await cmux(["close-pane", "--pane", pane]);
+    async closePane(surface) {
+      const r = await cmux(["close-surface", "--surface", surface, "--force"]);
       if (r.code !== 0 && !/not found|no such/i.test(`${r.stdout}\n${r.stderr}`))
-        throw failed("close-pane", r);
+        throw failed("close-surface", r);
+    },
+    async sendPane(surface, text) {
+      const pasted = await cmux(["send", "--paste", "--surface", surface, "--", text]);
+      if (pasted.code !== 0) throw failed("send", pasted);
+      await sleep(PASTE_SETTLE_MS);
+      const key = await cmux(["send-key", "--surface", surface, "--", "enter"]);
+      if (key.code !== 0) throw failed("send-key", key);
+    },
+    async readPane(surface, lines) {
+      const r = await cmux(["read-screen", "--surface", surface, "--lines", String(lines)]);
+      if (r.code !== 0) throw failed("read-screen", r);
+      return r.stdout.trimEnd();
     },
     agents() {
       if (agentsCall !== null && Date.now() - agentsAt < AGENTS_CACHE_MS) return agentsCall;

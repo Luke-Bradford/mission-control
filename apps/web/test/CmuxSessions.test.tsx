@@ -13,6 +13,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../src/hud.css";
 import { hub } from "../src/data.ts";
+import { answer } from "../src/demo/source.ts";
 import { Sessions } from "../src/pages/Sessions.tsx";
 import { Toast } from "../src/shell/Toast.tsx";
 import { settled, stubFetch } from "./fetchStub.ts";
@@ -113,6 +114,21 @@ afterEach(() => {
 const bodyRows = () => screen.getAllByRole("row").slice(1);
 
 describe("Sessions page", () => {
+  it("shows the demo's crew apps: two endpoints, a long name, every health state, running and stopped", async () => {
+    const demo = await answer(APPS_PATH).json();
+    const fetch = stubFetch({ [PATH]: VIEW, [SIDEBAR_PATH]: { on: true }, [APPS_PATH]: demo });
+    render(<Sessions />);
+    await settled(fetch, APPS_PATH);
+    expect(screen.getByText("guido-eb · ebull")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "127.0.0.1:5174" })).toBeTruthy();
+    expect(screen.getByText(/autonomy-engine-studio/)).toBeTruthy();
+    expect(screen.getAllByText("Answers").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not answering").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not checked").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Stop" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Start" })).toBeTruthy();
+  });
+
   it("shows each crew app address, health word and start or stop action", async () => {
     const start = vi.fn().mockResolvedValue({ status: 200, body: { ok: true } });
     const fetch = stubFetch({

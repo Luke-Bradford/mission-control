@@ -44,13 +44,32 @@ loopback port block for each running seat, passes `PORT` and repository-specific
 launchd-owned jobs process.
 
 A writer seat uses `app_start`, `app_restart` and `app_status` to start its panes, restart after a
-code change, and read the last lines from every app pane. `terminal_run` runs a one-off terminal
-command from that same worktree. The Sessions page lists each seat app, its address and its current
-loopback reachability, and provides Start and Stop.
+code change, and read the last lines from every app pane. The Sessions page lists each seat app, its
+address and its current loopback reachability, and provides Start and Stop
+(`GET /api/sessions/apps`, `POST /api/sessions/apps/<seat>/start|stop` with body `{}`).
 
 The hub probes app URLs each minute. A stopped app restarts no more than once every five minutes;
-the restart is logged. It stops and closes every app pane when the seat's run ends, then releases
-that seat's port block. Preview hubs never start or restart crew apps.
+the restart is logged. It stops and closes every app pane, and the terminal pane, when the seat's run
+ends, then releases that seat's port block. Preview hubs never start or restart crew apps.
+
+### The seat's terminal pane
+
+`terminal_run` types one command into the seat's terminal pane: a pane the hub opens once in the
+seat's workspace, in its worktree, running the operator's login shell. It is the seat's way to what its
+sandbox cannot reach: `make up` or `docker compose up -d`, migrations, database tests
+(`uv run pytest -m db`). It runs as the operator, outside the seat sandbox.
+
+- The hub writes the command to a script under `<data dir>/seat-terminal/`, types `bash <script>`
+  into the pane, and reads the output and exit code from files beside it. The operator sees the run
+  live in the pane.
+- The call answers when the command ends, or at `timeoutSeconds` (default 600) with the output so
+  far; the command keeps running in the pane, and the seat's next `terminal_run` is refused until it
+  ends.
+- Each typed command is posted to the crew channel on the ticket, secrets redacted.
+- A configured check typed here goes through the push gate's recorder: it reserves the checkout,
+  and a pass on a clean commit counts at push, as a check run in the sandbox does. Terminal runs do
+  not take the shared test lock.
+- The pane closes when the seat's run ends.
 
 ## Opening a session
 

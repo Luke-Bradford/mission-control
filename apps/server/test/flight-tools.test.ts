@@ -491,6 +491,8 @@ beforeEach(() => {
     },
     newPane: async () => "pane",
     closePane: async () => {},
+    sendPane: async () => {},
+    readPane: async () => "",
     send: async (ws, text) => {
       cmuxSent.push({ ws, text });
       return "sent";

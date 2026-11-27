@@ -3,6 +3,9 @@ import { SESSION_APP_STATUS_KEY } from "@mc/core";
 import type { Cmux } from "../runtime/cmux.ts";
 import { probeLocal } from "./sessions.ts";
 
+/** A crew app action the hub refuses, with the reason the operator or seat reads. */
+export class CrewAppError extends Error {}
+
 export const APP_RESTART_MS = 5 * 60_000;
 export const APP_PORT_START = 5173;
 const PORT_BLOCK = 10;
@@ -39,7 +42,7 @@ export interface CrewAppSeat {
   worktree: string;
 }
 interface CrewAppsDeps {
-  cmux: Pick<Cmux, "closePane" | "newPane" | "setStatus" | "readScreen" | "workspaces">;
+  cmux: Pick<Cmux, "closePane" | "newPane" | "setStatus" | "readPane" | "workspaces">;
   run(command: string, args: string[]): Promise<string>;
   repos(): readonly CrewAppRepo[];
   seats(): readonly CrewAppSeat[];
@@ -61,6 +64,15 @@ export interface CrewApps {
     running: boolean;
     apps: { url: string; answers: boolean | null }[];
   }[];
+}
+/** The id of the seat's own cmux workspace (named `<seat> · …`), or null when none is open. */
+export async function seatWorkspace(
+  cmux: Pick<Cmux, "workspaces">,
+  seatId: string,
+): Promise<string | null> {
+  return (
+    (await cmux.workspaces()).find((entry) => entry.name.startsWith(`${seatId} · `))?.id ?? null
+  );
 }
 const urlAt = (url: string, port: number) => url.replaceAll("$PORT", String(port));
 const pidOf = (seat: string, index: number) =>
@@ -108,7 +120,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
       repo.id.toLowerCase() === "ebull" &&
       repo.commands.some((entry) => /app\.jobs/.test(entry.command))
     )
-      throw new Error("eBull jobs is owned by launchd and cannot be an app command");
+      throw new CrewAppError("eBull jobs is owned by launchd and cannot be an app command");
   };
   const stop = async (seatId: string) => {
     const app = running.get(seatId);
@@ -127,14 +139,12 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
   };
   const start = async (seatId: string) => {
     const seat = seatOf(seatId);
-    if (!seat) throw new Error("No live cmux workspace for this seat.");
-    const workspace = (await deps.cmux.workspaces()).find((entry) =>
-      entry.name.startsWith(`${seat.id} · `),
-    )?.id;
-    if (!workspace) throw new Error("No live cmux workspace for this seat.");
+    if (!seat) throw new CrewAppError("No live cmux workspace for this seat.");
+    const workspace = await seatWorkspace(deps.cmux, seat.id);
+    if (!workspace) throw new CrewAppError("No live cmux workspace for this seat.");
     const repo = repoOf(seat.repoId);
     if (!repo || repo.commands.length === 0)
-      throw new Error("This seat's repository has no app commands.");
+      throw new CrewAppError("This seat's repository has no app commands.");
     checkJobs(repo);
     if (running.has(seatId)) await stop(seatId);
     const startPort = portStart(seat.id);
@@ -167,7 +177,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
         await Promise.all(
           app.apps.map(
             async (entry, index) =>
-              `App ${index + 1} (${entry.url}):\n${await deps.cmux.readScreen(entry.pane, 40)}`,
+              `App ${index + 1} (${entry.url}):\n${await deps.cmux.readPane(entry.pane, 40)}`,
           ),
         )
       ).join("\n\n");

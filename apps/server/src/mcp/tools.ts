@@ -29,6 +29,7 @@ import {
   BLOCKING_SEVERITIES,
   CALL_FLIGHT_SELF,
   CALLED_FLIGHT,
+  CHECK_BASH_TIMEOUT_MS,
   type CheckDrop,
   type CheckState,
   COMMS_CANT_REASON_MAX,
@@ -201,6 +202,7 @@ import {
   type ReviewRow,
   type Run,
   readOnlyToolText,
+  redactSecrets,
   removedText,
   removeLinkedText,
   removeMissingText,
@@ -260,6 +262,11 @@ import {
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
 import { originHeads } from "../runtime/origin-heads.ts";
+import {
+  TERMINAL_TIMEOUT_DEFAULT_MS,
+  type TerminalResult,
+  type TerminalRun,
+} from "../sessions/terminal.ts";
 import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
@@ -273,10 +280,8 @@ export interface McToolsDeps {
     restart(seatId: string): Promise<void>;
     status(seatId: string): Promise<string>;
   } | null;
-  terminalRun?: (
-    worktree: string,
-    command: string,
-  ) => Promise<{ output: string; exitCode: number }>;
+  /** Types a command into the seat's terminal pane (sessions/terminal.ts); throws its refusal. */
+  terminalRun?: (input: TerminalRun) => Promise<TerminalResult>;
   qaReports?: QaReportService;
   qaReportBaseUrl?: string;
   config: CcConfig;
@@ -381,7 +386,15 @@ const CommitArgs = z.strictObject({
   message: text(MC_TEXT_MAX),
   remove: z.array(removePath).max(MC_REMOVE_MAX).optional(),
 });
-const TerminalRunArgs = z.strictObject({ command: text(10_000) });
+const TerminalRunArgs = z.strictObject({
+  command: text(10_000),
+  timeoutSeconds: z
+    .number()
+    .int()
+    .min(1)
+    .max(CHECK_BASH_TIMEOUT_MS / 1000)
+    .optional(),
+});
 const PrBodyArgs = z.strictObject({ body: text(MC_PR_BODY_MAX) });
 const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
 const CallArgs = z.strictObject({
@@ -1704,8 +1717,34 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (live.worktree === null)
       return { text: "No worktree is active for this seat.", isError: true };
     if (!deps.terminalRun) return { text: "The seat terminal is unavailable.", isError: true };
-    const result = await deps.terminalRun(live.worktree, parsed.data.command);
-    return { text: JSON.stringify(result) };
+    const { command } = parsed.data;
+    const timeoutMs = (parsed.data.timeoutSeconds ?? TERMINAL_TIMEOUT_DEFAULT_MS / 1000) * 1000;
+    // it runs as the operator, outside the sandbox: Comms shows every command typed
+    const known = await readKnown(deps, "terminal_run");
+    store.addComms({
+      at: now(),
+      from: ctx.seatId,
+      senderKind: "seat",
+      to: COMMS_CREW,
+      ticket: live.run.ticket ?? null,
+      text: `Typed in ${ctx.seatId}'s terminal: \`${redactSecrets(command, known).replaceAll("`", "'")}\``,
+    });
+    bus.emit("agents");
+    try {
+      const result = await deps.terminalRun({
+        seatId: ctx.seatId,
+        runId: ctx.runId,
+        worktree: live.worktree,
+        command,
+        timeoutMs,
+      });
+      const said = result.timedOut
+        ? `Still running after ${timeoutMs / 1000} s; it keeps running in this seat's terminal pane.`
+        : `Exit code ${String(result.exitCode)}.`;
+      return { text: `${said}\n${result.output}` };
+    } catch (e) {
+      return { text: e instanceof Error ? e.message : String(e), isError: true };
+    }
   }
 
   async function commsRead(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3390,7 +3429,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.terminalRun,
       description:
-        "Run one command in this seat's worktree terminal and return its output and exit code.",
+        "Type one command into this seat's terminal pane in its cmux workspace, from its worktree, outside the seat sandbox (for the app's stack, migrations and database tests). Returns its exit code and the end of its output, or, past timeoutSeconds (default 600), the output so far while it keeps running. Comms shows each command typed, secrets redacted. A configured check that passes here on a clean commit counts at push.",
       inputSchema: z.toJSONSchema(TerminalRunArgs),
       modes: ["writer"],
       call: terminalRun,
