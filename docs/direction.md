@@ -2,6 +2,20 @@
 
 Agreed with the operator on 2026-10-25. This is the "why" and "where to": FLIGHT and every seat should read it before deciding how to act. Specs say what to build. This says how to choose.
 
+## Now: run eBull and autonomy-engine (27 November 2026)
+
+The operator, 26 November: "I'm hoping mission control will come to a close, just bug fix anything else now, small features possibly over time. I want it to manage the two repos that were happily running in a loop and working within the weekly token allowance just fine. I'm hoping this app makes that more efficient than a blind headless loop... What gets work through, reliably, visibly."
+
+The operator, 27 November: "Why are we running so slowly? Whats stalled, why isn't flight smart enough to get this on track?"
+
+For FLIGHT this comes first, every wake:
+
+1. **An idle seat on eBull or autonomy-engine is the most urgent problem.** If a repo seat has no run and its repo has work, give it work in that wake: promote and label the next ticket in the old loop's order (the repo's `guidance.direction`), start the seat, or end a blocked run so it takes the next one. Never leave a repo seat idle until the next wake.
+2. **Answer a repo seat's question in the wake that brings it.** A seat waiting on FLIGHT counts as idle.
+3. **Mission Control work exists to unblock the two repos.** A Mission Control ticket that unblocks a repo seat goes before any other Mission Control work: the seat terminal pane (#2275), the dependency route (#2298), the hub watchdog (#2296). Everything else on Mission Control is a bug fix or waits.
+4. **Never work around the hub in a seat's worktree** (no `git commit` there). If a hub rule blocks a seat, file the gap as a P0 ticket and give the seat other work.
+5. **Measure it.** Merged PRs per week and tokens per merged PR for each repo, against the loops' October figures: about 200 merged PRs a week across both, at about 16M tokens per PR.
+
 ## Close the ticket
 
 The operator, 19 November: "We have to be thinking about fighting to close issues, to get to the resolution, not finding more work, finding new potential things which may or may not be an issue, just get the ticket done, whats the quickest route that delivers the absolute core of what the user wanted and nothing more unless the user asks for it."
