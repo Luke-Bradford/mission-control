@@ -162,7 +162,12 @@ export function dialogOf(screen: string): CmuxDialog | null {
     if (option !== null && /^\s*[❯›>]?\s*\d+\./.test(r)) options.push(option[1] as string);
     else if (options.length === 0 && r.trim() !== "") question.push(r.trim());
     // a long option wraps: its next line belongs to it, until the footer
-    else if (options.length > 0 && r.trim() !== "" && !MENU_FOOTER.test(r) && !/^\s*Enter to/i.test(r))
+    else if (
+      options.length > 0 &&
+      r.trim() !== "" &&
+      !MENU_FOOTER.test(r) &&
+      !/^\s*Enter to/i.test(r)
+    )
       options[options.length - 1] += ` ${r.trim()}`;
   }
   return { question: question.join(" "), options };
@@ -615,9 +620,7 @@ function createCmuxDriver(
    * cmux's state checked against the screen: a turn (running or waiting) with a dialog open is
    * `needsInput`, and the dialog is kept for the event. An idle Claude has no dialog: not read.
    */
-  async function screenLifecycle(
-    said: CmuxAgent["lifecycle"],
-  ): Promise<CmuxAgent["lifecycle"]> {
+  async function screenLifecycle(said: CmuxAgent["lifecycle"]): Promise<CmuxAgent["lifecycle"]> {
     if (said === "idle") return said;
     let screen = "";
     try {

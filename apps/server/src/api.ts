@@ -1,6 +1,6 @@
 import { statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Run } from "@mc/core";
 import {
   ACK_BATCH_MAX,
@@ -81,11 +81,13 @@ import {
   GUARD_CHECK_PATH,
   GUARD_HITS_LIMIT,
   GUARD_HOOK_EVENTS,
+  GUARD_PERMISSION_REFUSED_TEXT,
   GUARD_WINDOW_DAYS,
   type GuardHitsView,
   globMatches,
   guardAckKey,
   guardDenyOutput,
+  guardPermissionOutput,
   HUB_SETTING_KEYS,
   HUD_RENDERER_HEADER,
   type HubSettingKey,
@@ -111,6 +113,7 @@ import {
   OWNER_OPERATOR,
   PACE_SETTING,
   type PaceSettings,
+  PERMISSION_EDIT_TOOLS,
   PLAN_NO_SUCH,
   PLAN_NOTE_MAX,
   PR_LIST_DAYS,
@@ -424,6 +427,7 @@ import {
   GitFailed,
   NO_WORKTREE_NOTE,
 } from "./repo/files.ts";
+import { runPathGrants } from "./repo/path-grants.ts";
 import { reviewCheckFor } from "./review/check.ts";
 import { branchOwned, readExternalSubject } from "./review/external.ts";
 import {
@@ -447,6 +451,7 @@ import {
   removeSessionCheckout,
   validateSessionCheckout,
 } from "./runtime/checkouts.ts";
+import { codexEditAllowed, realPathOrParent } from "./runtime/codex-floor.ts";
 import { type CodexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
@@ -2654,6 +2659,45 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               seat.kind === "crew" ? seat.seat.role : "",
               crewSeatDef(config, seat.id).loop,
             ) === "flight-full";
+          if (body.data.hook_event_name === "PermissionRequest") {
+            // Claude is about to open its permission dialog, which nobody in cmux watches (#2304):
+            // an edit the seat's rules allow goes ahead, and anything else is refused at once.
+            const input = body.data.tool_input ?? {};
+            const worktree = store.seatSession(who.seatId)?.worktree ?? null;
+            const mode = seatMode(who.seatId);
+            const verdict = crewGuardDecision(
+              config,
+              seat.repoId,
+              mode,
+              { tool: body.data.tool_name, input },
+              deps.superuserTools,
+              deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
+              worktree ?? undefined,
+              body.data.cwd,
+              fullAccess,
+            );
+            // judged by its real path, as the worktree is: a link cannot lead it outside
+            const target =
+              worktree !== null && typeof input.file_path === "string" && input.file_path !== ""
+                ? realPathOrParent(resolve(body.data.cwd ?? worktree, input.file_path))
+                : null;
+            const allowed =
+              verdict.kind === "allow" &&
+              mode !== "read-only" &&
+              PERMISSION_EDIT_TOOLS.includes(body.data.tool_name) &&
+              worktree !== null &&
+              target !== null &&
+              codexEditAllowed(
+                target,
+                worktree,
+                seat.kind === "crew" ? seat.seat.area : [],
+                config.repos.find((r) => r.id === seat.repoId)?.protectedFiles ?? [],
+                runPathGrants(store, who.runId),
+              );
+            return reply
+              .type("application/json")
+              .send(guardPermissionOutput(allowed ? null : GUARD_PERMISSION_REFUSED_TEXT));
+          }
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
             const command = body.data.tool_input?.command;

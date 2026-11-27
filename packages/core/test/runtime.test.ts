@@ -1281,7 +1281,7 @@ describe("crew sandbox and scoped edits", () => {
     ]);
   });
 
-  it("registers the guard hook: every tool before it runs, Bash after it ends (Task 1's shape)", () => {
+  it("registers the guard hook: every tool before it runs, Bash after it ends, every permission dialog", () => {
     for (const mode of ["writer", "read-only"] as const) {
       const j = JSON.parse(crewSandboxSettings(base.sandbox, mode, base.hook));
       const entry = (matcher: string) => [
@@ -1291,6 +1291,8 @@ describe("crew sandbox and scoped edits", () => {
         PreToolUse: entry("*"),
         PostToolUse: entry("Bash"),
         PostToolUseFailure: entry("Bash"),
+        // #2304: the guard answers Claude's permission dialog, so none opens in cmux
+        PermissionRequest: entry("*"),
       });
       expect(Object.keys(j.hooks)).toEqual([...GUARD_HOOK_EVENTS]);
     }

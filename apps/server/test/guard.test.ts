@@ -12,12 +12,14 @@ import {
   GUARD_CHECK_PATH,
   GUARD_HITS_LIMIT,
   GUARD_HOOK_TIMEOUT_S,
+  GUARD_PERMISSION_REFUSED_TEXT,
   GUARD_RULES,
   GUARD_TOO_LONG_TEXT,
   GUARD_UNREACHABLE_TEXT,
   type GuardHitsView,
   guardAckKey,
   guardDenyOutput,
+  guardPermissionOutput,
   HOOK_DEADLINE_MS,
   HOOK_RETRY_ENV,
   HOOK_RETRY_MS,
@@ -25,6 +27,7 @@ import {
   lockBusyText,
   MC_TOOLS,
   MCP_PATH,
+  PERMISSION_REQUEST_ID,
   TEST_LOCK_UNAVAILABLE_TEXT,
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
@@ -904,6 +907,70 @@ describe("POST /api/guard/check", () => {
     }
   });
 
+  // #2304: Claude's permission dialog in cmux waited on nobody; the guard now answers it
+  describe("a permission dialog (PermissionRequest)", () => {
+    const ask = (tool: string, input: Record<string, unknown>) => ({
+      hook_event_name: "PermissionRequest",
+      tool_name: tool,
+      tool_use_id: PERMISSION_REQUEST_ID,
+      tool_input: input,
+    });
+    const ALLOW = guardPermissionOutput(null);
+    const REFUSE = guardPermissionOutput(GUARD_PERMISSION_REFUSED_TEXT);
+    beforeEach(() => {
+      execFileSync("git", ["init", "-q", dir]);
+      for (const seatId of ["guido-1", "retro-1"])
+        store.setSeatSession({
+          seatId,
+          runId: null,
+          cliSessionId: null,
+          state: "running",
+          reason: null,
+          worktree: dir,
+          updatedAt: NOW,
+        });
+    });
+
+    it("allows creating and editing a file inside the seat's worktree, with no dialog", async () => {
+      const created = join(dir, "sql", "518_filing_processing_receipts.sql");
+      expect((await check(tokA, ask("Write", { file_path: created }))).body).toBe(ALLOW);
+      writeFileSync(join(dir, "a.ts"), "x");
+      expect((await check(tokA, ask("Edit", { file_path: "a.ts" }))).body).toBe(ALLOW);
+      expect(store.guardHits(0)).toEqual([]);
+    });
+
+    it("refuses a file outside the worktree, in its git folder, or a protected file", async () => {
+      for (const file_path of [
+        join(tmpdir(), "elsewhere.ts"),
+        join(dir, "..", "next-door.ts"),
+        join(dir, ".git", "config"),
+        join(dir, ".github", "workflows", "ci.yml"),
+      ])
+        expect((await check(tokA, ask("Write", { file_path }))).body, file_path).toBe(REFUSE);
+    });
+
+    it("refuses a read-only seat's edit, a command and a tool the seat lacks", async () => {
+      expect((await check(tokR, ask("Write", { file_path: join(dir, "a.ts") }))).body).toBe(REFUSE);
+      expect((await check(tokA, ask("Bash", { command: "ls" }))).body).toBe(REFUSE);
+      expect((await check(tokA, ask("mcp__mc__promote", {}))).body).toBe(REFUSE);
+    });
+
+    it("keeps a seat to its area: an edit outside it is refused, one inside allowed", async () => {
+      const cfg = config();
+      const seats = cfg.crew?.sessions[0]?.seats ?? [];
+      for (const s of seats) if (s.id === "guido-1") s.area = ["apps/**"];
+      const a = await build({ config: cfg });
+      try {
+        const write = (path: string) =>
+          check(tokA, ask("Write", { file_path: join(dir, path) }), a);
+        expect((await write("apps/server/x.ts")).body).toBe(ALLOW);
+        expect((await write("docs/x.md")).body).toBe(REFUSE);
+      } finally {
+        await a.close();
+      }
+    });
+  });
+
   it("allows with {} and records nothing", async () => {
     const r = await check(tokA, bash("t1", "ls -la"));
     expect(r.statusCode).toBe(200);
@@ -1572,6 +1639,44 @@ describe("hookMain", () => {
       out: deny,
       exit: 0,
     });
+  });
+
+  it("asks about a permission dialog, which has no tool_use_id, and passes the two answers through", async () => {
+    const stdin = JSON.parse(
+      stdinFor({ hook_event_name: "PermissionRequest", tool_name: "Write" }),
+    );
+    delete stdin.tool_use_id;
+    stdin.tool_input = { file_path: "/w/a.sql", content: "secret body" };
+    stdin.permission_suggestions = [{ type: "setMode", mode: "acceptEdits" }];
+    for (const said of [
+      guardPermissionOutput(null),
+      guardPermissionOutput(GUARD_PERMISSION_REFUSED_TEXT),
+    ]) {
+      posts = [];
+      const r = await hookMain(JSON.stringify(stdin), [tokenFile, URL_OK], answer(200, said));
+      expect(r).toEqual({ out: said, exit: 0 });
+      expect(JSON.parse(posts[0]?.body ?? "")).toEqual({
+        hook_event_name: "PermissionRequest",
+        tool_name: "Write",
+        tool_use_id: PERMISSION_REQUEST_ID,
+        cwd: "/w",
+        tool_input: { file_path: "/w/a.sql" },
+      });
+    }
+    // a PreToolUse answer to a permission dialog, or a permission answer to a tool call, is no answer
+    expect(
+      (
+        await hookMain(
+          JSON.stringify(stdin),
+          [tokenFile, URL_OK],
+          answer(200, guardDenyOutput("x")),
+        )
+      ).exit,
+    ).toBe(2);
+    expect(
+      (await hookMain(stdinFor(), [tokenFile, URL_OK], answer(200, guardPermissionOutput(null))))
+        .exit,
+    ).toBe(2);
   });
 
   it("refuses a block answer to a tool event", async () => {

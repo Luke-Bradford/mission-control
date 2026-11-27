@@ -842,7 +842,9 @@ describe("startCmuxSession", () => {
     const reason = cmuxDialogReason(d as NonNullable<typeof d>);
     expect(reason).toContain('"Which migration should run first?"');
     expect(reason).toContain("1. 518_filing_processing_receipts / 2. 519_backfill");
-    expect(cmuxDialogReason({ question: "x".repeat(5000), options: [] }).length).toBeLessThanOrEqual(1500);
+    expect(
+      cmuxDialogReason({ question: "x".repeat(5000), options: [] }).length,
+    ).toBeLessThanOrEqual(1500);
   });
 
   it("knows Claude 2.1.332's create-file dialog, which has no title, as a tool prompt", () => {
