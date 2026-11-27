@@ -365,8 +365,7 @@ export const ACTIONS = {
   /** Body `{}`; opens the session's app in that workspace's cmux browser. */
   sessionApp: (id: string) => `${RESOURCES.sessions.path}/${enc(id)}/app`,
   /** Body `{}`; starts or stops one crew seat's app panes. */
-  crewApp: (seat: string, action: "start" | "stop") =>
-    `${RESOURCES.crewApps.path}/${enc(seat)}/${action}`,
+  crewApp: (seat: string, action: string) => `${RESOURCES.crewApps.path}/${enc(seat)}/${action}`,
   /** Body: an OpenSessionInput; answers 201 `{ id, name }`. */
   sessionOpen: RESOURCES.sessions.path,
   /** Body `{}`; queues the session's repo checks. 400 with the reason when it has none or is a crew seat. */
