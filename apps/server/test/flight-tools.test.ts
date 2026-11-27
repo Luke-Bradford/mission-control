@@ -3712,6 +3712,15 @@ describe("allow_dependency", () => {
     });
   });
 
+  it("does not leave an allowance when recording its decision fails", async () => {
+    vi.spyOn(store, "addFlightDecision").mockImplementationOnce(() => {
+      throw new Error("decision write failed");
+    });
+    await expect(call("allow_dependency", A())).rejects.toThrow("decision write failed");
+    expect(runDependencyAllowance(store, "r-g")).toEqual({ files: [], packages: [], added: [] });
+    expect(store.flightDecisions(0, 10)).toEqual([]);
+  });
+
   it("adds to an earlier allowance for the same run", async () => {
     await call("allow_dependency", A());
     const w = { name: "hyparquet-writer", version: "0.18.1", licence: "MIT" };
