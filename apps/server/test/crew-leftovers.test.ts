@@ -183,6 +183,7 @@ it("leaves an open browser profile when the temp folder is reached through a lin
   try {
     if (child.stdout === null) throw new Error("The file-holder did not expose stdout.");
     await once(child.stdout, "data");
+    const started = performance.now();
     const result = await cleanupCrewLeftovers({
       now: NOW,
       worktrees: join(root, "worktrees"),
@@ -194,11 +195,42 @@ it("leaves an open browser profile when the temp folder is reached through a lin
 
     expect(result.browserRemoved).toBe(0);
     expect(existsSync(profile)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(2_000);
   } finally {
     child.kill();
   }
-  // a system-wide lsof takes about 10 s on macOS
-}, 30_000);
+}, 5_000);
+
+it("checks candidate browser leftovers without blocking the event loop", async () => {
+  const tmp = join(root, "tmp");
+  const profile = join(tmp, "playwright_chromiumdev_profile-slow-lsof");
+  const bin = join(root, "bin");
+  const lsof = join(bin, "lsof");
+  mkdirSync(profile, { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(lsof, "#!/bin/sh\nsleep 0.4\nexit 1\n");
+  chmodSync(lsof, 0o755);
+  old(profile, 7);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    const started = performance.now();
+    const cleanup = cleanupCrewLeftovers({
+      now: NOW,
+      worktrees: join(root, "worktrees"),
+      claudeProjects: join(root, "claude", "projects"),
+      tmp,
+      liveWorktrees: new Set(),
+      processLines: [],
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(performance.now() - started).toBeLessThan(200);
+    expect((await cleanup).browserRemoved).toBe(1);
+  } finally {
+    process.env.PATH = path;
+  }
+}, 5_000);
 
 it("retries compression after an interrupted pass leaves its temporary gzip", async () => {
   const worktrees = join(root, "worktrees");
