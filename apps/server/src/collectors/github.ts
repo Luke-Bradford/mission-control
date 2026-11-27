@@ -215,6 +215,10 @@ export const PR_FILES_MAX = 100;
 
 /** A PR head's checks read per poll; a required check past them reads as missing. */
 export const PR_CHECKS_MAX = 50;
+/** Reviews read for each PR list entry; enough for the configured bot's current-head verdict. */
+const PR_REVIEWS_MAX = 50;
+/** Inline comments read for each review; enough to show the configured bot's findings. */
+const PR_REVIEW_COMMENTS_MAX = 20;
 /** The head commit's rollup: its state and each check run or commit status by name. */
 export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { id name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { runAttempt workflow { name } } } } ... on StatusContext { context state description targetUrl } } } }`;
 
@@ -227,7 +231,7 @@ const PR_FIELDS = `
         assignees(first: 10) { nodes { login } }
         closingIssuesReferences(first: 100) { nodes { number repository { nameWithOwner } } }
         comments(first: 100) { nodes { author { login } body url } }
-        reviews(first: 100) { nodes { author { login } state body url commit { oid } comments(first: 100) { nodes { path line body url } } } }
+        reviews(first: ${PR_REVIEWS_MAX}) { nodes { author { login } state body url commit { oid } comments(first: ${PR_REVIEW_COMMENTS_MAX}) { nodes { path line body url } } } }
         commits(last: 1) { nodes { commit { oid ${CHECK_CONTEXTS} } } }
       `;
 
