@@ -3266,6 +3266,26 @@ describe("merge workspace", () => {
     expect(kindsOf(r.actions)).not.toContain("note");
   });
 
+  it("a repository bot PR becomes ready after CI, before its verdict permits a merge", () => {
+    const waitingForBot = merge({
+      repoBotReview: true,
+      review: { retro: RETRO, rows: [], findings: [] },
+    });
+    const ready = reconcile(waitingForBot).actions;
+    expect(ready.filter((x) => x.kind === "mark-ready" || x.kind === "request-review")).toEqual([
+      { kind: "mark-ready" },
+      { kind: "request-review", sha: SHA, attempt: 1 },
+    ]);
+    expect(kindsOf(ready)).not.toContain("merge");
+
+    const approved = reconcile(
+      merge({ repoBotReview: true, pr: pr({ ci: "passing", isDraft: false }) }),
+    ).actions;
+    expect(approved.filter((x) => x.kind === "mark-ready" || x.kind === "merge")).toEqual([
+      { kind: "merge", sha: SHA },
+    ]);
+  });
+
   it("records HUD design checks without making them a merge gate", () => {
     const result = reconcile(
       merge(
