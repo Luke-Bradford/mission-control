@@ -25,7 +25,7 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -149,7 +149,8 @@ import {
   reorderQueue,
 } from "./queue/queue-reorder.ts";
 import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./repo/branch-tidy.ts";
-import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
+import { crewLeftoverFootprint } from "./repo/crew-leftovers.ts";
+import { clearLeftovers, closeFinishedPreviews, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
 import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./run/rotating-log.ts";
@@ -172,6 +173,7 @@ import { crewDir } from "./store/crew-paths.ts";
 import { Store } from "./store.ts";
 import { hubFileServiceRestart } from "./telemetry/file-service-restart.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
+import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import {
   commitsOf,
   createAutoUpdate,
@@ -1246,6 +1248,15 @@ export async function main(): Promise<void> {
   });
   void flushInstructionNotices({ config, store, bus, supervisor });
 
+  const crewLeftoverPaths = {
+    worktrees: config.crew?.worktrees,
+    claudeProjects: join(homedir(), ".claude", "projects"),
+    codexSessions: join(homedir(), ".codex", "sessions"),
+    tmp: tmpdir(),
+    previews: previewRoot,
+  };
+  let leftoverFootprint: Awaited<ReturnType<typeof crewLeftoverFootprint>> | null = null;
+  let crewTranscriptFootprint: ReturnType<typeof transcriptFootprint> = null;
   const app = buildApp({
     crewApps,
     sessions,
@@ -1255,6 +1266,8 @@ export async function main(): Promise<void> {
     sessionChecks,
     notifications,
     diskUse: hubDiskUse,
+    leftoverFootprint: () => leftoverFootprint,
+    transcriptFootprint: () => crewTranscriptFootprint,
     qaReports,
     previews,
     previewRepoId,
@@ -1548,16 +1561,25 @@ export async function main(): Promise<void> {
   trackTimer(setInterval(silence, 60_000)).unref();
   trackTimer(setTimeout(silence, 60_000)).unref();
   // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
-  const leftovers = () => {
+  const leftovers = async () => {
     try {
-      for (const text of clearLeftovers({ store, config, now: Date.now() }))
+      for (const text of await clearLeftovers({
+        store,
+        config,
+        now: Date.now(),
+        crewLeftovers: crewLeftoverPaths,
+      }))
         log(`leftovers: ${text}`);
+      crewTranscriptFootprint = transcriptFootprint(store);
+      leftoverFootprint = await crewLeftoverFootprint(crewLeftoverPaths);
+      const previewsClosed = await closeFinishedPreviews({ previews, store, config });
+      if (previewsClosed > 0) log(`leftovers: removed ${previewsClosed} finished preview(s)`);
     } catch (e) {
       log(`leftovers: pass failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  trackTimer(setInterval(leftovers, LEFTOVERS_EVERY_MS)).unref();
-  trackTimer(setTimeout(leftovers, 5_000)).unref();
+  trackTimer(setInterval(() => void leftovers(), LEFTOVERS_EVERY_MS)).unref();
+  trackTimer(setTimeout(() => void leftovers(), 5_000)).unref();
   crewReloader.start();
   flightWatch.start();
   stopDiscovery = startCodexDiscovery({

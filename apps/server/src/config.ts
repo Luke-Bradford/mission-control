@@ -275,6 +275,10 @@ export interface CcConfig {
     appCommands?: { command: string; url: string }[];
     /** The checks that decide CI on a PR head, by name. [] = every check but mc/review. Loaded: always set. */
     requiredChecks?: string[];
+    /** A repository-owned bot whose verdict replaces the crew review. */
+    review?:
+      | { kind: "repo-bot"; check: string; verdict: "check" }
+      | { kind: "repo-bot"; check: string; verdict: "comment"; actor: string };
     /** What the repo's seats may run: `writer` for writers, `review` for read-only and scratch seats. Loaded: always set. */
     commands?: SeatCommands;
     /** Board rules from user config; the optional repo block tightens safety rules and fills omitted policy keys. */
@@ -641,6 +645,21 @@ const fileSchema = z
             ),
           )
           .default([]),
+        review: z
+          .discriminatedUnion("verdict", [
+            z.strictObject({
+              kind: z.literal("repo-bot"),
+              check: nonEmpty,
+              verdict: z.literal("check"),
+            }),
+            z.strictObject({
+              kind: z.literal("repo-bot"),
+              check: nonEmpty,
+              verdict: z.literal("comment"),
+              actor: nonEmpty,
+            }),
+          ])
+          .optional(),
         commands: z
           .strictObject({ writer: z.array(seatCommand), review: z.array(seatCommand) })
           .optional(),
@@ -845,6 +864,19 @@ const fileSchema = z
         ...(r.run_command === undefined ? {} : { runCommand: r.run_command }),
         ...(r.app_commands.length === 0 ? {} : { appCommands: r.app_commands }),
         requiredChecks: r.required_checks,
+        ...(r.review === undefined
+          ? {}
+          : {
+              review:
+                r.review.verdict === "comment"
+                  ? {
+                      kind: r.review.kind,
+                      check: r.review.check,
+                      verdict: r.review.verdict,
+                      actor: r.review.actor,
+                    }
+                  : { kind: r.review.kind, check: r.review.check, verdict: r.review.verdict },
+            }),
         ...(r.commands === undefined ? {} : { commands: r.commands }),
         protectedFiles: r.protected,
         keepBranches: r.keep_branches,

@@ -585,6 +585,19 @@ export interface PullRequestView {
   closingIssues?: number[];
   isDraft: boolean;
   review: "approved" | "changes" | "requested" | null;
+  /** The configured repository bot's latest review on this head, if the collector could verify it. */
+  repoBotReview?: {
+    actor: string;
+    sha: string;
+    verdict: "approved" | "changes";
+    findings: {
+      file: string;
+      line: number;
+      summary: string;
+      scenario: string;
+      fix: string;
+    }[];
+  } | null;
   ci: "passing" | "failing" | "pending" | null;
   createdAt: number;
   updatedAt: number;
@@ -988,12 +1001,24 @@ export interface MachineView {
   /** The most seats in any one session. */
   perSessionMax: number;
   transcripts: TranscriptFootprint | null;
+  /** Crew-owned files outside the hub data folder, retained and cleaned by the hourly leftovers pass. */
+  leftovers?: CrewLeftoverFootprint | null;
 }
 
 export interface TranscriptFootprint {
   totalBytes: number;
   seats: { seatId: string; bytes: number; files: number }[];
   oldestAt: number | null;
+}
+
+/** Byte counts for the crew-only stores the Machine panel can name and the hub can clean. */
+export interface CrewLeftoverFootprint {
+  claudeProjectsBytes: number;
+  codexSessionsBytes: number;
+  browserProfilesBytes: number;
+  chromeTempBytes: number;
+  worktreesBytes: number;
+  previewsBytes: number;
 }
 
 /** One `/api/repos` row: a configured repo, without its status map. */

@@ -64,6 +64,14 @@ function api() {
     seats: 2,
     perSessionMax: 2,
     transcripts: null,
+    leftovers: {
+      claudeProjectsBytes: 1 * GIB,
+      codexSessionsBytes: 2 * GIB,
+      browserProfilesBytes: 3 * GIB,
+      chromeTempBytes: 4 * GIB,
+      worktreesBytes: 5 * GIB,
+      previewsBytes: 6 * GIB,
+    },
   };
   routes[RESOURCES.testLockHistory.path] = {
     runs: [
@@ -173,6 +181,7 @@ describeRendered("Telemetry, Machine tab, in a browser", () => {
                 legends: ["#tMach", "#mMem", "#mPressure", "#mAgentMem"].map(
                   (id) => document.querySelectorAll(`${id} .legend`).length,
                 ),
+                cleanup: document.querySelector("[data-testid=cleanup-footprint]")?.textContent,
               };
             }, undefined);
             expect(page.errors()).toEqual([]);
@@ -192,6 +201,7 @@ describeRendered("Telemetry, Machine tab, in a browser", () => {
             expect(g.tiles).toBe(6);
             expect(g.escaped).toEqual([]);
             expect(g.legends).toEqual([1, 1, 1, 1]);
+            expect(g.cleanup).toContain("Preview clones 6 GB");
             if (evidence) {
               mkdirSync(evidence, { recursive: true });
               await page.screenshot(

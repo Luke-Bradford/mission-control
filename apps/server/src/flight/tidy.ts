@@ -33,9 +33,6 @@ export interface CrewTidyCycle extends CrewTidy {
   tidyFinished(now: number): Promise<{ removed: string[]; trimmed: string[] }>;
 }
 
-/** An ended run's worktree is tidied for this long after it ended. */
-export const TIDY_FINISHED_WINDOW_MS = 30 * 86_400_000;
-
 export interface CrewTidyDeps {
   config: CcConfig;
   store: Store;
@@ -133,11 +130,12 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
       }
     },
 
-    async tidyFinished(now) {
+    async tidyFinished(_now) {
       const seen = new Set<string>();
       const out = { removed: [] as string[], trimmed: [] as string[] };
       const runs = deps.store
-        .runsActiveSince(now - TIDY_FINISHED_WINDOW_MS)
+        // Finished worktrees must be found even when a hub was offline for more than a month.
+        .runsActiveSince(0)
         // an ended run, or one set aside at review (no end, its seat freed): both wait for days
         .filter((r) => (r.endedAt !== null || isAside(r)) && r.branch !== null)
         .sort((a, b) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt));

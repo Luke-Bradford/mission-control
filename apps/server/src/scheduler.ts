@@ -137,6 +137,8 @@ import { readSessionSpend } from "./spend/sessions.ts";
 import type { Store } from "./store.ts";
 import type { FileServiceRestart } from "./telemetry/file-service-restart.ts";
 import {
+  DISK_LOW_NOTE_KEY,
+  DISK_LOW_NOTICE_PCT,
   FILE_SERVICE_CAPTURE_GAP_MS,
   FILE_SERVICE_CAPTURE_SETTING,
   FILE_SERVICE_RECURRING_RESTARTS,
@@ -1622,6 +1624,25 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             ? (r.sample.fileServiceBytes ?? null)
             : null,
         );
+        const diskPct =
+          r.sample.diskFreeBytes !== null &&
+          r.sample.diskTotalBytes !== null &&
+          r.sample.diskTotalBytes > 0
+            ? (r.sample.diskFreeBytes / r.sample.diskTotalBytes) * 100
+            : null;
+        if (diskPct !== null && diskPct < DISK_LOW_NOTICE_PCT) {
+          store.raiseNote({
+            key: DISK_LOW_NOTE_KEY,
+            kind: "flag",
+            runId: null,
+            seatId: null,
+            repoId: null,
+            text: `Disk free is ${diskPct.toFixed(1)}%, below ${DISK_LOW_NOTICE_PCT}%. The hourly crew cleanup removes expired transcripts and browser files; clear other disk users before starting more work.`,
+            at,
+          });
+        } else {
+          store.clearNote(DISK_LOW_NOTE_KEY, at);
+        }
         if (capacity.blocked) {
           const gb = (bytes: number | null | undefined): string =>
             bytes === null || bytes === undefined ? "—" : `${(bytes / 1024 ** 3).toFixed(1)} GB`;

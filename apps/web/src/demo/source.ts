@@ -39,6 +39,13 @@ const ALIASES: Record<string, string> = {
   "/api/metrics?session=demo": "/api/metrics",
 };
 
+const DEMO_CLEANUP_FOOTPRINT = {
+  claudeProjectsBytes: 1.2 * 2 ** 30,
+  codexSessionsBytes: 680 * 2 ** 20,
+  browserProfilesBytes: 24 * 2 ** 20,
+  chromeTempBytes: 1.5 * 2 ** 20,
+};
+
 function activitySince(path: string): unknown {
   const m = /^\/api\/activity\?since=(\d+)$/.exec(path);
   if (!m) return undefined;
@@ -378,6 +385,8 @@ function modelsView(): ModelsView {
 export function answer(path: string): Response {
   const api = getState().api;
   const key = path in ALIASES ? (ALIASES[path] as string) : path;
+  if (key === "/api/machine" && key in api)
+    return json({ ...(api[key] as object), leftovers: DEMO_CLEANUP_FOOTPRINT });
   if (key in api) return json(api[key]);
   const diff = fileDiff(path);
   if (diff !== undefined) return json(diff);
