@@ -1432,6 +1432,10 @@ describe("through /mcp", () => {
       const names = async (tok: string) =>
         (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
       expect(await names(writer)).toEqual([
+        "app_start",
+        "app_restart",
+        "app_status",
+        "terminal_run",
         "comms_read",
         "comms_inbox",
         "comms_send",
