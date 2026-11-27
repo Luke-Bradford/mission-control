@@ -18,10 +18,13 @@ import {
 } from "./demoNeeds.ts";
 import {
   boardItems,
+  DEMO_CONFIGURED_REPOS,
   DEMO_REPO,
   DEMO_TICKETS,
-  type DemoTicket,
   demoPageAnswers,
+  demoRepoForTicket,
+  demoTicketRef,
+  demoTicketsForRepo,
   openPrs,
   pipelineStages,
   prFlowView,
@@ -579,11 +582,7 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
 export function demoSeed(daySeed = 1) {
   const base = overviewDensityFixture("default");
   const random = seeded(daySeed);
-  const repos = ["mission-control", "eBull", "autonomy-engine"] as const;
-  // The empty autonomy-engine board is deliberate; tickets on the other boards stay paired with
-  // their seat rows.
-  const repoForTicket = (ticket: DemoTicket): (typeof repos)[number] =>
-    repos[DEMO_TICKETS.indexOf(ticket) % 2] ?? "mission-control";
+  const repos = DEMO_CONFIGURED_REPOS;
   const day = [
     {
       state: "waiting",
@@ -633,7 +632,9 @@ export function demoSeed(daySeed = 1) {
     const jitterMinutes = Math.floor(random() * 23);
     return {
       ...row,
-      repoId: ticket ? repoForTicket(ticket) : (repos[index % repos.length] ?? "mission-control"),
+      repoId: ticket
+        ? demoRepoForTicket(ticket)
+        : (repos[index % repos.length] ?? "mission-control"),
       hudState: shape.state,
       paused: false,
       stop: null,
@@ -641,7 +642,7 @@ export function demoSeed(daySeed = 1) {
       note: shape.note,
       role: SEAT_ROLES[row.id] ?? "GUIDO",
       mode: row.id === "dev-9" ? "read-only" : "writer",
-      ticket: ticket ? `${repoForTicket(ticket)}#${ticket.n}` : null,
+      ticket: ticket ? demoTicketRef(ticket) : null,
       ticketTitle: ticket?.title ?? null,
       stateSince: NOW - (shape.hours * 60 + jitterMinutes) * MIN,
       // Keep the loop record on an idle or stopped seat too: it lets the scene's later review
@@ -674,12 +675,12 @@ export function demoSeed(daySeed = 1) {
     const number = Number(item.ticket?.split("#")[1]);
     const ticket = DEMO_TICKETS.find((candidate) => candidate.n === number);
     if (!ticket) return item;
-    const repoId = repoForTicket(ticket);
+    const repoId = demoRepoForTicket(ticket);
     return { ...item, repoId, ticket: `${repoId}#${ticket.n}` };
   });
   const summary: OverviewSummary = {
     ...base.summary,
-    pipeline: pipelineStages(DEMO_TICKETS),
+    pipeline: pipelineStages(DEMO_TICKETS, demoRepoForTicket),
     kpis: {
       ...base.summary.kpis,
       inFlight: { ...base.summary.kpis.inFlight, count: 9 },
@@ -713,7 +714,7 @@ export function demoSeed(daySeed = 1) {
     "/api/repos": repoViews,
     "/api/overview": summary,
     "/api/overview?session=demo": summary,
-    "/api/prs/flow": prFlowView(),
+    "/api/prs/flow": prFlowView(DEMO_TICKETS, demoRepoForTicket, repos),
     "/api/flight": {
       seat: {
         id: "flight-1",
@@ -730,7 +731,7 @@ export function demoSeed(daySeed = 1) {
           kind: "answer",
           seatId: ticket.seat,
           targetRunId: null,
-          ref: `${DEMO_REPO}#${ticket.n}`,
+          ref: demoTicketRef(ticket),
           questionId: null,
           about: ticket.title,
           decision: "Keep the agreed scope and check the result against the ticket before merging.",
@@ -739,7 +740,6 @@ export function demoSeed(daySeed = 1) {
       ),
     },
     "/api/flight/summary": flightSummary(),
-    [`/api/repos/${DEMO_REPO}/rules`]: rulesFixture(DEMO_REPO),
     ...Object.fromEntries(
       repos.map((repoId) => [`/api/repos/${repoId}/rules`, rulesFixture(repoId)]),
     ),
@@ -757,14 +757,6 @@ export function demoSeed(daySeed = 1) {
     },
     warning: "Disk space is at the configured floor.",
   };
-  const flow = JSON.parse(
-    JSON.stringify(api["/api/prs/flow"]).replaceAll(DEMO_REPO, "mission-control"),
-  ) as { repos: { repoId: string; rows: unknown[] }[] };
-  flow.repos.push(
-    { ...flow.repos[0], repoId: "eBull", rows: flow.repos[0]?.rows.slice(0, 2) ?? [] },
-    { ...flow.repos[0], repoId: "autonomy-engine", rows: [] },
-  );
-  api["/api/prs/flow"] = flow;
   api["/api/activity"] = [
     2, 2, 2, 3, 3, 3, 3, 3, 3, 2, 2, 2, 1, 1, 0, 0, 0, 0, 1, 0, 0, 4, 6, 5,
   ].flatMap((count, hour) =>
@@ -785,9 +777,8 @@ export function demoSeed(daySeed = 1) {
     api[`/api/flight/memory?repo=${repoId}`] = JSON.parse(
       JSON.stringify(memory).replaceAll(DEMO_REPO, repoId),
     );
-  for (const [index, repoId] of repos.entries()) {
-    const own =
-      index === 2 ? [] : DEMO_TICKETS.filter((ticket) => repoForTicket(ticket) === repoId);
+  for (const repoId of repos) {
+    const own = demoTicketsForRepo(repoId);
     const replaceRepo = <T>(value: T): T =>
       JSON.parse(JSON.stringify(value).replaceAll(DEMO_REPO, repoId)) as T;
     api[`/api/boards/${repoId}`] = replaceRepo(boardItems(own));
@@ -795,10 +786,9 @@ export function demoSeed(daySeed = 1) {
     api[`/api/repos/${repoId}/prs`] = prs;
     api[`/api/repos/${repoId}/prs?shape=summary`] = prs;
     api[`/api/repos/${repoId}/prs?linked=1&shape=summary`] = prs;
-    for (const ticket of DEMO_TICKETS)
+    for (const ticket of own)
       api[`/api/tickets/${repoId}/${ticket.n}`] = replaceRepo(ticketHistory(ticket));
   }
-  for (const t of DEMO_TICKETS) api[`/api/tickets/${DEMO_REPO}/${t.n}`] = ticketHistory(t);
   return { ...base, rows, attention, config, summary, api };
 }
 

@@ -69,6 +69,25 @@ export const DEMO_TICKETS: readonly DemoTicket[] = [
   { n: 254, title: "Fix the broken wishlist link", stage: "merged", seat: null },
 ];
 
+/** The configured Demo day uses two working boards and one deliberately empty board. */
+export const DEMO_CONFIGURED_REPOS = ["mission-control", "eBull", "autonomy-engine"] as const;
+
+export type DemoRepoId = (typeof DEMO_CONFIGURED_REPOS)[number];
+
+/** Ticket ownership is shared by Overview, Board, FLIGHT and the scene. */
+export function demoRepoForTicket(ticket: DemoTicket): DemoRepoId {
+  const index = DEMO_TICKETS.findIndex((candidate) => candidate.n === ticket.n);
+  return DEMO_CONFIGURED_REPOS[index % 2] ?? "mission-control";
+}
+
+export const demoTicketRef = (ticket: DemoTicket): string =>
+  `${demoRepoForTicket(ticket)}#${ticket.n}`;
+
+export const demoTicketsForRepo = (repoId: DemoRepoId, tickets = DEMO_TICKETS): DemoTicket[] =>
+  repoId === "autonomy-engine"
+    ? []
+    : tickets.filter((ticket) => demoRepoForTicket(ticket) === repoId);
+
 const PIPELINE_ORDER: readonly PipelineStage["stage"][] = [
   "ready",
   "building",
@@ -79,7 +98,10 @@ const PIPELINE_ORDER: readonly PipelineStage["stage"][] = [
 ];
 
 /** The Overview's pipeline, counted from the ticket list. */
-export function pipelineStages(tickets: readonly DemoTicket[]): PipelineStage[] {
+export function pipelineStages(
+  tickets: readonly DemoTicket[],
+  repoForTicket: (ticket: DemoTicket) => string = () => DEMO_REPO,
+): PipelineStage[] {
   return PIPELINE_ORDER.map((name) => {
     const here = tickets.filter((t) => t.stage === name);
     return {
@@ -87,7 +109,7 @@ export function pipelineStages(tickets: readonly DemoTicket[]): PipelineStage[] 
       count: here.length,
       oldestAt: here.length ? NOW - 40 * MIN : null,
       cards: here.slice(0, 8).map((t, i) => ({
-        repoId: DEMO_REPO,
+        repoId: repoForTicket(t),
         ticket: t.n,
         title: t.title,
         pr: null,
@@ -942,7 +964,11 @@ function plansView() {
 }
 
 /** The PR flow table, from the same tickets and seats as the rest of the crew. */
-export function prFlowView(tickets: readonly DemoTicket[] = DEMO_TICKETS): FlightPrFlowView {
+export function prFlowView(
+  tickets: readonly DemoTicket[] = DEMO_TICKETS,
+  repoForTicket: (ticket: DemoTicket) => string = () => DEMO_REPO,
+  repoIds: readonly string[] = [...new Set(tickets.map(repoForTicket))],
+): FlightPrFlowView {
   const base = prFlowFixture(0);
   const stageOf: Record<DemoTicket["stage"], FlightPrFlowRow["stage"]> = {
     ready: "building",
@@ -951,12 +977,13 @@ export function prFlowView(tickets: readonly DemoTicket[] = DEMO_TICKETS): Fligh
     review: "review",
     merged: "merge",
   };
+  const blocked = tickets.find((ticket) => ticket.n === 104);
   const rows: FlightPrFlowRow[] = openPrs(tickets).map((pr, i) => {
     const t = tickets.find((x) => `${DEMO_REPO}#${x.n}` === pr.ticket) as DemoTicket;
     const seat = t.seat ?? "dev-1";
     return {
       pr: pr.number,
-      ticket: `${DEMO_REPO}#${t.n}`,
+      ticket: `${repoForTicket(t)}#${t.n}`,
       title: t.title,
       owner: seat,
       ownerKind: "seat",
@@ -967,7 +994,7 @@ export function prFlowView(tickets: readonly DemoTicket[] = DEMO_TICKETS): Fligh
       openSince: NOW - (i + 2) * 40 * MIN,
       waitsOn:
         t.stage === "checks" ? ["CI to finish"] : t.stage === "review" ? ["review by dev-9"] : [],
-      blocks: i === 0 ? [`${DEMO_REPO}#104`] : [],
+      blocks: i === 0 && blocked ? [`${repoForTicket(blocked)}#${blocked.n}`] : [],
       lastAction: "pushed",
       lastActor: seat,
       lastActionAt: NOW - 4 * MIN,
@@ -975,15 +1002,13 @@ export function prFlowView(tickets: readonly DemoTicket[] = DEMO_TICKETS): Fligh
   });
   return {
     generatedAt: NOW,
-    repos: [
-      {
-        ...(base.repos[0] as FlightPrFlowView["repos"][number]),
-        repoId: DEMO_REPO,
-        generatedAt: NOW,
-        unowned: 0,
-        rows,
-      },
-    ],
+    repos: repoIds.map((repoId) => ({
+      ...(base.repos[0] as FlightPrFlowView["repos"][number]),
+      repoId,
+      generatedAt: NOW,
+      unowned: 0,
+      rows: rows.filter((row) => row.ticket?.startsWith(`${repoId}#`)),
+    })),
   };
 }
 
