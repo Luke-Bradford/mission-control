@@ -2,6 +2,8 @@ import type { CrewRow, LimitRow } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { seedFromSearch } from "../src/demo/random.ts";
 import { getState, playNext, setSceneSeed } from "../src/demo/simulator.ts";
+import { NOW } from "./fixtures.ts";
+import { demoSeed } from "./overviewDensityFixtures.ts";
 
 const BEATS = 45;
 const rows = () => (getState().api["/api/crew?shape=summary"] as { rows: CrewRow[] }).rows;
@@ -33,6 +35,46 @@ it("the same seed plays the same scene, and another seed plays another", () => {
   expect(play(7, 30)).toBe(play(7, 30));
   expect(play(7, 30)).not.toBe(play(8, 30));
   expect(play(7)).toBe(play(7));
+});
+
+it("builds an uneven, repeatable day with the awkward cases in view", () => {
+  const first = demoSeed(17);
+  const again = demoSeed(17);
+  const other = demoSeed(18);
+  expect(JSON.stringify(first.rows)).toBe(JSON.stringify(again.rows));
+  expect(JSON.stringify(first.rows)).not.toBe(JSON.stringify(other.rows));
+
+  const rows = first.rows;
+  expect((first.api["/api/repos"] as { id: string }[]).map((repo) => repo.id)).toEqual([
+    "mission-control",
+    "eBull",
+    "autonomy-engine",
+  ]);
+  expect(first.api["/api/boards/autonomy-engine"]).toEqual([]);
+  const reworked = first.api["/api/tickets/shop-app/108"] as {
+    prs: { rounds: unknown[]; ci: { checks: { name: string }[] }[] }[];
+  };
+  expect(reworked.prs[0]?.rounds).toHaveLength(3);
+  expect(
+    reworked.prs[0]?.ci.flatMap((run) => run.checks).some((check) => check.name.includes("re-run")),
+  ).toBe(true);
+  expect(new Set(rows.map((row) => row.hudState)).size).toBeGreaterThanOrEqual(5);
+  expect(
+    rows.every((row, index) => {
+      const previous = rows[index - 1];
+      return (
+        !previous ||
+        `${row.hudState}:${row.run?.costUsd}` !== `${previous.hudState}:${previous.run?.costUsd}`
+      );
+    }),
+  ).toBe(true);
+  expect(rows.some((row) => row.run && NOW - row.run.startedAt >= 6 * 60 * 60 * 1000)).toBe(true);
+  expect(rows.some((row) => row.hudState === "parked")).toBe(true);
+  expect(rows.some((row) => row.note?.includes("FLIGHT"))).toBe(true);
+  expect(rows.some((row) => row.hudState === "error")).toBe(true);
+  expect(
+    (first.api["/api/machine"] as { latest: { diskFreeBytes: number } }).latest.diskFreeBytes,
+  ).toBeLessThanOrEqual(20 * 2 ** 30);
 });
 
 it("takes its seed from the address, and falls back to 1", () => {

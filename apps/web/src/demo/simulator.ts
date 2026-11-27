@@ -94,6 +94,9 @@ const wholeMinutes = (ms: number): number => Math.round(ms / 60_000) * 60_000;
 /** Harness only: play the scene a seed names. The next scene to start uses it. */
 export function setSceneSeed(value: number | undefined): void {
   sceneSeed = value;
+  // The opening scene and its initial day share one seed. Reset both for browser tests that
+  // compare seeds and for switching a seeded Demo link without reloading the app bundle.
+  seed = undefined;
   state = undefined;
 }
 
@@ -102,8 +105,8 @@ const startingSeed = (): number =>
   sceneSeed ?? seedFromSearch((globalThis as SearchHolder).location?.search ?? "");
 
 function fresh(loops = 0): DemoState {
-  seed ??= demoSeed();
   const base = startingSeed();
+  seed ??= demoSeed(base);
   const rng = seeded(base + loops);
   // A whole number of minutes, so the per-minute token buckets still start on minute marks.
   const api = shiftTimes(seed.api, NOW, wholeMinutes(Date.now() - NOW));

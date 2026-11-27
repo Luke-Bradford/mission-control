@@ -996,6 +996,7 @@ export function ticketHistory(t: DemoTicket, at = NOW) {
   const merged = t.stage === "merged";
   const sha = "a".repeat(40);
   const runId = `demo-run-${t.seat ?? t.n}`;
+  const reworked = t.n === 108;
   return {
     repoId: DEMO_REPO,
     number: t.n,
@@ -1040,8 +1041,69 @@ export function ticketHistory(t: DemoTicket, at = NOW) {
               headSha: sha,
               createdAt: at - 2 * HOUR,
               mergedAt: merged ? at - 20 * MIN : null,
-              rounds: [],
+              rounds: reworked
+                ? [
+                    {
+                      reviewId: 1081,
+                      round: 1,
+                      sha: "b".repeat(40),
+                      state: "complete",
+                      verdict: "rework",
+                      summary: "The first pass found a missing narrow-screen state.",
+                      blocking: 1,
+                      minor: 0,
+                      at: at - 80 * MIN,
+                      findings: [],
+                    },
+                    {
+                      reviewId: 1082,
+                      round: 2,
+                      sha: "c".repeat(40),
+                      state: "complete",
+                      verdict: "rework",
+                      summary: "The fix needs one more focused browser check.",
+                      blocking: 1,
+                      minor: 1,
+                      at: at - 50 * MIN,
+                      findings: [],
+                    },
+                    {
+                      reviewId: 1083,
+                      round: 3,
+                      sha,
+                      state: "complete",
+                      verdict: "pass",
+                      summary: "Third review round passed.",
+                      blocking: 0,
+                      minor: 0,
+                      at: at - 20 * MIN,
+                      findings: [],
+                    },
+                  ]
+                : [],
               ci: [
+                ...(reworked
+                  ? [
+                      {
+                        sha: "c".repeat(40),
+                        at: at - 45 * MIN,
+                        checks: [
+                          {
+                            name: "test (attempt 1)",
+                            conclusion: "failure",
+                            state: "failing" as const,
+                            url: null,
+                          },
+                          {
+                            name: "test (attempt 2, re-run)",
+                            conclusion: "success",
+                            state: "passing" as const,
+                            url: null,
+                          },
+                        ],
+                      },
+                    ]
+                  : []),
                 {
                   sha,
                   at: at - 30 * MIN,
