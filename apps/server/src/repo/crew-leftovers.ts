@@ -5,16 +5,21 @@
 import { execFileSync } from "node:child_process";
 import {
   type Dirent,
+  closeSync,
+  createWriteStream,
   lstatSync,
+  openSync,
   readdirSync,
-  readFileSync,
+  readSync,
+  renameSync,
   rmSync,
   statSync,
   utimesSync,
-  writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { gunzipSync, gzipSync } from "node:zlib";
+import { createReadStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { createGzip, createGunzip } from "node:zlib";
 
 export const CREW_TRANSCRIPT_GZIP_AFTER_MS = 24 * 60 * 60_000;
 export const CREW_TRANSCRIPT_DELETE_AFTER_MS = 14 * 24 * 60 * 60_000;
@@ -22,6 +27,7 @@ export const BROWSER_LEFTOVER_AFTER_MS = 6 * 60 * 60_000;
 
 const TRANSCRIPT = /\.jsonl(?:\.gz)?$/;
 const BROWSER_LEFTOVER = /^(?:playwright_chromiumdev_profile-|com\.google\.Chrome\.)/;
+const TRANSCRIPT_PREFIX_BYTES = 64 * 1024;
 
 export interface CrewLeftoverInput {
   now: number;
@@ -29,6 +35,7 @@ export interface CrewLeftoverInput {
   claudeProjects: string;
   codexSessions?: string;
   tmp: string;
+  previews?: string;
   /** Worktrees held by a seat or currently being started. Their project folders are left whole. */
   liveWorktrees: ReadonlySet<string>;
   /** Supplying process lines avoids a process-table read in tests. Null means process safety is unknown. */
@@ -47,6 +54,8 @@ export interface CrewLeftoverFootprint {
   codexSessionsBytes: number;
   browserProfilesBytes: number;
   chromeTempBytes: number;
+  worktreesBytes: number;
+  previewsBytes: number;
 }
 
 /** Claude maps an absolute project path to this folder name. */
@@ -98,16 +107,45 @@ const walkFiles = (root: string, visit: (path: string) => void): void => {
 };
 
 /** The session metadata carries the worktree cwd. A malformed or unknown session is never ours. */
-const transcriptWorktree = (path: string, worktrees: string | undefined): string | null => {
-  if (worktrees === undefined) return null;
-  let text: Buffer;
+const plainPrefix = (path: string): Buffer | null => {
+  let fd: number | undefined;
   try {
-    const input = readFileSync(path);
-    text = path.endsWith(".gz") ? gunzipSync(input) : input;
+    fd = openSync(path, "r");
+    const text = Buffer.alloc(TRANSCRIPT_PREFIX_BYTES);
+    return text.subarray(0, readSync(fd, text));
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+};
+
+/** Stops inflating once ownership metadata is found; old multi-gigabyte sessions stay bounded. */
+const gzipPrefix = async (path: string): Promise<Buffer | null> => {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  try {
+    for await (const chunk of createReadStream(path).pipe(createGunzip())) {
+      const next = Buffer.from(chunk);
+      const take = Math.min(next.length, TRANSCRIPT_PREFIX_BYTES - size);
+      chunks.push(next.subarray(0, take));
+      size += take;
+      if (size === TRANSCRIPT_PREFIX_BYTES) break;
+    }
+    return Buffer.concat(chunks, size);
   } catch {
     return null;
   }
-  const start = text.toString("utf8", 0, 65_536);
+};
+
+const transcriptWorktree = async (
+  path: string,
+  worktrees: string | undefined,
+): Promise<string | null> => {
+  if (worktrees === undefined) return null;
+  const text = path.endsWith(".gz") ? await gzipPrefix(path) : plainPrefix(path);
+  if (text === null) return null;
+  const start = text.toString("utf8");
   const root = `${resolve(worktrees)}/`;
   for (const match of start.matchAll(/"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
     try {
@@ -120,7 +158,7 @@ const transcriptWorktree = (path: string, worktrees: string | undefined): string
   return null;
 };
 
-const cleanTranscript = (path: string, now: number, out: CrewLeftoverResult): void => {
+const cleanTranscript = async (path: string, now: number, out: CrewLeftoverResult): Promise<void> => {
   if (!TRANSCRIPT.test(path)) return;
   let st: ReturnType<typeof statSync>;
   try {
@@ -135,7 +173,9 @@ const cleanTranscript = (path: string, now: number, out: CrewLeftoverResult): vo
       out.deleted++;
     } else if (!path.endsWith(".gz") && age >= CREW_TRANSCRIPT_GZIP_AFTER_MS) {
       const compressed = `${path}.gz`;
-      writeFileSync(compressed, gzipSync(readFileSync(path)), { flag: "wx", mode: 0o600 });
+      const tmp = `${compressed}.tmp`;
+      await pipeline(createReadStream(path), createGzip(), createWriteStream(tmp, { flags: "wx" }));
+      renameSync(tmp, compressed);
       utimesSync(compressed, st.atime, st.mtime);
       rmSync(path, { force: true });
       out.gzipped++;
@@ -146,7 +186,7 @@ const cleanTranscript = (path: string, now: number, out: CrewLeftoverResult): vo
 };
 
 /** Cleans only crew Claude projects and abandoned Chromium temporary entries. */
-export function cleanupCrewLeftovers(input: CrewLeftoverInput): CrewLeftoverResult {
+export async function cleanupCrewLeftovers(input: CrewLeftoverInput): Promise<CrewLeftoverResult> {
   const out: CrewLeftoverResult = { gzipped: 0, deleted: 0, browserRemoved: 0, skippedLive: 0 };
   const liveProjects = new Set([...input.liveWorktrees].map(crewProjectName));
   for (const project of crewProjects(input.claudeProjects, input.worktrees)) {
@@ -154,21 +194,26 @@ export function cleanupCrewLeftovers(input: CrewLeftoverInput): CrewLeftoverResu
       out.skippedLive++;
       continue;
     }
-    walkFiles(project, (path) => {
-      if (transcriptWorktree(path, input.worktrees) === null) return;
-      cleanTranscript(path, input.now, out);
-    });
+    const paths: string[] = [];
+    walkFiles(project, (path) => paths.push(path));
+    for (const path of paths) {
+      if ((await transcriptWorktree(path, input.worktrees)) === null) continue;
+      await cleanTranscript(path, input.now, out);
+    }
   }
-  if (input.codexSessions !== undefined)
-    walkFiles(input.codexSessions, (path) => {
-      const worktree = transcriptWorktree(path, input.worktrees);
-      if (worktree === null) return;
+  if (input.codexSessions !== undefined) {
+    const paths: string[] = [];
+    walkFiles(input.codexSessions, (path) => paths.push(path));
+    for (const path of paths) {
+      const worktree = await transcriptWorktree(path, input.worktrees);
+      if (worktree === null) continue;
       if (input.liveWorktrees.has(worktree)) {
         out.skippedLive++;
-        return;
+        continue;
       }
-      cleanTranscript(path, input.now, out);
-    });
+      await cleanTranscript(path, input.now, out);
+    }
+  }
   const processes = input.processLines === undefined ? processTable() : input.processLines;
   if (processes === null) return out;
   for (const entry of list(input.tmp)) {
@@ -196,19 +241,23 @@ export function cleanupCrewLeftovers(input: CrewLeftoverInput): CrewLeftoverResu
 }
 
 /** Byte counts for the Machine panel. Operator projects and unrelated temp files are excluded. */
-export function crewLeftoverFootprint(
+export async function crewLeftoverFootprint(
   input: Omit<CrewLeftoverInput, "now" | "liveWorktrees">,
-): CrewLeftoverFootprint {
+): Promise<CrewLeftoverFootprint> {
   let claudeProjectsBytes = 0;
-  for (const project of crewProjects(input.claudeProjects, input.worktrees))
-    walkFiles(project, (path) => {
-      if (transcriptWorktree(path, input.worktrees) !== null) claudeProjectsBytes += bytes(path);
-    });
+  for (const project of crewProjects(input.claudeProjects, input.worktrees)) {
+    const paths: string[] = [];
+    walkFiles(project, (path) => paths.push(path));
+    for (const path of paths)
+      if ((await transcriptWorktree(path, input.worktrees)) !== null) claudeProjectsBytes += bytes(path);
+  }
   let codexSessionsBytes = 0;
-  if (input.codexSessions !== undefined)
-    walkFiles(input.codexSessions, (path) => {
-      if (transcriptWorktree(path, input.worktrees) !== null) codexSessionsBytes += bytes(path);
-    });
+  if (input.codexSessions !== undefined) {
+    const paths: string[] = [];
+    walkFiles(input.codexSessions, (path) => paths.push(path));
+    for (const path of paths)
+      if ((await transcriptWorktree(path, input.worktrees)) !== null) codexSessionsBytes += bytes(path);
+  }
   let browserProfilesBytes = 0;
   let chromeTempBytes = 0;
   for (const entry of list(input.tmp)) {
@@ -217,5 +266,12 @@ export function crewLeftoverFootprint(
       browserProfilesBytes += bytes(path);
     else if (entry.name.startsWith("com.google.Chrome.")) chromeTempBytes += bytes(path);
   }
-  return { claudeProjectsBytes, codexSessionsBytes, browserProfilesBytes, chromeTempBytes };
+  return {
+    claudeProjectsBytes,
+    codexSessionsBytes,
+    browserProfilesBytes,
+    chromeTempBytes,
+    worktreesBytes: input.worktrees === undefined ? 0 : bytes(input.worktrees),
+    previewsBytes: input.previews === undefined ? 0 : bytes(input.previews),
+  };
 }

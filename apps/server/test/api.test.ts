@@ -3327,6 +3327,8 @@ describe("GET /api/machine", () => {
       codexSessionsBytes: 202,
       browserProfilesBytes: 303,
       chromeTempBytes: 404,
+      worktreesBytes: 505,
+      previewsBytes: 606,
     };
     let reads = 0;
     const a = buildApp({

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   cleanupCrewLeftovers,
@@ -23,7 +24,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-it("retains live crew transcripts but compresses and deletes ended crew and browser leftovers", () => {
+it("retains live crew transcripts but compresses and deletes ended crew and browser leftovers", async () => {
   const worktrees = join(root, "worktrees");
   const projects = join(root, "claude", "projects");
   const codex = join(root, "codex", "sessions");
@@ -62,7 +63,7 @@ it("retains live crew transcripts but compresses and deletes ended crew and brow
   old(chrome, 7);
   old(busy, 7);
 
-  const result = cleanupCrewLeftovers({
+  const result = await cleanupCrewLeftovers({
     now: NOW,
     worktrees,
     claudeProjects: projects,
@@ -85,7 +86,7 @@ it("retains live crew transcripts but compresses and deletes ended crew and brow
   expect(existsSync(busy)).toBe(true);
 });
 
-it("leaves Claude folders whose hyphenated name collides with the crew root", () => {
+it("leaves Claude folders whose hyphenated name collides with the crew root", async () => {
   const worktrees = join(root, "worktrees");
   const projects = join(root, "claude", "projects");
   const operatorWorktree = join(root, "worktrees-operator", "notes");
@@ -95,12 +96,35 @@ it("leaves Claude folders whose hyphenated name collides with the crew root", ()
   writeFileSync(transcript, JSON.stringify({ cwd: operatorWorktree }));
   old(transcript, 15 * 24);
 
-  cleanupCrewLeftovers({
+  await cleanupCrewLeftovers({
     now: NOW,
     worktrees,
     claudeProjects: projects,
     tmp: join(root, "tmp"),
     liveWorktrees: new Set(),
+    processLines: [],
+  });
+
+  expect(existsSync(transcript)).toBe(true);
+});
+
+it("finds a crew gzip transcript from its bounded prefix", async () => {
+  const worktrees = join(root, "worktrees");
+  const projects = join(root, "claude", "projects");
+  const crew = join(projects, crewProjectName(join(worktrees, "mc", "seat")));
+  mkdirSync(crew, { recursive: true });
+  const transcript = join(crew, "large.jsonl.gz");
+  writeFileSync(
+    transcript,
+    gzipSync(Buffer.concat([Buffer.from(JSON.stringify({ cwd: join(worktrees, "mc", "seat") })), Buffer.alloc(2 ** 20)])),
+  );
+
+  await cleanupCrewLeftovers({
+    now: NOW,
+    worktrees,
+    claudeProjects: projects,
+    tmp: join(root, "tmp"),
+    liveWorktrees: new Set([join(worktrees, "mc", "seat")]),
     processLines: [],
   });
 
@@ -140,17 +164,20 @@ it("closes finished previews but leaves an open preview running", async () => {
   expect(closed).toEqual([1, 2, 4]);
 });
 
-it("reports only the configured crew stores", () => {
+it("reports only the configured crew stores", async () => {
   const worktrees = join(root, "worktrees");
   const projects = join(root, "claude", "projects");
   const codex = join(root, "codex", "sessions");
   const tmp = join(root, "tmp");
+  const previews = join(root, "previews");
   const crew = join(projects, crewProjectName(join(worktrees, "mc", "seat")));
   const operator = join(projects, crewProjectName(join(root, "operator")));
   mkdirSync(crew, { recursive: true });
   mkdirSync(operator, { recursive: true });
   mkdirSync(join(tmp, "playwright_chromiumdev_profile-seat"), { recursive: true });
   mkdirSync(join(tmp, "com.google.Chrome.seat"), { recursive: true });
+  mkdirSync(join(worktrees, "mc", "seat"), { recursive: true });
+  mkdirSync(join(previews, "42"), { recursive: true });
   writeFileSync(
     join(crew, "transcript.jsonl"),
     JSON.stringify({ cwd: join(worktrees, "mc", "seat") }),
@@ -161,6 +188,8 @@ it("reports only the configured crew stores", () => {
   );
   writeFileSync(join(tmp, "playwright_chromiumdev_profile-seat", "cache"), Buffer.alloc(17));
   writeFileSync(join(tmp, "com.google.Chrome.seat", "cache"), Buffer.alloc(19));
+  writeFileSync(join(worktrees, "mc", "seat", "work"), Buffer.alloc(29));
+  writeFileSync(join(previews, "42", "preview"), Buffer.alloc(31));
   mkdirSync(codex, { recursive: true });
   writeFileSync(
     join(codex, "crew.jsonl"),
@@ -168,11 +197,19 @@ it("reports only the configured crew stores", () => {
   );
 
   expect(
-    crewLeftoverFootprint({ worktrees, claudeProjects: projects, codexSessions: codex, tmp }),
+    await crewLeftoverFootprint({
+      worktrees,
+      claudeProjects: projects,
+      codexSessions: codex,
+      tmp,
+      previews,
+    }),
   ).toEqual({
     claudeProjectsBytes: JSON.stringify({ cwd: join(worktrees, "mc", "seat") }).length,
     codexSessionsBytes: 23 + JSON.stringify({ cwd: join(worktrees, "mc", "seat") }).length + 1,
     browserProfilesBytes: 17,
     chromeTempBytes: 19,
+    worktreesBytes: 29,
+    previewsBytes: 31,
   });
 });

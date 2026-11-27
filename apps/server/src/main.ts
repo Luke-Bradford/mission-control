@@ -1234,8 +1234,9 @@ export async function main(): Promise<void> {
     claudeProjects: join(homedir(), ".claude", "projects"),
     codexSessions: join(homedir(), ".codex", "sessions"),
     tmp: tmpdir(),
+    previews: previewRoot,
   };
-  let leftoverFootprint: ReturnType<typeof crewLeftoverFootprint> | null = null;
+  let leftoverFootprint: Awaited<ReturnType<typeof crewLeftoverFootprint>> | null = null;
   let crewTranscriptFootprint: ReturnType<typeof transcriptFootprint> = null;
   const app = buildApp({
     sessions,
@@ -1537,7 +1538,7 @@ export async function main(): Promise<void> {
   // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
   const leftovers = async () => {
     try {
-      for (const text of clearLeftovers({
+      for (const text of await clearLeftovers({
         store,
         config,
         now: Date.now(),
@@ -1545,7 +1546,7 @@ export async function main(): Promise<void> {
       }))
         log(`leftovers: ${text}`);
       crewTranscriptFootprint = transcriptFootprint(store);
-      leftoverFootprint = crewLeftoverFootprint(crewLeftoverPaths);
+      leftoverFootprint = await crewLeftoverFootprint(crewLeftoverPaths);
       const previewsClosed = await closeFinishedPreviews({ previews, store, config });
       if (previewsClosed > 0) log(`leftovers: removed ${previewsClosed} finished preview(s)`);
     } catch (e) {

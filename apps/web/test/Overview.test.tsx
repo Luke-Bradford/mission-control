@@ -93,12 +93,6 @@ interface Data {
   warning?: string | null;
   seats?: { maxSeats: number; seats: number; perSessionMax: number };
   transcripts?: TranscriptFootprint | null;
-  leftovers?: {
-    claudeProjectsBytes: number;
-    codexSessionsBytes: number;
-    browserProfilesBytes: number;
-    chromeTempBytes: number;
-  } | null;
   /** The activity feed, read at each fetch. */
   activityNow?: () => ActivityRow[];
   /** More routes, by "METHOD path". */
@@ -117,7 +111,6 @@ function stub(d: Data = {}) {
       latest: d.machine === undefined ? sample() : d.machine,
       warning: d.warning ?? null,
       transcripts: d.transcripts,
-      leftovers: d.leftovers,
       ...d.seats,
     },
     "/api/limits": d.limits ?? [],
@@ -1578,27 +1571,6 @@ describe("Machine panel", () => {
     const mach = container.querySelector("#machP") as HTMLElement;
     await within(mach).findByText("37%");
     expect(within(mach).queryByText("Transcripts")).toBeNull();
-  });
-
-  it("shows every crew cleanup store's footprint", async () => {
-    stub({
-      leftovers: {
-        claudeProjectsBytes: 12.3 * 2 ** 20,
-        codexSessionsBytes: 4.5 * 2 ** 20,
-        browserProfilesBytes: 1.2 * 2 ** 30,
-        chromeTempBytes: 678 * 2 ** 10,
-      },
-    });
-    const { container } = render(<MachinePanel />);
-    const mach = container.querySelector("#machP") as HTMLElement;
-    await within(mach).findByText("Claude projects");
-    expect(mach.textContent).toContain("12.3 MiB");
-    expect(mach.textContent).toContain("Codex sessions");
-    expect(mach.textContent).toContain("4.5 MiB");
-    expect(mach.textContent).toContain("Browser profiles");
-    expect(mach.textContent).toContain("1.20 GiB");
-    expect(mach.textContent).toContain("Chrome temp");
-    expect(mach.textContent).toContain("678.0 KiB");
   });
 
   it("labels CPU, memory and disk, keeping the legend on hover", async () => {

@@ -2643,7 +2643,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
       expect(keys(withCrew())).toContain("note:c1:file-minor");
     });
 
-    it("the cleanup pass sets the question aside, and releases a hold and a park, each with a hub event", () => {
+    it("the cleanup pass sets the question aside, and releases a hold and a park, each with a hub event", async () => {
       const id = setup({
         endedAt: NOW - 20 * DAY,
         status: "ok",
@@ -2694,7 +2694,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
           },
         }),
       );
-      const cleared = clearLeftovers({ store, config: withCrew(), now: NOW });
+      const cleared = await clearLeftovers({ store, config: withCrew(), now: NOW });
       expect(cleared).toHaveLength(3);
       expect(store.run("held")?.loop?.mergeHold).not.toBeNull();
       expect(store.run("held")?.loop?.hold?.kind).toBeTruthy();
@@ -2712,7 +2712,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
           expect.stringContaining("parked"),
         ]),
       );
-      expect(clearLeftovers({ store, config: withCrew(), now: NOW })).toEqual([]);
+      expect(await clearLeftovers({ store, config: withCrew(), now: NOW })).toEqual([]);
     });
   });
 });

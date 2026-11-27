@@ -1017,6 +1017,8 @@ export interface CrewLeftoverFootprint {
   codexSessionsBytes: number;
   browserProfilesBytes: number;
   chromeTempBytes: number;
+  worktreesBytes: number;
+  previewsBytes: number;
 }
 
 /** One `/api/repos` row: a configured repo, without its status map. */

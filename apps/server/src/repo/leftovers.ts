@@ -43,13 +43,13 @@ export async function closeFinishedPreviews(deps: {
  * parked state closed, each on an ended run whose work is over. Each gets a hub event. Local only:
  * no model run and no GitHub write. Returns the hub event texts, for the log.
  */
-export function clearLeftovers(deps: {
+export async function clearLeftovers(deps: {
   store: Store;
   config: CcConfig;
   now: number;
   /** External paths are supplied by the hub entrypoint, never inferred by unit callers. */
   crewLeftovers?: Omit<CrewLeftoverInput, "now" | "liveWorktrees">;
-}): string[] {
+}): Promise<string[]> {
   const { store, config, now } = deps;
   const boards = new Map<string, BoardItem[]>();
   const boardOf = (repoId: string): BoardItem[] => {
@@ -84,7 +84,7 @@ export function clearLeftovers(deps: {
       record(`cleared the parked state on ended run ${run.id}: its work is over`);
   }
   if (deps.crewLeftovers) {
-    const browser = cleanupCrewLeftovers({
+    const browser = await cleanupCrewLeftovers({
       ...deps.crewLeftovers,
       now,
       worktrees: config.crew?.worktrees,
