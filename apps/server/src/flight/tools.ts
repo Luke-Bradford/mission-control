@@ -2081,13 +2081,16 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const why = allowanceFileProblem(f);
       if (why !== null) return fail(dependencyFileRefusedText(f, why));
     }
+    const decision = dependencyDecisionText(call, packages, files);
+    if (cut(decision, FLIGHT_DECISION_MAX) !== decision)
+      return fail("Not allowed: the complete dependency decision is too long to record.");
     allowRunDependencies(store, run.id, files, packages);
     record(now(), {
       kind: "dependency",
       seatId: seat,
       targetRunId: run.id,
       about: aboutRun(call, run),
-      decision: dependencyDecisionText(call, packages, files),
+      decision,
       basis,
     });
     bus.emit("flight");

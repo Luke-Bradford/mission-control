@@ -3749,6 +3749,24 @@ describe("allow_dependency", () => {
       expect((await call("allow_dependency", A({ packages: [p] }))).isError).toBe(true);
     }
     expect((await call("allow_dependency", A({ runId: "nope" }))).text).toBe(notDevRunText("nope"));
+    store.upsertRun(run("r-g", "guido-1", { endedAt: NOW, status: "ok" }));
+    expect((await call("allow_dependency", A())).text).toBe(notDevRunText("r-g"));
+    expect(runDependencyAllowance(store, "r-g")).toEqual({ files: [], packages: [], added: [] });
+    expect(store.flightDecisions(0, 10)).toEqual([]);
+  });
+
+  it("refuses an allowance whose complete decision would not fit, without storing either record", async () => {
+    const packages = Array.from({ length: 20 }, (_, i) => ({
+      name: `${"a".repeat(212)}${String(i).padStart(2, "0")}`,
+      version: "1.0.0",
+      licence: "x".repeat(100),
+    }));
+    const r = await call("allow_dependency", A({ packages }));
+    expect(r).toEqual({
+      text: "Not allowed: the complete dependency decision is too long to record.",
+      isError: true,
+    });
+    expect(runDependencyAllowance(store, "r-g")).toEqual({ files: [], packages: [], added: [] });
     expect(store.flightDecisions(0, 10)).toEqual([]);
   });
 });
