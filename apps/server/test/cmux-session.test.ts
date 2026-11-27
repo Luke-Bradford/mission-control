@@ -35,7 +35,9 @@ import {
   CMUX_TOOL_REFUSED_TEXT,
   CMUX_TRUST_QUIT,
   claudeTranscript,
+  cmuxDialogReason,
   cmuxMessageText,
+  dialogOf,
   dialogOpen,
   envFileText,
   isPermissionPrompt,
@@ -818,6 +820,37 @@ describe("startCmuxSession", () => {
     await wait(() => h.events.some((e) => e.kind === "needs-input"));
     expect((state().keys ?? []).some((k) => k.key === "escape")).toBe(false);
     await h.session.close();
+  });
+
+  it("reads an open dialog's question and options, a wrapped option joined, for FLIGHT's call", () => {
+    const screen = [
+      " earlier conversation",
+      "────────────────────────────────────────────────────────────",
+      " Which migration should run first?",
+      " ❯ 1. 518_filing_processing_receipts",
+      "   2. 519_backfill, which is long and",
+      "      wraps",
+      "",
+      " Enter to select · Esc to cancel",
+    ].join("\n");
+    const d = dialogOf(screen);
+    expect(d).toEqual({
+      question: "Which migration should run first?",
+      options: ["1. 518_filing_processing_receipts", "2. 519_backfill, which is long and wraps"],
+    });
+    expect(dialogOf(" Thinking…")).toBeNull();
+    const reason = cmuxDialogReason(d as NonNullable<typeof d>);
+    expect(reason).toContain('"Which migration should run first?"');
+    expect(reason).toContain("1. 518_filing_processing_receipts / 2. 519_backfill");
+    expect(cmuxDialogReason({ question: "x".repeat(5000), options: [] }).length).toBeLessThanOrEqual(1500);
+  });
+
+  it("knows Claude 2.1.332's create-file dialog, which has no title, as a tool prompt", () => {
+    expect(
+      isPermissionPrompt(
+        " Do you want to create 518_filing_processing_receipts.sql?\n ❯ 1. Yes\n   2. Yes, and switch to accept edits\n   3. No\n\n Esc to cancel",
+      ),
+    ).toBe(true);
   });
 
   it("knows Claude's permission dialog by its fixed options, not by its question alone", () => {

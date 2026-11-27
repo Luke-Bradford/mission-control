@@ -136,6 +136,17 @@ export interface CmuxDialog {
   options: string[];
 }
 
+/** How long a dialog stays open before FLIGHT is called about it: with the watch's debounce, inside a minute. */
+export const CMUX_DIALOG_REPORT_MS = 20_000;
+/** The most of a dialog's text a call to FLIGHT carries. */
+const DIALOG_REASON_MAX = 1500;
+
+/** The call to FLIGHT about a dialog nobody has answered: what it asks and every option, numbered. */
+export function cmuxDialogReason(d: CmuxDialog): string {
+  const text = `A Claude dialog is open in this seat's cmux workspace and nobody has answered it. It asks: "${d.question}" Options: ${d.options.join(" / ")}.`;
+  return text.length > DIALOG_REASON_MAX ? `${text.slice(0, DIALOG_REASON_MAX - 1)}…` : text;
+}
+
 /** The open dialog's question and options, read from the block under the last rule; null when none is open. */
 export function dialogOf(screen: string): CmuxDialog | null {
   if (!dialogOpen(screen)) return null;

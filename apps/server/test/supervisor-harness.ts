@@ -430,6 +430,7 @@ function make(
       : {
           cmuxCommand: [process.execPath, FAKE_CMUX, "--state", over.cmuxState],
           cmuxPollMs: 20,
+          cmuxDialogReportMs: 50,
           cmuxStartWaitMs: over.cmuxStartWaitMs ?? 5000,
           // never the real cmux app: a stand-in that starts nothing, and a short wait for it
           cmuxOptions: { open: ["/usr/bin/true"], startWaitMs: 300 },

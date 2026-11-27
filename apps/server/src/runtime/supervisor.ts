@@ -175,6 +175,7 @@ import { RepoRulesError } from "../engine/rules.ts";
 import { flightFloor, flightShellContext } from "../flight/floor.ts";
 import { noteFlightWrite } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
+import { recordSeatCall } from "../flight/signals.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
@@ -264,10 +265,13 @@ import {
 import { type Cmux, CmuxError, type CmuxOptions, createCmux } from "./cmux.ts";
 import {
   attachCmuxSession,
+  CMUX_DIALOG_REPORT_MS,
   CMUX_WORKSPACE_PREFIX,
+  type CmuxDialog,
   type CmuxSaved,
   claudeConfigDir,
   claudeTranscript,
+  cmuxDialogReason,
   cmuxKeeperKey,
   cmuxSourceKey,
   cmuxWorkspaceKey,
@@ -515,6 +519,8 @@ export interface SupervisorDeps {
   /** How often a cmux run is polled, and how long it may take to show Claude (default 1 s, 60 s). */
   cmuxPollMs?: number;
   cmuxStartWaitMs?: number;
+  /** How long a cmux dialog stays open before FLIGHT is called about it (default 20 s). */
+  cmuxDialogReportMs?: number;
   /** How cmux is started when it is not running (tests give a stand-in and a short wait). */
   cmuxOptions?: CmuxOptions;
   /** Default "codex"; its version and app-server are run through the same binary. */
@@ -1137,6 +1143,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     });
 
   const live = new Map<string, Live>();
+  /** Per run: the call to FLIGHT about its open dialog, made if the dialog is still open when it fires. */
+  const dialogTimers = new Map<string, NodeJS.Timeout>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
   /** Runs already taken back once: a second such exit ends them as a crash. In memory only, so a hub restart allows one more. */
@@ -1489,6 +1497,36 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     emit({ kind: "run-ended", seatId, runId: l.run.id, endedBy: l.endedBy ?? "exit" });
   }
 
+  /**
+   * A dialog still open in a seat's cmux workspace after `cmuxDialogReportMs` is FLIGHT's to see:
+   * a call with its question and options, which the watch delivers after its debounce. FLIGHT's own
+   * dialog waits on the operator, whose HUD shows the seat waiting.
+   */
+  function reportDialogLater(l: Live, dialog: CmuxDialog): void {
+    const runId = l.run.id;
+    const seatId = l.info.seat.id;
+    if (seatDef(l.info.seat).loop === "watch") return;
+    clearTimeout(dialogTimers.get(runId));
+    const timer = setTimeout(() => {
+      dialogTimers.delete(runId);
+      if (live.get(seatId)?.run.id !== runId) return;
+      if (store.seatSession(seatId)?.state !== "needs-input") return;
+      try {
+        recordSeatCall(store, l.info.repo.id, {
+          seat: seatId,
+          reason: cmuxDialogReason(dialog),
+          ref: l.run.ticket ?? null,
+          at: now(),
+        });
+        bus.emit("attention");
+      } catch (err) {
+        log(`${seatId}: could not tell FLIGHT about an open dialog: ${err}`);
+      }
+    }, deps.cmuxDialogReportMs ?? CMUX_DIALOG_REPORT_MS);
+    timer.unref?.();
+    dialogTimers.set(runId, timer);
+  }
+
   function onEvent(l: Live, e: SessionEvent): void {
     switch (e.kind) {
       case "init":
@@ -1502,6 +1540,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       case "needs-input":
         l.inTurn = true;
         setState(l, "needs-input", CMUX_NEEDS_INPUT_TEXT);
+        if (e.dialog !== undefined) reportDialogLater(l, e.dialog);
         break;
       case "turn-refused":
         if (!e.active) {

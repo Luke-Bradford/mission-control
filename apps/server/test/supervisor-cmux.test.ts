@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { CMUX_NEEDS_INPUT_TEXT, type Run } from "@mc/core";
+import { CMUX_NEEDS_INPUT_TEXT, FLIGHT_SIGNALS_SETTING, type Run } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { agentViews } from "../src/hud/hud.ts";
 import {
@@ -152,6 +152,35 @@ describe("a Claude run in cmux", () => {
     lifecycle("idle");
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     expect(store.seatSession("guido-1")?.reason).toBeNull();
+  });
+
+  // #2304: a dialog nobody answered left the run "working" and FLIGHT idle
+  it("a dialog left open is waiting, and FLIGHT is called with its question and options, once", async () => {
+    await started();
+    lifecycle("running");
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    // cmux's record still says running: the screen decides
+    await until(() => expect(seatState("guido-1")).toBe("needs-input"));
+    const calls = () =>
+      Object.values(
+        JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals ?? {},
+      ) as { kind: string; evidence: string }[];
+    await until(() => expect(calls()).toHaveLength(1));
+    expect(calls()[0]).toMatchObject({ kind: "seat_call" });
+    expect(calls()[0]?.evidence).toContain("Which database should I use?");
+    expect(calls()[0]?.evidence).toContain("1. Postgres");
+    expect(calls()[0]?.evidence).toContain("2. SQLite");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(calls()).toHaveLength(1);
   });
 
   it("an operator's /clear keeps the run", async () => {
