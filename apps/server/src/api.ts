@@ -617,6 +617,8 @@ export interface AppDeps {
   operatorToken?: string;
   /** Whether the local process behind a loopback connection (by its client port) is a seat or started by one. */
   seatPeer?: (clientPort: number | undefined) => boolean;
+  /** Whether the local process behind a loopback connection (by its client port) is the operator's browser. */
+  bootstrapPeer?: (clientPort: number | undefined) => boolean;
   /** The per-boot controller token: the controller's own key, which labels its messages. */
   controllerToken?: string;
   /** Holds new runs while FLIGHT's Update waits for running turns; without it FLIGHT's Update refuses a busy crew. */
@@ -4180,7 +4182,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             !LOOPBACK_ADDRESSES.has(req.socket.remoteAddress ?? "") ||
             req.headers["sec-fetch-site"] !== "same-origin" ||
             req.headers[HUD_RENDERER_HEADER] !== undefined ||
-            deps.seatPeer?.(req.socket.remotePort) === true
+            deps.seatPeer?.(req.socket.remotePort) === true ||
+            deps.bootstrapPeer?.(req.socket.remotePort) === false
           ) {
             return reply.code(403).send({ error: BOOTSTRAP_REFUSED });
           }

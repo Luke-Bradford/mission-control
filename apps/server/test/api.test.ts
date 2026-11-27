@@ -10412,6 +10412,26 @@ describe("operator token", () => {
     await app.close();
   });
 
+  it("refuses the token to a non-browser peer that forges the same-origin header", async () => {
+    const app = buildApp({
+      config,
+      store,
+      bus,
+      operatorToken: "tok-1",
+      bootstrapPeer: () => false,
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: OPERATOR_BOOTSTRAP_PATH,
+      headers: { "sec-fetch-site": "same-origin" },
+      remoteAddress: "127.0.0.1",
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: BOOTSTRAP_REFUSED });
+    expect(response.body).not.toContain("tok-1");
+    await app.close();
+  });
+
   it("refuses the token to the HUD screenshot browser, whatever spelling of the path it uses", async () => {
     for (const url of [OPERATOR_BOOTSTRAP_PATH, "/api/operator/%62ootstrap"]) {
       const shot = await guarded.inject({

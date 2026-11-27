@@ -7,6 +7,8 @@ const defaultRun: RunTool = (cmd, args) =>
   execFileSync(cmd, args, { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] });
 
 const MAX_DEPTH = 16;
+const BROWSER_PROCESS =
+  /(?:^|\s)(?:Google Chrome(?: Helper(?: \([^)]*\))?)?|Chromium(?: Helper(?: \([^)]*\))?)?|Safari(?:Networking)?|Firefox|firefox|Arc|Brave Browser|Microsoft Edge)(?:\s|$)/;
 
 /** The pid at the client end of a loopback connection that came from `clientPort`. */
 function clientPid(clientPort: number, run: RunTool): number | null {
@@ -44,5 +46,28 @@ export function peerIsSeat(clientPort: number | undefined, run: RunTool = defaul
     return pid !== 1 && pid !== 0;
   } catch {
     return true;
+  }
+}
+
+/**
+ * Whether the local process behind a loopback connection is the operator's browser or one of its
+ * helpers. Docker forwards container requests through its own proxy, which does not match here.
+ * A caller that cannot be identified is not a browser: doubt refuses the operator token.
+ */
+export function peerIsBrowser(clientPort: number | undefined, run: RunTool = defaultRun): boolean {
+  if (clientPort === undefined) return false;
+  try {
+    let pid = clientPid(clientPort, run);
+    if (pid === null) return false;
+    for (let depth = 0; depth < MAX_DEPTH && pid > 1; depth++) {
+      if (BROWSER_PROCESS.test(run("ps", ["-E", "-ww", "-o", "command=", "-p", String(pid)])))
+        return true;
+      const parent = Number.parseInt(run("ps", ["-o", "ppid=", "-p", String(pid)]).trim(), 10);
+      if (!Number.isFinite(parent)) return false;
+      pid = parent;
+    }
+    return false;
+  } catch {
+    return false;
   }
 }

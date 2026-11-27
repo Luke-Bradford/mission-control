@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { peerIsSeat } from "../src/peer-process.ts";
+import { peerIsBrowser, peerIsSeat } from "../src/peer-process.ts";
 
 /** A fake `lsof`/`ps`: `tree` maps a pid to its parent and its environment line. */
 const fake =
@@ -57,5 +57,23 @@ describe("peerIsSeat", () => {
       return args.includes("ppid=") ? "\n" : "sh PATH=/bin";
     };
     expect(peerIsSeat(50000, blank)).toBe(true);
+  });
+});
+
+describe("peerIsBrowser", () => {
+  it("accepts a browser process behind a loopback connection", () => {
+    const tree = {
+      4242: { ppid: 100, env: "Google Chrome Helper (Renderer) PATH=/bin" },
+      100: { ppid: 1, env: "Google Chrome PATH=/bin" },
+    };
+    expect(peerIsBrowser(50000, fake(tree))).toBe(true);
+  });
+
+  it("refuses Docker's proxy behind a forged browser request", () => {
+    const tree = {
+      4242: { ppid: 100, env: "com.docker.backend PATH=/bin" },
+      100: { ppid: 1, env: "launchd" },
+    };
+    expect(peerIsBrowser(50000, fake(tree))).toBe(false);
   });
 });

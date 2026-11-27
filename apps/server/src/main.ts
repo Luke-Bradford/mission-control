@@ -119,7 +119,7 @@ import {
   readKnown,
 } from "./mcp/tools.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
-import { peerIsSeat } from "./peer-process.ts";
+import { peerIsBrowser, peerIsSeat } from "./peer-process.ts";
 import { createPrEvidence, evidenceReviewDeps } from "./pr-evidence/capture.ts";
 import { evidenceDemoRender } from "./pr-evidence/demo-render.ts";
 import {
@@ -1261,6 +1261,7 @@ export async function main(): Promise<void> {
     operatorToken,
     controllerToken,
     seatPeer: peerIsSeat,
+    bootstrapPeer: peerIsBrowser,
     gh,
     knownSecrets: mcDeps.knownSecrets,
     deliverComms,
