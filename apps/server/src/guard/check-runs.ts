@@ -211,7 +211,10 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   const started = new Map<string, StartedCall>();
   const finishing = new Set<StartedCall>();
   /** The one check or test call each run may have in flight, whether or not it is a receipt check. */
-  const reservations = new Map<string, { key: CallKey; command: string; at: number }>();
+  const reservations = new Map<
+    string,
+    { key: CallKey; command: string; at: number; begun?: true }
+  >();
   /** Calls the recorder saw start and did not count, by run; in memory, so a restart forgets them. */
   const dropped = new Map<string, CheckDrop[]>();
   const noteDrop = (
@@ -275,19 +278,20 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       if (afterFirstPoll) await new Promise((r) => setTimeout(r, pollMs).unref());
       while (true) {
         const calls = new Set([...started.values()].filter((c) => c.runId === runId));
+        const reservation = reservations.get(runId);
         // its completion came (or the call was lost): nothing is held any more
-        if (calls.size === 0 && !reservations.has(runId)) return;
+        if (calls.size === 0 && reservation === undefined) return;
         const expired = now() - since >= CHECK_BASH_TIMEOUT_MS;
         if (!expired && (await reading(runId))) {
           sawAlive = true;
           gone = 0;
         } else if (expired || (!sawAlive && calls.size === 0) || ++gone > 1) {
-          // a process never seen is a plain turn end; one that went with no completion is lost
-          const reason = sawAlive || expired ? "session-lost" : "turn-ended";
+          // A call that never began is a plain turn end. A begun call whose process is gone had
+          // its result lost, even when a short focused test ended before this first process poll.
+          const reason = sawAlive || expired || reservation?.begun ? "session-lost" : "turn-ended";
           for (const call of calls) forget(call, reason);
           // A focused test command has no configured-check receipt, but it still holds the
           // checkout. Once its process is gone, its seat must get the same rerun instruction.
-          const reservation = reservations.get(runId);
           if (reason === "session-lost" && calls.size === 0 && reservation !== undefined)
             d.onLost?.(runId, [reservation.command]);
           reservations.delete(runId);
@@ -327,6 +331,9 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     },
     async begin(key, command, aliases = [], options = {}) {
       try {
+        const reservation = reservations.get(key.runId);
+        if (reservation !== undefined && callId(reservation.key) === callId(key))
+          reservation.begun = true;
         const checks = await d.checks(key.runId);
         const own = d.worktree === undefined ? null : await d.worktree(key.runId).catch(() => null);
         const matched = checksRun(withoutOwnCd(command, own), checks);

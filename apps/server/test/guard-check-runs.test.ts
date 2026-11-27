@@ -618,6 +618,22 @@ describe("why the recorder dropped a check call", () => {
       expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
     });
 
+    it("tells the seat when a focused test ends before the first process poll", async () => {
+      const focused = "pnpm -s vitest apps/server/test/guard-check-runs.test.ts";
+      const lost: string[][] = [];
+      const r = watching(
+        { now: false },
+        { onLost: (_runId, commands) => lost.push([...commands]) },
+      );
+      await r.admit?.(KEY, focused);
+      await r.begin(KEY, focused);
+      r.dropRun("r1");
+      await wait(20);
+
+      expect(lost).toEqual([[focused]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, focused)).toBeNull();
+    });
+
     it("keeps an admitted check when its process starts after the first watcher poll", async () => {
       let firstRead: (() => void) | undefined;
       let finishFirstRead: ((alive: boolean) => void) | undefined;
