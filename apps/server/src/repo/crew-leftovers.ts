@@ -4,9 +4,10 @@
  */
 import { execFileSync } from "node:child_process";
 import {
-  type Dirent,
   closeSync,
+  createReadStream,
   createWriteStream,
+  type Dirent,
   lstatSync,
   openSync,
   readdirSync,
@@ -17,9 +18,8 @@ import {
   utimesSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { createReadStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
-import { createGzip, createGunzip } from "node:zlib";
+import { createGunzip, createGzip } from "node:zlib";
 
 export const CREW_TRANSCRIPT_GZIP_AFTER_MS = 24 * 60 * 60_000;
 export const CREW_TRANSCRIPT_DELETE_AFTER_MS = 14 * 24 * 60 * 60_000;
@@ -158,7 +158,11 @@ const transcriptWorktree = async (
   return null;
 };
 
-const cleanTranscript = async (path: string, now: number, out: CrewLeftoverResult): Promise<void> => {
+const cleanTranscript = async (
+  path: string,
+  now: number,
+  out: CrewLeftoverResult,
+): Promise<void> => {
   if (!TRANSCRIPT.test(path)) return;
   let st: ReturnType<typeof statSync>;
   try {
@@ -249,14 +253,16 @@ export async function crewLeftoverFootprint(
     const paths: string[] = [];
     walkFiles(project, (path) => paths.push(path));
     for (const path of paths)
-      if ((await transcriptWorktree(path, input.worktrees)) !== null) claudeProjectsBytes += bytes(path);
+      if ((await transcriptWorktree(path, input.worktrees)) !== null)
+        claudeProjectsBytes += bytes(path);
   }
   let codexSessionsBytes = 0;
   if (input.codexSessions !== undefined) {
     const paths: string[] = [];
     walkFiles(input.codexSessions, (path) => paths.push(path));
     for (const path of paths)
-      if ((await transcriptWorktree(path, input.worktrees)) !== null) codexSessionsBytes += bytes(path);
+      if ((await transcriptWorktree(path, input.worktrees)) !== null)
+        codexSessionsBytes += bytes(path);
   }
   let browserProfilesBytes = 0;
   let chromeTempBytes = 0;
