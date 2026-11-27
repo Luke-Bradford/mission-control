@@ -1,13 +1,11 @@
-/** Keeps each crew repository's development app in its own cmux workspace. */
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+/** Keeps a live seat's development app in panes of that seat's cmux workspace. */
 import { SESSION_APP_STATUS_KEY } from "@mc/core";
 import type { Cmux } from "../runtime/cmux.ts";
 import { probeLocal } from "./sessions.ts";
 
 export const APP_RESTART_MS = 5 * 60_000;
 export const APP_PORT_START = 5173;
-/** The operator-approved development commands for the two initial crew applications. */
+const PORT_BLOCK = 10;
 export const CREW_APP_DEFAULTS: Readonly<Record<string, readonly CrewAppCommand[]>> = {
   "autonomy-engine": [
     {
@@ -18,204 +16,193 @@ export const CREW_APP_DEFAULTS: Readonly<Record<string, readonly CrewAppCommand[
   ebull: [
     {
       command:
-        "uv run uvicorn app.main:app --reload --reload-dir app --host 127.0.0.1 --port $PORT",
+        "uv run uvicorn app.main:app --reload --reload-dir app --host 127.0.0.1 --port $BACKEND_PORT",
       url: "http://127.0.0.1:$PORT",
     },
-    { command: "cd frontend && pnpm dev", url: "http://127.0.0.1:$PORT" },
+    {
+      command: "cd frontend && pnpm dev -- --host 127.0.0.1 --port $PORT",
+      url: "http://127.0.0.1:$PORT",
+    },
   ],
 };
-
 export interface CrewAppCommand {
   command: string;
-  /** A loopback URL. `$PORT` is replaced by this command's reserved port. */
   url: string;
 }
-
 export interface CrewAppRepo {
   id: string;
-  checkout: string;
   commands: readonly CrewAppCommand[];
 }
-
+export interface CrewAppSeat {
+  id: string;
+  repoId: string;
+  worktree: string;
+}
 interface CrewAppsDeps {
-  cmux: Pick<Cmux, "ensure" | "workspaces" | "newWorkspace" | "setStatus" | "close"> & {
-    newPane(ws: string, cwd: string, command: string): Promise<void>;
-  };
-  /** Runs git, or starts a shell command when its first argument is `sh`. */
+  cmux: Pick<Cmux, "newPane" | "setStatus" | "readScreen" | "workspaces">;
   run(command: string, args: string[]): Promise<string>;
   repos(): readonly CrewAppRepo[];
-  root: string;
+  seats(): readonly CrewAppSeat[];
   now?(): number;
   probe?(url: string): Promise<boolean>;
-  worktreeExists?(path: string): boolean;
   log?(message: string): void;
 }
-
 export interface CrewApps {
-  start(repoId: string): Promise<void>;
-  stop(repoId: string): Promise<void>;
+  start(seatId: string): Promise<void>;
+  restart(seatId: string): Promise<void>;
+  stop(seatId: string): Promise<void>;
+  status(seatId: string): Promise<string>;
   tick(): Promise<void>;
   view(): {
     id: string;
     name: string;
+    repo: string;
+    seat: string;
     running: boolean;
     apps: { url: string; answers: boolean | null }[];
   }[];
 }
-
-const appName = (repoId: string) => `${repoId} · app`;
-const portOf = (repos: readonly CrewAppRepo[], target: string, command: number) => {
-  let port = APP_PORT_START;
-  for (const repo of repos) {
-    if (repo.id === target) return port + command;
-    port += repo.commands.length;
-  }
-  return port + command;
-};
 const urlAt = (url: string, port: number) => url.replaceAll("$PORT", String(port));
-const commandAt = (repo: string, command: string, port: number, backendPort?: number) => {
-  const rendered = command.replaceAll("$PORT", String(port));
-  const environment = `PORT=${port}${backendPort === undefined ? "" : ` BACKEND_PORT=${backendPort}`}`;
-  if (!/pnpm dev$/.test(rendered)) return `${environment} ${rendered}`;
-  const vite = `${rendered} -- --host 127.0.0.1 --port ${port}`;
-  if (repo.toLowerCase() !== "ebull" || backendPort === undefined) return `${environment} ${vite}`;
-  return `${environment} ${vite.replace(
-    "cd frontend && ",
-    `cd frontend && VITE_API_PROXY_TARGET=http://127.0.0.1:${backendPort} `,
-  )}`;
-};
-
-/** App worktrees are private to the hub and always detached at the freshly fetched origin/main. */
+const pidOf = (seat: string, index: number) =>
+  `.mc-app-${seat.replaceAll(/[^a-zA-Z0-9_-]/g, "-")}-${index}.pid`;
+const quote = (value: string) => `'${value.replaceAll("'", "'\\\"'\\\"'")}'`;
+function commandAt(repo: string, command: string, port: number, backendPort: number, pid: string) {
+  const rendered = command
+    .replaceAll("$PORT", String(port))
+    .replaceAll("$BACKEND_PORT", String(backendPort));
+  const proxy =
+    repo.toLowerCase() === "ebull" && /cd frontend &&/.test(rendered)
+      ? ` VITE_API_PROXY_TARGET=http://127.0.0.1:${backendPort}`
+      : "";
+  return `sh -lc ${quote(`echo $$ > ${quote(pid)}; exec PORT=${port} BACKEND_PORT=${backendPort}${proxy} ${rendered}`)}`;
+}
 export function createCrewApps(deps: CrewAppsDeps): CrewApps {
   const now = deps.now ?? Date.now;
   const probe = deps.probe ?? probeLocal;
-  const worktreeExists = deps.worktreeExists ?? ((path) => existsSync(join(path, ".git")));
-  const prepared = new Set<string>();
   const running = new Map<
     string,
     {
       workspace: string;
+      repo: CrewAppRepo;
       urls: { url: string; answers: boolean | null }[];
-      main: string;
       restartedAt?: number;
     }
   >();
-
   const repoOf = (id: string) => deps.repos().find((repo) => repo.id === id);
+  const seatOf = (id: string) => deps.seats().find((seat) => seat.id === id);
+  const portOf = (seat: CrewAppSeat, index: number) =>
+    APP_PORT_START +
+    deps
+      .seats()
+      .filter((item) => item.worktree !== "")
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .findIndex((item) => item.id === seat.id) *
+      PORT_BLOCK +
+    index;
   const checkJobs = (repo: CrewAppRepo) => {
-    if (repo.id.toLowerCase() !== "ebull") return;
-    if (repo.commands.some((command) => /(?:^|\s)app\.jobs(?:\s|$)/.test(command.command)))
+    if (
+      repo.id.toLowerCase() === "ebull" &&
+      repo.commands.some((entry) => /app\.jobs/.test(entry.command))
+    )
       throw new Error("eBull jobs is owned by launchd and cannot be an app command");
   };
-  for (const repo of deps.repos()) checkJobs(repo);
-  const start = async (repoId: string) => {
-    const repo = repoOf(repoId);
-    if (!repo || repo.commands.length === 0) return;
-    checkJobs(repo);
-    const worktree = join(deps.root, repo.id);
-    await deps.run("git", ["-C", repo.checkout, "fetch", "origin", "main"]);
-    const main = (await deps.run("git", ["-C", repo.checkout, "rev-parse", "origin/main"])).trim();
-    if (prepared.has(repo.id) || worktreeExists(worktree)) {
-      await deps.run("git", ["-C", worktree, "reset", "--hard", "origin/main"]);
-      await deps.run("git", ["-C", worktree, "clean", "-fdx"]);
-      prepared.add(repo.id);
-    } else {
-      await deps.run("git", [
-        "-C",
-        repo.checkout,
-        "worktree",
-        "add",
-        "--force",
-        "--detach",
-        worktree,
-        "origin/main",
+  const stop = async (seatId: string) => {
+    const app = running.get(seatId);
+    const seat = seatOf(seatId);
+    if (!app || !seat) return;
+    for (const index of app.repo.commands.keys()) {
+      const pid = `${seat.worktree}/${pidOf(seatId, index)}`;
+      await deps.run("sh", [
+        "-lc",
+        `if test -r ${quote(pid)}; then kill "$(cat ${quote(pid)})" 2>/dev/null || true; fi`,
       ]);
-      prepared.add(repo.id);
     }
-    const old = running.get(repoId);
-    if (old) await deps.cmux.close(old.workspace);
-    await deps.cmux.ensure();
-    const repos = deps.repos();
-    const first = repo.commands[0] as CrewAppCommand;
-    const firstPort = portOf(repos, repo.id, 0);
-    const workspace = await deps.cmux.newWorkspace({
-      name: appName(repo.id),
-      cwd: worktree,
-      command: commandAt(
-        repo.id,
-        first.command,
-        firstPort,
-        repo.id.toLowerCase() === "ebull" ? firstPort : undefined,
-      ),
-    });
-    const urls = [{ url: urlAt(first.url, firstPort), answers: null }];
-    for (const [index, command] of repo.commands.slice(1).entries()) {
-      const port = portOf(repos, repo.id, index + 1);
+    running.delete(seatId);
+    deps.log?.(`Stopped ${seatId}'s ${app.repo.id} app panes.`);
+  };
+  const start = async (seatId: string) => {
+    const seat = seatOf(seatId);
+    if (!seat) throw new Error("No live cmux workspace for this seat.");
+    const workspace = (await deps.cmux.workspaces()).find((entry) =>
+      entry.name.startsWith(`${seat.id} · `),
+    )?.id;
+    if (!workspace) throw new Error("No live cmux workspace for this seat.");
+    const repo = repoOf(seat.repoId);
+    if (!repo || repo.commands.length === 0)
+      throw new Error("This seat's repository has no app commands.");
+    checkJobs(repo);
+    if (running.has(seatId)) await stop(seatId);
+    const backendPort = portOf(seat, 0);
+    const urls = [];
+    for (const [index, entry] of repo.commands.entries()) {
+      const port = portOf(seat, index);
       await deps.cmux.newPane(
         workspace,
-        worktree,
-        commandAt(
-          repo.id,
-          command.command,
-          port,
-          repo.id.toLowerCase() === "ebull" ? firstPort : undefined,
-        ),
+        seat.worktree,
+        commandAt(repo.id, entry.command, port, backendPort, pidOf(seatId, index)),
       );
-      urls.push({ url: urlAt(command.url, port), answers: null });
+      urls.push({ url: urlAt(entry.url, port), answers: null });
     }
-    await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, urls[0]?.url as string);
-    running.set(repo.id, { workspace, urls, main });
-    deps.log?.(`Started ${appName(repo.id)} from origin/main.`);
+    await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, urls[0]?.url ?? "");
+    running.set(seatId, { workspace, repo, urls });
+    deps.log?.(`Started ${seatId}'s ${repo.id} app panes.`);
   };
   return {
     start,
-    async stop(repoId) {
-      const app = running.get(repoId);
-      if (!app) return;
-      await deps.cmux.close(app.workspace);
-      running.delete(repoId);
-      deps.log?.(`Stopped ${appName(repoId)}.`);
+    async restart(seatId) {
+      await stop(seatId);
+      await start(seatId);
+    },
+    stop,
+    async status(seatId) {
+      const app = running.get(seatId);
+      return app
+        ? deps.cmux.readScreen(app.workspace, 40)
+        : "No app panes are running for this seat.";
     },
     async tick() {
-      for (const repo of deps.repos()) {
-        const app = running.get(repo.id);
-        if (!app) continue;
-        await deps.run("git", ["-C", repo.checkout, "fetch", "origin", "main"]);
-        const main = (
-          await deps.run("git", ["-C", repo.checkout, "rev-parse", "origin/main"])
-        ).trim();
-        if (main !== app.main) {
-          deps.log?.(`Restarting ${appName(repo.id)} on the new origin/main.`);
-          await start(repo.id);
-          continue;
-        }
+      for (const [seatId] of running) if (!seatOf(seatId)) await stop(seatId);
+      for (const seat of deps.seats()) if (!running.has(seat.id)) await start(seat.id);
+      for (const [seatId, app] of running) {
         const answers = await Promise.all(
           app.urls.map((entry) => probe(entry.url).catch(() => false)),
         );
         app.urls.forEach((entry, index) => {
           entry.answers = answers[index] ?? false;
         });
-        if (answers.every(Boolean)) continue;
-        if (app.restartedAt !== undefined && now() - app.restartedAt < APP_RESTART_MS) continue;
+        if (
+          answers.every(Boolean) ||
+          (app.restartedAt !== undefined && now() - app.restartedAt < APP_RESTART_MS)
+        )
+          continue;
         app.restartedAt = now();
-        deps.log?.(`Restarting ${appName(repo.id)} because an app stopped.`);
-        await start(repo.id);
-        const next = running.get(repo.id);
-        if (next) next.restartedAt = app.restartedAt;
+        deps.log?.(`Restarting ${seatId}'s ${app.repo.id} app panes because an app stopped.`);
+        await start(seatId);
+        const restarted = running.get(seatId);
+        if (restarted) restarted.restartedAt = app.restartedAt;
       }
     },
     view() {
-      return deps.repos().map((repo) => ({
-        id: repo.id,
-        name: appName(repo.id),
-        running: running.has(repo.id),
-        apps:
-          running.get(repo.id)?.urls ??
-          repo.commands.map((command, index) => ({
-            url: urlAt(command.url, portOf(deps.repos(), repo.id, index)),
-            answers: null,
-          })),
-      }));
+      return deps.seats().flatMap((seat) => {
+        const repo = repoOf(seat.repoId);
+        if (!repo) return [];
+        const app = running.get(seat.id);
+        return [
+          {
+            id: seat.id,
+            name: `${seat.id} · ${repo.id}`,
+            repo: repo.id,
+            seat: seat.id,
+            running: app !== undefined,
+            apps:
+              app?.urls ??
+              repo.commands.map((entry, index) => ({
+                url: urlAt(entry.url, portOf(seat, index)),
+                answers: null,
+              })),
+          },
+        ];
+      });
     },
   };
 }

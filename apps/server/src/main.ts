@@ -818,7 +818,9 @@ export async function main(): Promise<void> {
       );
     });
   };
+  let crewApps: ReturnType<typeof createCrewApps> | null = null;
   const mcDeps: McToolsDeps = {
+    crewApps: () => crewApps,
     qaReports,
     rules: engineRules,
     qaReportBaseUrl: `http://${HOST}:${port}`,
@@ -1044,7 +1046,7 @@ export async function main(): Promise<void> {
   // Every cmux workspace on this Mac (the Sessions page, and FLIGHT's cmux_sessions and cmux_send).
   // A preview hub reads them but never tells a session its app stopped.
   const cmux = createCmux([CMUX_COMMAND], (m) => log(m));
-  const crewApps = createCrewApps({
+  crewApps = createCrewApps({
     cmux,
     run: (command, args) =>
       new Promise<string>((resolve, reject) =>
@@ -1052,13 +1054,15 @@ export async function main(): Promise<void> {
       ),
     repos: () =>
       config.repos.flatMap((repo) => {
-        const checkout = config.crew?.sessions.find(
-          (session) => session.repoId === repo.id,
-        )?.checkout;
         const commands = repo.appCommands ?? CREW_APP_DEFAULTS[repo.id.toLowerCase()];
-        return checkout && commands?.length ? [{ id: repo.id, checkout, commands }] : [];
+        return commands?.length ? [{ id: repo.id, commands }] : [];
       }),
-    root: `${config.crew?.worktrees ?? dirname(dbPath)}-apps`,
+    seats: () =>
+      store
+        .liveSeatRuns()
+        .flatMap(({ seatId, worktree, run }) =>
+          worktree === null ? [] : [{ id: seatId, repoId: run.repoId, worktree }],
+        ),
     probe: probeLocal,
     log: (m) => log(m),
   });
