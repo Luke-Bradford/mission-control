@@ -12,6 +12,7 @@ import {
   openSync,
   readdirSync,
   readSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -255,9 +256,19 @@ export async function cleanupCrewLeftovers(input: CrewLeftoverInput): Promise<Cr
   const processes = input.processLines === undefined ? processTable() : input.processLines;
   if (processes === null) return out;
   const open = openPaths();
+  // `lsof` reports real paths; on macOS `$TMPDIR` is `/var/...`, a link to `/private/var/...` (#2294).
+  // Unresolvable: delete nothing, as with a missing process or lsof table.
+  let realTmp: string;
+  try {
+    realTmp = realpathSync.native(input.tmp);
+  } catch {
+    return out;
+  }
   for (const entry of list(input.tmp)) {
     if (!BROWSER_LEFTOVER.test(entry.name)) continue;
     const path = join(input.tmp, entry.name);
+    // not a symlink (checked below), so this is the entry's real path
+    const real = join(realTmp, entry.name);
     let st: ReturnType<typeof lstatSync>;
     try {
       st = lstatSync(path);
@@ -265,11 +276,11 @@ export async function cleanupCrewLeftovers(input: CrewLeftoverInput): Promise<Cr
       continue;
     }
     if (st.isSymbolicLink() || input.now - st.mtimeMs < BROWSER_LEFTOVER_AFTER_MS) continue;
-    if (processes.some((line) => line.includes(path))) {
+    if (processes.some((line) => line.includes(path) || line.includes(real))) {
       out.skippedLive++;
       continue;
     }
-    if (open === null || pathInUse(path, open)) {
+    if (open === null || pathInUse(real, open)) {
       out.skippedLive++;
       continue;
     }
