@@ -54,6 +54,14 @@ it("builds an uneven, repeatable day with the awkward cases in view", () => {
   for (const repoId of ["mission-control", "eBull", "autonomy-engine"])
     expect(first.api[`/api/repos/${repoId}/rules`]).toBeDefined();
   expect(first.api["/api/flight/memory?repo=mission-control"]).toBeDefined();
+  const boardRefs = new Set(
+    ["mission-control", "eBull", "autonomy-engine"].flatMap((repoId) =>
+      (first.api[`/api/boards/${repoId}`] as { repoId: string; issueNumber: number }[]).map(
+        (item) => `${item.repoId}#${item.issueNumber}`,
+      ),
+    ),
+  );
+  for (const row of rows) if (row.ticket) expect(boardRefs).toContain(row.ticket);
   expect(rows[1]?.hudState).toBe("running");
   const reworked = first.api["/api/tickets/shop-app/108"] as {
     prs: { rounds: unknown[]; ci: { checks: { name: string }[] }[] }[];

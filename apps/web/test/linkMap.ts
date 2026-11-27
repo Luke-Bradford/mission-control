@@ -123,10 +123,10 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
     ],
   },
   board: {
-    routes: ["/board", "/board/shop-app"],
+    routes: ["/board", "/board/mission-control"],
     rules: [
       rule(
-        /^(All repos|shop-app|site-builder)$/,
+        /^(All repos|mission-control|eBull|autonomy-engine)$/,
         /^\/board(\/[\w-]+)?$/,
         "A repo lane opens that repo's board.",
       ),
@@ -146,7 +146,7 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
     ],
   },
   ticket: {
-    routes: ["/tickets/shop-app/102"],
+    routes: ["/tickets/mission-control/101"],
     rules: [rule(/^← Board$/, /^\/board\/[\w-]+$/, "Back to the ticket's repo board.")],
   },
   agent: {

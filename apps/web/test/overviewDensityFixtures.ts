@@ -20,6 +20,7 @@ import {
   boardItems,
   DEMO_REPO,
   DEMO_TICKETS,
+  type DemoTicket,
   demoPageAnswers,
   openPrs,
   pipelineStages,
@@ -579,6 +580,10 @@ export function demoSeed(daySeed = 1) {
   const base = overviewDensityFixture("default");
   const random = seeded(daySeed);
   const repos = ["mission-control", "eBull", "autonomy-engine"] as const;
+  // The empty autonomy-engine board is deliberate; tickets on the other boards stay paired with
+  // their seat rows.
+  const repoForTicket = (ticket: DemoTicket): (typeof repos)[number] =>
+    repos[DEMO_TICKETS.indexOf(ticket) % 2] ?? "mission-control";
   const day = [
     {
       state: "waiting",
@@ -628,7 +633,7 @@ export function demoSeed(daySeed = 1) {
     const jitterMinutes = Math.floor(random() * 23);
     return {
       ...row,
-      repoId: repos[index % repos.length] ?? "mission-control",
+      repoId: ticket ? repoForTicket(ticket) : (repos[index % repos.length] ?? "mission-control"),
       hudState: shape.state,
       paused: false,
       stop: null,
@@ -636,7 +641,7 @@ export function demoSeed(daySeed = 1) {
       note: shape.note,
       role: SEAT_ROLES[row.id] ?? "GUIDO",
       mode: row.id === "dev-9" ? "read-only" : "writer",
-      ticket: ticket ? `${repos[index % repos.length]}#${ticket.n}` : null,
+      ticket: ticket ? `${repoForTicket(ticket)}#${ticket.n}` : null,
       ticketTitle: ticket?.title ?? null,
       stateSince: NOW - (shape.hours * 60 + jitterMinutes) * MIN,
       // Keep the loop record on an idle or stopped seat too: it lets the scene's later review
@@ -665,7 +670,13 @@ export function demoSeed(daySeed = 1) {
   if (config.crew?.sessions[0]) config.crew.sessions[0].repoId = "mission-control";
   for (const session of config.crew?.sessions ?? [])
     for (const seat of session.seats) seat.role = SEAT_ROLES[seat.id] ?? seat.role;
-  const attention = demoAttention();
+  const attention = demoAttention().map((item) => {
+    const number = Number(item.ticket?.split("#")[1]);
+    const ticket = DEMO_TICKETS.find((candidate) => candidate.n === number);
+    if (!ticket) return item;
+    const repoId = repoForTicket(ticket);
+    return { ...item, repoId, ticket: `${repoId}#${ticket.n}` };
+  });
   const summary: OverviewSummary = {
     ...base.summary,
     pipeline: pipelineStages(DEMO_TICKETS),
@@ -775,7 +786,8 @@ export function demoSeed(daySeed = 1) {
       JSON.stringify(memory).replaceAll(DEMO_REPO, repoId),
     );
   for (const [index, repoId] of repos.entries()) {
-    const own = index === 2 ? [] : DEMO_TICKETS.filter((_, ticket) => ticket % 2 === index);
+    const own =
+      index === 2 ? [] : DEMO_TICKETS.filter((ticket) => repoForTicket(ticket) === repoId);
     const replaceRepo = <T>(value: T): T =>
       JSON.parse(JSON.stringify(value).replaceAll(DEMO_REPO, repoId)) as T;
     api[`/api/boards/${repoId}`] = replaceRepo(boardItems(own));
