@@ -136,10 +136,12 @@ describe("lockfileProblems", () => {
   it("treats Object prototype-shaped importer dependency names as own keys", () => {
     const constructorEntry = { specifier: "1.0.0", version: "1.0.0" };
     const hyparquet = { specifier: "1.33.2", version: "1.33.2" };
-    expect(lockfileProblems(lock({ constructor: constructorEntry }), lock({ hyparquet }), [HYP])).toEqual([
-      "removes constructor from importer . dependencies",
-    ]);
-    expect(lockfileProblems(lock({}), lock({ constructor: constructorEntry }), [CONSTRUCTOR])).toEqual([]);
+    expect(
+      lockfileProblems(lock({ constructor: constructorEntry }), lock({ hyparquet }), [HYP]),
+    ).toEqual(["removes constructor from importer . dependencies"]);
+    expect(
+      lockfileProblems(lock({}), lock({ constructor: constructorEntry }), [CONSTRUCTOR]),
+    ).toEqual([]);
   });
 
   it("refuses a named package resolved at another version", () => {
