@@ -300,6 +300,10 @@ describe("the allowlist in phase 2b", () => {
       MC_TOOLS.syncMain,
       MC_TOOLS.askFlight,
       MC_TOOLS.reportEvidence,
+      MC_TOOLS.appStart,
+      MC_TOOLS.appRestart,
+      MC_TOOLS.appStatus,
+      MC_TOOLS.terminalRun,
     ]) {
       expect(WRITER_TOOLS).toContain(t);
     }

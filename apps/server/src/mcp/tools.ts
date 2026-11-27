@@ -3370,21 +3370,21 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       name: MC_TOOL_NAMES.appStart,
       description: "Start this seat's configured app panes in its cmux workspace.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
-      modes: ["writer", "read-only", "scratch"],
+      modes: ["writer"],
       call: appStart,
     },
     {
       name: MC_TOOL_NAMES.appRestart,
       description: "Restart this seat's configured app panes after a code change.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
-      modes: ["writer", "read-only", "scratch"],
+      modes: ["writer"],
       call: appRestart,
     },
     {
       name: MC_TOOL_NAMES.appStatus,
       description: "Read the last lines from this seat's app workspace.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
-      modes: ["writer", "read-only", "scratch"],
+      modes: ["writer"],
       call: appStatus,
     },
     {
@@ -3392,7 +3392,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       description:
         "Run one command in this seat's worktree terminal and return its output and exit code.",
       inputSchema: z.toJSONSchema(TerminalRunArgs),
-      modes: ["writer", "read-only", "scratch"],
+      modes: ["writer"],
       call: terminalRun,
     },
     {

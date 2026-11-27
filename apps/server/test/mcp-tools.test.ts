@@ -376,6 +376,10 @@ const seatbeltBlocked = await blockedHere("seatbelt");
 describe("the mc tools", () => {
   it("serves the mode tools under the names the CLI prefixes, and no push or draft_pr", () => {
     expect(tools.map((t) => [t.name, t.modes])).toEqual([
+      [MC_TOOL_NAMES.appStart, ["writer"]],
+      [MC_TOOL_NAMES.appRestart, ["writer"]],
+      [MC_TOOL_NAMES.appStatus, ["writer"]],
+      [MC_TOOL_NAMES.terminalRun, ["writer"]],
       [MC_TOOL_NAMES.commsRead, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsInbox, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsSend, ["writer", "read-only", "scratch"]],
@@ -393,6 +397,10 @@ describe("the mc tools", () => {
       ["report_plan", []],
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
+      MC_TOOLS.appStart,
+      MC_TOOLS.appRestart,
+      MC_TOOLS.appStatus,
+      MC_TOOLS.terminalRun,
       MC_TOOLS.commsRead,
       MC_TOOLS.commsInbox,
       MC_TOOLS.commsSend,
