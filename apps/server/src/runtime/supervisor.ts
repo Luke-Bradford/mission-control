@@ -300,6 +300,7 @@ import {
   readKeeperExit,
   readPidFile,
 } from "./keeper.ts";
+import { type LocalServiceForwards, startLocalServiceForwards } from "./local-services.ts";
 import { recordNoReport } from "./no-report.ts";
 import { nodeFirstPath, ZSH_NODE_FIRST_DIR, zprofileNodeFirst } from "./node-first.ts";
 import {
@@ -1137,6 +1138,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     });
 
   const live = new Map<string, Live>();
+  const localServiceForwards = new Map<string, LocalServiceForwards>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
   /** Runs already taken back once: a second such exit ends them as a crash. In memory only, so a hub restart allows one more. */
@@ -1739,6 +1741,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     tmp: string,
     fullGit = false,
     readOnlyReview = false,
+    localServiceSockets: readonly string[] = [],
   ): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const k of CREW_ENV_KEYS) {
@@ -1752,6 +1755,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     env.TEMP = tmp;
     env.CLAUDE_CODE_TMPDIR = tmp;
     env[PNPM_STORE_ENV] = sharedPnpmStoreDir(crew?.worktrees ?? "");
+    const postgresSocket = localServiceSockets.find((socket) => socket.endsWith(".s.PGSQL.5432"));
+    if (postgresSocket !== undefined) env.PGHOST = dirname(postgresSocket);
+    const redisSocket = localServiceSockets.find((socket) => socket.endsWith(".s.PGSQL.6379"));
+    if (redisSocket !== undefined) env.REDIS_URL = `unix://${redisSocket}`;
     Object.assign(env, crewPythonEnv(tmp, seatId));
     // FLIGHT's full profile pushes as the operator does: their git config and credential helper
     // apply (the seats' GIT_CONFIG_GLOBAL=/dev/null would leave `git push` with no credentials).
@@ -2258,6 +2265,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     deps.tokens.revoke(run.id);
     const token = deps.tokens.issue(info.seat.id, run.id);
     let session: CrewSession;
+    let serviceForwards: LocalServiceForwards | undefined;
     try {
       // the cursor of an earlier keeper counts that keeper's lines, not this one's
       store.deleteKeeperCursor(run.id);
@@ -2295,6 +2303,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new Error("crew temp root must be a private directory owned by the server");
       }
       const tmp = realpathSync(tmpPath);
+      serviceForwards = ensureLocalServiceForwards(info, run, tmp);
       // made here, before the seat runs: the trim hook writes in it outside the sandbox
       if (run.vendor !== "codex") {
         const outDir = join(tmp, TOOL_OUTPUT_DIR);
@@ -2320,7 +2329,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         dataDir: realpathSync(dirname(deps.dbPath)),
         hubRoot: existsSync(deps.hubRoot) ? realpathSync(deps.hubRoot) : deps.hubRoot,
         pnpmStoreDir: pnpmStore,
-        localServices: info.repo.localServices ?? [],
+        localServiceSockets: serviceForwards?.sockets ?? [],
         denyRead: [
           ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
           ...profileDenies(),
@@ -2384,6 +2393,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               tmp,
               crewProfileOf(info.seat.role, def.loop) === "flight-full",
               readOnlyReview,
+              serviceForwards?.sockets ?? [],
             ),
           ).filter(
             (e): e is [string, string] => !e[0].startsWith("CLAUDE_") && typeof e[1] === "string",
@@ -2510,6 +2520,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           tmpPath,
           crewProfileOf(info.seat.role, def.loop) === "flight-full",
           readOnlyReview,
+          serviceForwards?.sockets ?? [],
         );
         if (inCmux && cmux !== null) {
           const ref =
@@ -2589,6 +2600,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           });
       }
     } catch (e) {
+      if (serviceForwards !== undefined) {
+        localServiceForwards.delete(run.id);
+        void serviceForwards.close();
+      }
       release();
       throw e;
     }
@@ -2659,6 +2674,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   function removeRunFiles(runId: string): void {
+    const forwards = localServiceForwards.get(runId);
+    if (forwards !== undefined) {
+      localServiceForwards.delete(runId);
+      void forwards
+        .close()
+        .catch((e: unknown) =>
+          log(`could not close local service forwards of ${runId}: ${errText(e)}`),
+        );
+    }
     pendingPromptVersions.delete(runId);
     store.deleteSetting(cmuxSourceKey(runId));
     store.deleteSetting(cmuxKeeperKey(runId));
@@ -2681,6 +2705,33 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   function seatTmp(runId: string): string {
     return crewTempRoot(deps.dbPath, runId, process.getuid?.() ?? 0);
+  }
+
+  /** Recreate these hub-owned forwards after a hub restart before reattaching a Claude keeper. */
+  function ensureLocalServiceForwards(
+    info: SeatInfo,
+    run: Run,
+    tmp: string,
+  ): LocalServiceForwards | undefined {
+    const existing = localServiceForwards.get(run.id);
+    if (existing !== undefined) return existing;
+    const services = info.repo.localServices ?? [];
+    if (services.length === 0 || run.vendor === "codex") return undefined;
+    // `dirname(tmp)` is hub-owned and denied to the seat. Each exact socket is separately
+    // granted by Claude's network sandbox, so a seat cannot replace it or open loopback.
+    const parent = dirname(tmp);
+    const parentStat = lstatSync(parent);
+    if (
+      !parentStat.isDirectory() ||
+      parentStat.uid !== process.getuid?.() ||
+      (parentStat.mode & 0o777) !== 0o700
+    )
+      throw new Error(
+        "local service socket parent must be a private directory owned by the server",
+      );
+    const forwards = startLocalServiceForwards(services, join(parent, "local-services", run.id));
+    localServiceForwards.set(run.id, forwards);
+    return forwards;
   }
 
   function codexSeatTmp(worktree: string, runId: string): string {
@@ -3313,6 +3364,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
     }
     if (runGone(runId, row.seatId) || stopping) return;
+    if (info && run !== null && row.vendor === "claude")
+      ensureLocalServiceForwards(info, run, seatTmp(runId));
     const found = viaCmux({ id: runId, vendor: row.vendor })
       ? await attachWorkspace(row, runId)
       : await attachSession({

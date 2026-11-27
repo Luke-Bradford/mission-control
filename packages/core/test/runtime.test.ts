@@ -138,16 +138,20 @@ describe("crewCliArgs", () => {
     expect(seat.filesystem.denyRead).toContain(base.sandbox.home);
   });
 
-  it("allows only a repo's configured local services alongside the loopback denial", () => {
+  it("allows only hub-forwarded local-service sockets alongside the loopback denial", () => {
     const seat = JSON.parse(
       crewSandboxSettings(
-        { ...base.sandbox, localServices: ["127.0.0.1:5432", "127.0.0.1:6379"] },
+        {
+          ...base.sandbox,
+          localServiceSockets: ["/mc/services/.s.PGSQL.5432", "/mc/services/.s.PGSQL.6379"],
+        },
         "writer",
         base.hook,
       ),
     ).sandbox;
     expect(seat.network).toEqual({
-      allowedDomains: ["127.0.0.1:5432", "127.0.0.1:6379", "*"],
+      allowedDomains: ["*"],
+      allowUnixSockets: ["/mc/services/.s.PGSQL.5432", "/mc/services/.s.PGSQL.6379"],
       deniedDomains: [...SEAT_DENIED_HOSTS],
       deniedResolvedAddresses: [...SEAT_DENIED_RESOLVED_ADDRESSES],
     });

@@ -216,7 +216,7 @@ export function ticketBrief(i: BriefInput): string {
   const localServices =
     i.localServices === undefined || i.localServices.length === 0
       ? null
-      : `Local services you may use: ${i.localServices.join(", ")}.`;
+      : `Local services you may use through hub-owned Unix sockets: ${i.localServices.join(", ")}. PostgreSQL receives PGHOST and Redis receives REDIS_URL when those services are configured.`;
   const profile = profileLines(i);
   const last =
     i.loop === "plan"

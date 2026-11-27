@@ -986,8 +986,8 @@ export interface CrewSandboxInput {
   denyRead: string[];
   /** The hub-owned pnpm store seats may read but never write. */
   pnpmStoreDir: string;
-  /** The repo's explicitly configured loopback host:port pairs. */
-  localServices?: readonly string[];
+  /** Exact hub-owned Unix sockets that forward a repo's configured local services. */
+  localServiceSockets?: readonly string[];
   /**
    * The node and pnpm install folders the seat's tools run from, re-allowed for reads inside the
    * home folder's deny. Default [].
@@ -1219,12 +1219,14 @@ export function crewSandboxSettings(
       allowUnsandboxedCommands: false,
       // Defaults to true: every Bash not explicitly denied would be allowed, bypassing the allowlist.
       autoAllowBashIfSandboxed: false,
-      // A bare "*" matches every host. Claude applies deniedDomains before allowedDomains, so
-      // loopback lives in the resolution deny list instead: an exact repo-local IP-and-port is
-      // the sandbox's documented exception, while every other loopback destination stays shut.
-      // Put that exception before the catch-all, so the sandbox selects its precise rule.
+      // Loopback stays in the resolution deny list. The hub forwards a repo's configured local
+      // services through these exact Unix sockets, which the sandbox permits independently of
+      // TCP; this must not turn into a broad loopback exception.
       network: {
-        allowedDomains: [...(i.localServices ?? []), "*"],
+        allowedDomains: ["*"],
+        ...(i.localServiceSockets === undefined || i.localServiceSockets.length === 0
+          ? {}
+          : { allowUnixSockets: [...i.localServiceSockets] }),
         deniedDomains: [...SEAT_DENIED_HOSTS],
         deniedResolvedAddresses: [...SEAT_DENIED_RESOLVED_ADDRESSES],
       },

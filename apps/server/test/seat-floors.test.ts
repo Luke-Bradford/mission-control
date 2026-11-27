@@ -37,6 +37,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { CODEX_PROJECT_DIR, codexSeatConfig } from "../src/runtime/codex-floor.ts";
+import { startLocalServiceForwards } from "../src/runtime/local-services.ts";
 import { crewTempRoot } from "../src/runtime/supervisor.ts";
 import { type FakeAnthropic, startFakeAnthropic } from "./fake-anthropic.ts";
 import { blockedHere } from "./sandbox-gaps.ts";
@@ -537,10 +538,10 @@ const loopbackProbe = (port: number, hosts: readonly string[] = ["127.0.0.1"]) =
     .join("; ")}`;
 
 /** Reach one declared local service before attempting two loopback ports that must stay closed. */
-const localServiceProbe = (servicePort: number, hubPort: number, otherPort: number) =>
+const localServiceProbe = (serviceSocket: string, hubPort: number, otherPort: number) =>
   [
     "echo ran",
-    `/usr/bin/curl -fsS -m 3 http://127.0.0.1:${servicePort}/ >/dev/null`,
+    `/usr/bin/curl -fsS -m 3 --unix-socket '${serviceSocket}' http://localhost/ >/dev/null`,
     'echo "service=$?"',
     `/usr/bin/curl -s -m 3 -o /dev/null http://127.0.0.1:${hubPort}/api/operator/bootstrap`,
     'echo "hub=$?"',
@@ -759,16 +760,22 @@ describe.skipIf(claudeCli === null)("a Claude seat cannot reach the hub on loopb
     const service = await listenOnLoopback();
     const hub = await listenOnLoopback();
     const other = await listenOnLoopback();
+    const forwards = await startLocalServiceForwards(
+      [`127.0.0.1:${service.port}`],
+      join(dirname(tempRoot), "local-services", "floor"),
+    );
+    const serviceSocket = forwards.sockets[0];
+    if (serviceSocket === undefined) throw new Error("local service forward did not start");
     const input: CrewSandboxInput = {
       ...l,
       tempRoot,
       denyRead: [],
       pnpmStoreDir: join(l.root, ".mc-pnpm-store", "shared"),
-      localServices: [`127.0.0.1:${service.port}`],
+      localServiceSockets: [serviceSocket],
     };
     const store = crewPnpmStoreDir(tempRoot, "seat");
     mkdirSync(store, { recursive: true });
-    api = await startFakeAnthropic(localServiceProbe(service.port, hub.port, other.port));
+    api = await startFakeAnthropic(localServiceProbe(serviceSocket, hub.port, other.port));
     const settings = crewSandboxSettings(input, "writer", {
       command: "/usr/bin/true",
       timeoutS: 5,
@@ -811,7 +818,7 @@ describe.skipIf(claudeCli === null)("a Claude seat cannot reach the hub on loopb
         90_000,
       );
     } finally {
-      await Promise.all([service.close(), hub.close(), other.close()]);
+      await Promise.all([forwards.close(), service.close(), hub.close(), other.close()]);
     }
     expect(api.bashCalls(), output).toBe(1);
     expect(service.hits(), "requests that reached the declared service").toBe(1);

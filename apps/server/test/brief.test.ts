@@ -243,8 +243,12 @@ describe("ticketBrief", () => {
   it("names the configured local services a seat may use", () => {
     expect(
       ticketBrief({ ...input, localServices: ["127.0.0.1:5432", "127.0.0.1:6379"] }),
-    ).toContain("Local services you may use: 127.0.0.1:5432, 127.0.0.1:6379.");
-    expect(ticketBrief(input)).not.toContain("Local services you may use:");
+    ).toContain(
+      "Local services you may use through hub-owned Unix sockets: 127.0.0.1:5432, 127.0.0.1:6379.",
+    );
+    expect(ticketBrief(input)).not.toContain(
+      "Local services you may use through hub-owned Unix sockets:",
+    );
   });
 
   it("carries a body up to the collector's cap whole, with no cut note", () => {
