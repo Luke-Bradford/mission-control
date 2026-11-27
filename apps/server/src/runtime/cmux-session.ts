@@ -130,6 +130,33 @@ export function dialogOpen(screen: string): boolean {
   );
 }
 
+/** What an open dialog asks: its question (the lines above its first option) and its numbered options. */
+export interface CmuxDialog {
+  question: string;
+  options: string[];
+}
+
+/** The open dialog's question and options, read from the block under the last rule; null when none is open. */
+export function dialogOf(screen: string): CmuxDialog | null {
+  if (!dialogOpen(screen)) return null;
+  const rows = screen.split("\n");
+  let from = 0;
+  rows.forEach((r, n) => {
+    if (RULE.test(r)) from = n + 1;
+  });
+  const question: string[] = [];
+  const options: string[] = [];
+  for (const r of rows.slice(from)) {
+    const option = /^\W*?(\d+\.\s+\S.*?)\s*$/.exec(r);
+    if (option !== null && /^\s*[❯›>]?\s*\d+\./.test(r)) options.push(option[1] as string);
+    else if (options.length === 0 && r.trim() !== "") question.push(r.trim());
+    // a long option wraps: its next line belongs to it, until the footer
+    else if (options.length > 0 && r.trim() !== "" && !MENU_FOOTER.test(r) && !/^\s*Enter to/i.test(r))
+      options[options.length - 1] += ` ${r.trim()}`;
+  }
+  return { question: question.join(" "), options };
+}
+
 /**
  * The trust prompt's live menu: whether the cursor is on its "Yes" option, and which way "Yes" lies.
  * It is the menu only when it closes the screen: under the prompt's words, option lines next to
@@ -203,6 +230,9 @@ export async function answerTrustPrompt(
 /** The title Claude gives a tool's permission dialog (2.1.331): one per kind of tool. */
 const PERMISSION_TITLE =
   /^\W*(Bash command|Edit file|Overwrite file|Create file|Write file|Read file|Fetch|Tool use)\b/m;
+/** The second option only Claude's tool dialog offers (2.1.332: "Yes, and switch to accept edits"). */
+const PERMISSION_OPTION =
+  /\d+\.\s+Yes, (and switch to accept edits|allow all edits|and don't ask again)\b/i;
 /** A horizontal rule: Claude draws one above the dialog it has open. */
 const RULE = /^\s*[─━]{20,}\s*$/;
 
@@ -211,8 +241,9 @@ const RULE = /^\s*[─━]{20,}\s*$/;
  * Only the open dialog is read (the lines under the last rule on the screen), so a tool's name in
  * the conversation above cannot make a question of the seat's own look like one. In that block it
  * needs the question, a "Yes" and a "No" option, and one mark of a tool dialog: its title, the
- * "Tab to amend" footer (2.1.331, where the refusal is a bare "No"), or the older refusal "No, and
- * tell Claude what to do differently". A bare Yes/No with no such mark stays the operator's.
+ * "Tab to amend" footer (2.1.331, where the refusal is a bare "No"), a "Yes, and switch to accept
+ * edits" kind of option, or the older refusal "No, and tell Claude what to do differently". A bare
+ * Yes/No with no such mark stays the operator's.
  */
 export function isPermissionPrompt(screen: string): boolean {
   const rows = screen.split("\n");
@@ -229,6 +260,7 @@ export function isPermissionPrompt(screen: string): boolean {
     /^\W*\d+\.\s+No\b/m.test(block) &&
     (PERMISSION_TITLE.test(block) ||
       /\bTab to amend\b/.test(block) ||
+      PERMISSION_OPTION.test(flat) ||
       /\bNo, and tell Claude what to do differently\b/.test(flat))
   );
 }
@@ -378,6 +410,8 @@ function createCmuxDriver(
   let contextTokens: number | null = null;
   /** When the hub last refused a permission prompt: once per prompt, not once per poll. */
   let deniedAt = 0;
+  /** The dialog the screen last showed open, for the `needs-input` event. */
+  let dialog: CmuxDialog | null = null;
   let savedPath: string | null = null;
   let attachedSaid = mode.kind !== "attach";
   let timer: NodeJS.Timeout | undefined;
@@ -557,12 +591,31 @@ function createCmuxDriver(
     } catch {
       // unread: the transcript decides
     }
-    if (dialogOpen(screen)) return "needsInput";
+    dialog = dialogOf(screen);
+    if (dialog !== null) return "needsInput";
     if (CLAUDE_BUSY.test(screen)) return "running";
     const now = Date.now();
     if (turn === "pending" && now - grewAt < PENDING_QUIET_MS) return "running";
     if (sentAt !== null && now - sentAt < PENDING_QUIET_MS) return "running";
     return "idle";
+  }
+
+  /**
+   * cmux's state checked against the screen: a turn (running or waiting) with a dialog open is
+   * `needsInput`, and the dialog is kept for the event. An idle Claude has no dialog: not read.
+   */
+  async function screenLifecycle(
+    said: CmuxAgent["lifecycle"],
+  ): Promise<CmuxAgent["lifecycle"]> {
+    if (said === "idle") return said;
+    let screen = "";
+    try {
+      screen = await i.cmux.readScreen(workspace);
+    } catch {
+      return said;
+    }
+    dialog = dialogOf(screen);
+    return dialog === null ? said : "needsInput";
   }
 
   /**
@@ -708,7 +761,7 @@ function createCmuxDriver(
       sentAt = null;
       quiet = 0;
     } else if (next === "needsInput") {
-      emit({ kind: "needs-input" });
+      emit(dialog === null ? { kind: "needs-input" } : { kind: "needs-input", dialog });
     } else if (prev === "running" || prev === "needsInput") {
       finishTurn();
     }
@@ -764,7 +817,9 @@ function createCmuxDriver(
       }
       persist();
       if (grew) growth++;
-      const now = seen?.lifecycle ?? (await guessLifecycle());
+      let now = seen?.lifecycle ?? (await guessLifecycle());
+      // cmux's record can stay `running` under an open dialog (#2304): the screen is read too
+      if (seen !== undefined) now = await screenLifecycle(now);
       if (finished || detached) return;
       if (!attachedSaid) {
         attachedSaid = true;

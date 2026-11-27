@@ -1446,7 +1446,11 @@ export type SessionEvent =
   | { kind: "init"; sessionId: string; model: string | null }
   | { kind: "turn-start" }
   /** The Claude in cmux waits on the operator: a question or a permission dialog is open. */
-  | { kind: "needs-input" }
+  | {
+      kind: "needs-input";
+      /** The open dialog as the screen shows it: its question and numbered options. */
+      dialog?: { question: string; options: string[] };
+    }
   /** A rejected request is not evidence that any executing turn has ended. */
   | { kind: "turn-refused"; active: boolean }
   | { kind: "result"; isError: boolean; stopReason: string | null }

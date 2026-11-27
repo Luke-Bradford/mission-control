@@ -693,10 +693,10 @@ describe("startCmuxSession", () => {
     });
     const h = start();
     await h.session.ready;
+    // the screen is read while cmux says running: the prompt is refused before cmux says needsInput
     h.setLifecycle("running");
-    await wait(() => h.events.some((e) => e.kind === "turn-start"));
-    h.setLifecycle("needsInput");
     await wait(() => (state().keys ?? []).some((k) => k.key === "escape"));
+    h.setLifecycle("needsInput");
     expect(state().keys.find((k) => k.key === "escape")).toMatchObject({ force: true });
     await new Promise((r) => setTimeout(r, 200));
     expect(h.events.some((e) => e.kind === "needs-input")).toBe(false);
@@ -752,6 +752,56 @@ describe("startCmuxSession", () => {
     patch((s) => {
       s.screen =
         " Bash command\n   ls\n Do you want to proceed?\n ❯ 1. Yes\n   3. No, and tell Claude what to do differently (esc)";
+    });
+    await wait(() => (state().keys ?? []).some((k) => k.key === "escape"));
+    await h.session.close();
+  });
+
+  // #2304: cmux's record went on saying `running` while Claude's dialog was open, and the hub never looked
+  it("reads the screen while cmux says running: a question is needs-input, with its text and options", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen = "Thinking…";
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("running");
+    await wait(() => h.events.some((e) => e.kind === "turn-start"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    await wait(() => h.events.some((e) => e.kind === "needs-input"));
+    expect(h.events.find((e) => e.kind === "needs-input")).toMatchObject({
+      dialog: { question: "Which database should I use?", options: ["1. Postgres", "2. SQLite"] },
+    });
+    await h.session.close();
+  });
+
+  it("refuses the eBull create-file dialog even while cmux's record says running", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen = "Thinking…";
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("running");
+    await wait(() => h.events.some((e) => e.kind === "turn-start"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Do you want to create 518_filing_processing_receipts.sql?",
+        " ❯ 1. Yes",
+        "   2. Yes, and switch to accept edits",
+        "   3. No",
+        "",
+        " Esc to cancel",
+      ].join("\n");
     });
     await wait(() => (state().keys ?? []).some((k) => k.key === "escape"));
     await h.session.close();
