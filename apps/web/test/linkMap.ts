@@ -216,6 +216,7 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
       rule(/· PR #\d+ ·/, /^\/qa\?repo=[\w-]+&pr=\d+$/, "A queued PR opens its readiness report."),
       rule(/^Open preview$/, EXTERNAL, "The PR's running preview, in a new tab."),
       rule(/^Open PR #\d+ on GitHub$/, EXTERNAL, "GitHub, in a new tab."),
+      rule(/^Open pixel diff/, EXTERNAL, "The captured diff opens full size in a new tab."),
       rule(
         /^Open native review for /,
         /^\/qa\?view=history&native=\d+&identity=\w+$/,
