@@ -495,7 +495,7 @@ export function escalationKind(e: Pick<Escalation, "kind" | "source">): Attentio
 }
 /** Limits set when each seat starts, not refusals the guard records: the refusal counts leave them out. */
 export const RUNTIME_LIMITS = [
-  "Claude seats may use the network through curl and web search, except this Mac's loopback services unless the repo explicitly permits one; web fetch is off; Codex seats stay offline",
+  "Claude seats may use the network through curl and web search, except this Mac's own services (loopback); web fetch is off; Codex seats stay offline",
   "Seats may run background tasks; a full suite run with & or nohup, or handed to a launcher, still takes the test lock and keeps it until the seat's turn ends",
   "FLIGHT runs with full access, network included",
 ] as const;
