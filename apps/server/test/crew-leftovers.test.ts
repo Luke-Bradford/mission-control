@@ -1,6 +1,16 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -190,16 +200,69 @@ it("finds a crew gzip transcript from its bounded prefix", async () => {
     ),
   );
 
-  await cleanupCrewLeftovers({
+  old(transcript, 15 * 24);
+
+  // not live, past the delete age: deleted only if its bounded prefix names a crew worktree
+  const result = await cleanupCrewLeftovers({
     now: NOW,
     worktrees,
     claudeProjects: projects,
     tmp: join(root, "tmp"),
-    liveWorktrees: new Set([join(worktrees, "mc", "seat")]),
-    processLines: [],
+    liveWorktrees: new Set(),
+    processLines: null,
   });
 
-  expect(existsSync(transcript)).toBe(true);
+  expect(result.deleted).toBe(1);
+  expect(existsSync(transcript)).toBe(false);
+});
+
+it("closes every gzip transcript it reads, on a break, a bad file or an unreadable one (#2292)", async () => {
+  const worktrees = join(root, "worktrees");
+  const projects = join(root, "claude", "projects");
+  const crew = join(projects, crewProjectName(join(worktrees, "mc", "seat")));
+  mkdirSync(crew, { recursive: true });
+  // compressed bigger than one read and longer than the prefix the pass reads, so it stops before
+  // the file's end: the path that leaked a descriptor
+  const body = gzipSync(
+    Buffer.concat([
+      Buffer.from(JSON.stringify({ cwd: join(worktrees, "mc", "seat") })),
+      randomBytes(2 ** 20),
+    ]),
+  );
+  for (let i = 0; i < 40; i++) writeFileSync(join(crew, `s${i}.jsonl.gz`), body);
+  // past the delete age: deleting them proves the pass read their prefix and knew them as crew
+  for (let i = 0; i < 10; i++) {
+    const path = join(crew, `old${i}.jsonl.gz`);
+    writeFileSync(path, body);
+    old(path, 15 * 24);
+  }
+  // not gzip: the old code leaked here too
+  for (let i = 0; i < 5; i++) writeFileSync(join(crew, `bad${i}.jsonl.gz`), "not gzip");
+  // a read error on the file itself: with `pipe` this hung the pass and threw uncaught
+  const unreadable = join(crew, "unreadable.jsonl.gz");
+  writeFileSync(unreadable, body);
+  chmodSync(unreadable, 0o000);
+  const openFds = () => readdirSync("/dev/fd").length;
+  const input = {
+    now: NOW,
+    worktrees,
+    claudeProjects: projects,
+    tmp: join(root, "tmp"),
+    // not live: a live seat's folder is skipped before any transcript is read
+    liveWorktrees: new Set<string>(),
+    // null skips the browser section and its system-wide lsof
+    processLines: null,
+  };
+  const first = await cleanupCrewLeftovers(input);
+  await new Promise((r) => setTimeout(r, 50));
+  const before = openFds();
+  for (let pass = 0; pass < 2; pass++) await cleanupCrewLeftovers(input);
+  await new Promise((r) => setTimeout(r, 50));
+  chmodSync(unreadable, 0o600);
+
+  expect(first.deleted).toBe(10);
+  // a leak keeps one descriptor per transcript per pass: about 90 here
+  expect(openFds() - before).toBeLessThan(5);
 });
 
 it("closes finished previews but leaves an open preview running", async () => {

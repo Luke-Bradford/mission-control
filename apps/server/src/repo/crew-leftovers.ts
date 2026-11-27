@@ -18,6 +18,7 @@ import {
   utimesSync,
 } from "node:fs";
 import { join, resolve, sep } from "node:path";
+import { pipeline as pipe } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 
@@ -145,7 +146,9 @@ const gzipPrefix = async (path: string): Promise<Buffer | null> => {
   const chunks: Buffer[] = [];
   let size = 0;
   try {
-    for await (const chunk of createReadStream(path).pipe(createGunzip())) {
+    // `pipeline`, not `pipe`: it closes the file on a break and on either stream's error (#2292)
+    const inflate = pipe(createReadStream(path), createGunzip(), () => {});
+    for await (const chunk of inflate) {
       const next = Buffer.from(chunk);
       const take = Math.min(next.length, TRANSCRIPT_PREFIX_BYTES - size);
       chunks.push(next.subarray(0, take));
