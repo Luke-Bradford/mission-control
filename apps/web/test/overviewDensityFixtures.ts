@@ -580,12 +580,17 @@ export function demoSeed(daySeed = 1) {
   const random = seeded(daySeed);
   const repos = ["mission-control", "eBull", "autonomy-engine"] as const;
   const day = [
-    { state: "running", hours: 6, cost: 18.73, note: null },
     {
-      state: "idle",
-      hours: 0,
-      cost: null,
-      note: "Finished a merge and is waiting for the next Ready ticket.",
+      state: "waiting",
+      hours: 0.4,
+      cost: 0.4,
+      note: "Waiting for a decision before assigning the next ticket.",
+    },
+    {
+      state: "running",
+      hours: 6,
+      cost: 18.73,
+      note: null,
     },
     {
       state: "parked",
@@ -724,6 +729,9 @@ export function demoSeed(daySeed = 1) {
     },
     "/api/flight/summary": flightSummary(),
     [`/api/repos/${DEMO_REPO}/rules`]: rulesFixture(DEMO_REPO),
+    ...Object.fromEntries(
+      repos.map((repoId) => [`/api/repos/${repoId}/rules`, rulesFixture(repoId)]),
+    ),
     "/api/settings/away": {
       on: false,
       until: "",

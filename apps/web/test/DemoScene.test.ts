@@ -51,6 +51,9 @@ it("builds an uneven, repeatable day with the awkward cases in view", () => {
     "autonomy-engine",
   ]);
   expect(first.api["/api/boards/autonomy-engine"]).toEqual([]);
+  for (const repoId of ["mission-control", "eBull", "autonomy-engine"])
+    expect(first.api[`/api/repos/${repoId}/rules`]).toBeDefined();
+  expect(rows[1]?.hudState).toBe("running");
   const reworked = first.api["/api/tickets/shop-app/108"] as {
     prs: { rounds: unknown[]; ci: { checks: { name: string }[] }[] }[];
   };
