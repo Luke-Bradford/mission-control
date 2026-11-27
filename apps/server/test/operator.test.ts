@@ -34,9 +34,7 @@ describe("operator token", () => {
       );
       expect(denied, mode).toBe(true);
       expect(sandbox.network.allowedDomains).toEqual(["*"]);
-      expect(sandbox.network.deniedResolvedAddresses).toContain(
-        SEAT_DENIED_RESOLVED_ADDRESSES[0],
-      );
+      expect(sandbox.network.deniedResolvedAddresses).toContain(SEAT_DENIED_RESOLVED_ADDRESSES[0]);
       expect(text).not.toContain("tok-1");
     }
   });
