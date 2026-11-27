@@ -143,7 +143,7 @@ describe("lockfileProblems", () => {
         HYP,
       ]),
     ).toEqual(["changes packages zod@4.1.0"]);
-    const { "zod@4.1.0": _gone, ...rest } = grown.packages;
+    const rest = { "hyparquet@1.33.2": { resolution: { integrity: "sha512-h" } } };
     expect(lockfileProblems(before, { ...grown, packages: rest }, [HYP])).toEqual([
       "removes packages zod@4.1.0",
     ]);
