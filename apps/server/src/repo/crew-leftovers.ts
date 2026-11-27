@@ -2,7 +2,7 @@
  * Files created by crew tools outside the hub data folder. Every path is narrowed to a configured
  * crew worktree or to the two Chromium names before it is read or removed.
  */
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   closeSync,
   createReadStream,
@@ -18,7 +18,7 @@ import {
   statSync,
   utimesSync,
 } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { pipeline as pipe } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
@@ -30,6 +30,7 @@ export const BROWSER_LEFTOVER_AFTER_MS = 6 * 60 * 60_000;
 const TRANSCRIPT = /\.jsonl(?:\.gz)?$/;
 const BROWSER_LEFTOVER = /^(?:playwright_chromiumdev_profile-|com\.google\.Chrome\.)/;
 const TRANSCRIPT_PREFIX_BYTES = 64 * 1024;
+const LSOF_TIMEOUT_MS = 750;
 
 export interface CrewLeftoverInput {
   now: number;
@@ -92,25 +93,55 @@ const processTable = (): string[] | null => {
   }
 };
 
-/** All paths with an open descriptor, including process working directories. Null keeps deletion conservative. */
-const openPaths = (): string[] | null => {
-  try {
-    const result = spawnSync("lsof", ["-Fn"], { encoding: "utf8", maxBuffer: 16 * 2 ** 20 });
-    if (result.error || result.signal || result.status === null) return null;
-    if (result.stderr !== "") return null;
-    // `lsof` uses 1 for an otherwise successful search with no matching files.
-    if (result.status !== 0 && result.status !== 1) return null;
-    return result.stdout
-      .split("\n")
-      .filter((line) => line.startsWith("n"))
-      .map((line) => line.slice(1));
-  } catch {
-    return null;
-  }
-};
-
-const pathInUse = (path: string, paths: readonly string[]): boolean =>
-  paths.some((open) => open === path || open.startsWith(`${path}${sep}`));
+/** True if lsof finds an open file below the candidate folder. Null keeps deletion conservative. */
+const pathInUse = (path: string): Promise<boolean | null> =>
+  new Promise((finish) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("lsof", ["-Fn", "+D", path], { stdio: ["ignore", "pipe", "pipe"] });
+    } catch {
+      finish(null);
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let done = false;
+    const settle = (inUse: boolean | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeout);
+      finish(inUse);
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      settle(null);
+    }, LSOF_TIMEOUT_MS);
+    const collect = (chunk: string, target: "stdout" | "stderr") => {
+      if (target === "stdout") stdout += chunk;
+      else stderr += chunk;
+      if (stdout.length + stderr.length > 64 * 1024) {
+        child.kill();
+        settle(null);
+      }
+    };
+    const stdoutStream = child.stdout;
+    const stderrStream = child.stderr;
+    if (stdoutStream === null || stderrStream === null) {
+      child.kill();
+      settle(null);
+      return;
+    }
+    stdoutStream.setEncoding("utf8");
+    stdoutStream.on("data", (chunk: string) => collect(chunk, "stdout"));
+    stderrStream.setEncoding("utf8");
+    stderrStream.on("data", (chunk: string) => collect(chunk, "stderr"));
+    child.on("error", () => settle(null));
+    child.on("close", (status, signal) => {
+      if (signal !== null || stderr !== "") return settle(null);
+      // On macOS, permission warnings can leave lsof at status 1 even after it found a file.
+      settle(status === 0 || status === 1 ? stdout !== "" : null);
+    });
+  });
 
 const crewProjects = (root: string, worktrees: string | undefined): string[] => {
   if (worktrees === undefined) return [];
@@ -255,15 +286,13 @@ export async function cleanupCrewLeftovers(input: CrewLeftoverInput): Promise<Cr
   }
   const processes = input.processLines === undefined ? processTable() : input.processLines;
   if (processes === null) return out;
-  const open = openPaths();
-  // `lsof` reports real paths; on macOS `$TMPDIR` is `/var/...`, a link to `/private/var/...` (#2294).
-  // Unresolvable: delete nothing, as with a missing process or lsof table.
   let realTmp: string;
   try {
     realTmp = realpathSync.native(input.tmp);
   } catch {
     return out;
   }
+  const candidates: { path: string; lsofPath: string }[] = [];
   for (const entry of list(input.tmp)) {
     if (!BROWSER_LEFTOVER.test(entry.name)) continue;
     const path = join(input.tmp, entry.name);
@@ -280,12 +309,18 @@ export async function cleanupCrewLeftovers(input: CrewLeftoverInput): Promise<Cr
       out.skippedLive++;
       continue;
     }
-    if (open === null || pathInUse(real, open)) {
+    candidates.push({ path, lsofPath: real });
+  }
+  // `lsof` matches the real candidate path, avoiding macOS's `/var` and `/private/var` link.
+  // Every check runs at once and a timeout leaves that entry for the next hourly pass.
+  const inUse = await Promise.all(candidates.map(({ lsofPath }) => pathInUse(lsofPath)));
+  for (const [index, candidate] of candidates.entries()) {
+    if (inUse[index] !== false) {
       out.skippedLive++;
       continue;
     }
     try {
-      rmSync(path, { recursive: true, force: true });
+      rmSync(candidate.path, { recursive: true, force: true });
       out.browserRemoved++;
     } catch {
       // Leave it for the next pass.
