@@ -1,6 +1,15 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -201,6 +210,40 @@ it("finds a crew gzip transcript from its bounded prefix", async () => {
 
   expect(existsSync(transcript)).toBe(true);
 });
+
+it("closes every gzip transcript it reads the prefix of (#2292)", async () => {
+  const worktrees = join(root, "worktrees");
+  const projects = join(root, "claude", "projects");
+  const crew = join(projects, crewProjectName(join(worktrees, "mc", "seat")));
+  mkdirSync(crew, { recursive: true });
+  // compressed bigger than one read and longer than the prefix the pass reads, so it stops before
+  // the file's end: the path that leaked a descriptor
+  const body = gzipSync(
+    Buffer.concat([
+      Buffer.from(JSON.stringify({ cwd: join(worktrees, "mc", "seat") })),
+      randomBytes(2 ** 20),
+    ]),
+  );
+  for (let i = 0; i < 40; i++) writeFileSync(join(crew, `s${i}.jsonl.gz`), body);
+  const openFds = () => readdirSync("/dev/fd").length;
+  const input = {
+    now: NOW,
+    worktrees,
+    claudeProjects: projects,
+    tmp: join(root, "tmp"),
+    // not live: a live seat's folder is skipped before any transcript is read
+    liveWorktrees: new Set<string>(),
+    processLines: [],
+  };
+  await cleanupCrewLeftovers(input);
+  await new Promise((r) => setTimeout(r, 50));
+  const before = openFds();
+  for (let pass = 0; pass < 2; pass++) await cleanupCrewLeftovers(input);
+  await new Promise((r) => setTimeout(r, 50));
+
+  // a leak keeps one descriptor per transcript per pass: 80 here
+  expect(openFds() - before).toBeLessThan(5);
+}, 120_000);
 
 it("closes finished previews but leaves an open preview running", async () => {
   const closed: number[] = [];
