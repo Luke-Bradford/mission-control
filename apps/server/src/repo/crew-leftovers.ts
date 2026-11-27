@@ -18,6 +18,7 @@ import {
   utimesSync,
 } from "node:fs";
 import { join, resolve, sep } from "node:path";
+import { pipeline as pipe } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 
@@ -144,12 +145,10 @@ const plainPrefix = (path: string): Buffer | null => {
 const gzipPrefix = async (path: string): Promise<Buffer | null> => {
   const chunks: Buffer[] = [];
   let size = 0;
-  // `pipe` does not pass a destroy upstream: breaking out of the loop closes the gunzip stream
-  // but would leave the file open, one descriptor per transcript per pass (#2292).
-  const source = createReadStream(path);
-  const inflate = createGunzip();
   try {
-    for await (const chunk of source.pipe(inflate)) {
+    // `pipeline`, not `pipe`: it closes the file on a break and on either stream's error (#2292)
+    const inflate = pipe(createReadStream(path), createGunzip(), () => {});
+    for await (const chunk of inflate) {
       const next = Buffer.from(chunk);
       const take = Math.min(next.length, TRANSCRIPT_PREFIX_BYTES - size);
       chunks.push(next.subarray(0, take));
@@ -159,9 +158,6 @@ const gzipPrefix = async (path: string): Promise<Buffer | null> => {
     return Buffer.concat(chunks, size);
   } catch {
     return null;
-  } finally {
-    inflate.destroy();
-    source.destroy();
   }
 };
 
