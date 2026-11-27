@@ -16,6 +16,12 @@ const DASH = "—";
 const NO_SAMPLE = "No machine sample yet";
 const AGENTS_COLOUR = "var(--fg-2)";
 const OTHER_COLOUR = "var(--line-2)";
+const CLEANUP_STORES = [
+  ["Claude projects", "claudeProjectsBytes"],
+  ["Codex sessions", "codexSessionsBytes"],
+  ["Browser profiles", "browserProfilesBytes"],
+  ["Chrome temp", "chromeTempBytes"],
+] as const;
 /** The shared byte formatter divides by 1024; name the binary unit on this measured panel. */
 const binaryBytes = (value: number) => bytes(value).replace(/\b([KMG])B$/, "$1iB");
 
@@ -221,6 +227,7 @@ export function MachinePanel() {
   const summary = overview.data;
   const live = summary !== undefined && overview.error === null;
   const m = view?.latest ?? null;
+  const leftovers = view?.leftovers;
   const u = usage(m);
   const none = m === null ? NO_SAMPLE : undefined;
   const diskHistory = (summary?.machine?.disk ?? []).filter(
@@ -421,6 +428,14 @@ export function MachinePanel() {
               </span>
             </div>
           )}
+          {leftovers &&
+            CLEANUP_STORES.map(([label, key]) => (
+              <div className="resrow" key={key}>
+                <span className="s fg2">{label}</span>
+                <span />
+                <span className="num s">{binaryBytes(leftovers[key])}</span>
+              </div>
+            ))}
           <LockBox />
         </div>
         <p className="machine-window s muted">
