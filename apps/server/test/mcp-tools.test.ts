@@ -304,6 +304,27 @@ const commit = (message: unknown, ts: McTool[] = tools, ctx: McToolContext = CTX
 const rm = (remove: unknown, message = "chore: drop", ts: McTool[] = tools, ctx = CTX) =>
   tool("commit", ts).call(ctx, { message, remove });
 
+describe("seat terminal tools", () => {
+  it("runs only in the caller's active worktree and returns output with an exit code", async () => {
+    liveSeat("guido-1", RUN);
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: RUN,
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: "/crew/seat",
+      updatedAt: NOW,
+    });
+    const terminalRun = vi.fn().mockResolvedValue({ output: "ok\n", exitCode: 0 });
+    const result = await tool("terminal_run", make({ terminalRun })).call(CTX, {
+      command: "pnpm test",
+    });
+    expect(terminalRun).toHaveBeenCalledWith("/crew/seat", "pnpm test");
+    expect(result.text).toBe('{"output":"ok\\n","exitCode":0}');
+  });
+});
+
 beforeEach(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-tools-")));
   clone = join(dir, "clone");

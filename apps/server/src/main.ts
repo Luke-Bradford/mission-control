@@ -821,6 +821,19 @@ export async function main(): Promise<void> {
   let crewApps: ReturnType<typeof createCrewApps> | null = null;
   const mcDeps: McToolsDeps = {
     crewApps: () => crewApps,
+    terminalRun: (worktree, command) =>
+      new Promise((resolve) =>
+        execFile(
+          "sh",
+          ["-lc", command],
+          { cwd: worktree, maxBuffer: 64 * 1024 },
+          (error, stdout, stderr) =>
+            resolve({
+              output: `${stdout}${stderr}`.slice(-64 * 1024),
+              exitCode: error === null ? 0 : typeof error.code === "number" ? error.code : 1,
+            }),
+        ),
+      ),
     qaReports,
     rules: engineRules,
     qaReportBaseUrl: `http://${HOST}:${port}`,

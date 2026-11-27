@@ -273,6 +273,10 @@ export interface McToolsDeps {
     restart(seatId: string): Promise<void>;
     status(seatId: string): Promise<string>;
   } | null;
+  terminalRun?: (
+    worktree: string,
+    command: string,
+  ) => Promise<{ output: string; exitCode: number }>;
   qaReports?: QaReportService;
   qaReportBaseUrl?: string;
   config: CcConfig;
@@ -377,6 +381,7 @@ const CommitArgs = z.strictObject({
   message: text(MC_TEXT_MAX),
   remove: z.array(removePath).max(MC_REMOVE_MAX).optional(),
 });
+const TerminalRunArgs = z.strictObject({ command: text(10_000) });
 const PrBodyArgs = z.strictObject({ body: text(MC_PR_BODY_MAX) });
 const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
 const CallArgs = z.strictObject({
@@ -1690,6 +1695,17 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const apps = deps.crewApps?.();
     if (!apps) return { text: "Crew apps are unavailable.", isError: true };
     return { text: await apps.status(ctx.seatId) };
+  }
+  async function terminalRun(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = TerminalRunArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const live = liveRun(ctx);
+    if (live === null) return ENDED;
+    if (live.worktree === null)
+      return { text: "No worktree is active for this seat.", isError: true };
+    if (!deps.terminalRun) return { text: "The seat terminal is unavailable.", isError: true };
+    const result = await deps.terminalRun(live.worktree, parsed.data.command);
+    return { text: JSON.stringify(result) };
   }
 
   async function commsRead(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3370,6 +3386,14 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       modes: ["writer", "read-only", "scratch"],
       call: appStatus,
+    },
+    {
+      name: MC_TOOL_NAMES.terminalRun,
+      description:
+        "Run one command in this seat's worktree terminal and return its output and exit code.",
+      inputSchema: z.toJSONSchema(TerminalRunArgs),
+      modes: ["writer", "read-only", "scratch"],
+      call: terminalRun,
     },
     {
       name: MC_TOOL_NAMES.commsRead,
