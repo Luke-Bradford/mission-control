@@ -25,7 +25,12 @@ import {
   createCmux,
 } from "../src/runtime/cmux.ts";
 import {
+  answerCmuxDialog,
   attachCmuxSession,
+  CMUX_DIALOG_CHANGED,
+  CMUX_DIALOG_GONE,
+  CMUX_DIALOG_NO_OPTION,
+  CMUX_DIALOG_PERMISSION,
   CMUX_ENDED,
   CMUX_ENV_FILE,
   CMUX_LAUNCHER_FILE,
@@ -854,6 +859,97 @@ describe("startCmuxSession", () => {
     expect(long).toContain("1. Keep data");
     expect(long).toContain("2. Delete data");
     expect(long).toContain("3. yyy");
+  });
+
+  describe("answerCmuxDialog (FLIGHT's answer_dialog)", () => {
+    const RULE_LINE = "────────────────────────────────────────────────────────────";
+    /** A screen whose cursor the arrow keys move, as Claude's menu does; Enter closes it. */
+    const menu = (options: string[], at = 0, question = "Which database should I use?") => {
+      const m = {
+        at,
+        keys: [] as { key: string; force: boolean }[],
+        closed: false,
+        options,
+        question,
+      };
+      const screen = () =>
+        m.closed
+          ? " ❯ "
+          : [
+              RULE_LINE,
+              ` ${m.question}`,
+              ...m.options.map((o, n) => `${n === m.at ? " ❯ " : "   "}${o}`),
+              " Enter to select · Esc to cancel",
+            ].join("\n");
+      const cmux = {
+        readScreen: async () => screen(),
+        sendKey: async (_ws: string, key: string, force = false) => {
+          m.keys.push({ key, force });
+          if (key === "down") m.at = Math.min(m.at + 1, m.options.length - 1);
+          if (key === "up") m.at = Math.max(m.at - 1, 0);
+          if (key === "enter") m.closed = true;
+        },
+      };
+      return { m, cmux };
+    };
+    const OPTS = ["1. Postgres", "2. SQLite", "3. Neither"];
+
+    it("moves the cursor to the option a key at a time, then Enter, forced past the open dialog", async () => {
+      const { m, cmux } = menu(OPTS);
+      await answerCmuxDialog(cmux, "ws", { option: 3, label: "3. Neither" }, { pollMs: 0 });
+      expect(m.keys).toEqual([
+        { key: "down", force: true },
+        { key: "down", force: true },
+        { key: "enter", force: true },
+      ]);
+      const up = menu(OPTS, 2);
+      await answerCmuxDialog(up.cmux, "ws", { option: 1, label: "1. Postgres" }, { pollMs: 0 });
+      expect(up.m.keys.map((k) => k.key)).toEqual(["up", "up", "enter"]);
+    });
+
+    it("takes a label FLIGHT saw cut short", async () => {
+      const { m, cmux } = menu(["1. Keep data", "2. Delete data and every backup"]);
+      await answerCmuxDialog(cmux, "ws", { option: 2, label: "2. Delete data…" }, { pollMs: 0 });
+      expect(m.keys.map((k) => k.key)).toEqual(["down", "enter"]);
+    });
+
+    it("refuses with no key sent: no dialog, no such option, a changed dialog, a permission prompt", async () => {
+      const gone = menu(OPTS);
+      gone.m.closed = true;
+      await expect(
+        answerCmuxDialog(gone.cmux, "ws", { option: 1, label: "1. Postgres" }, { pollMs: 0 }),
+      ).rejects.toThrow(CMUX_DIALOG_GONE);
+      const none = menu(OPTS);
+      await expect(
+        answerCmuxDialog(none.cmux, "ws", { option: 4, label: "4. Mongo" }, { pollMs: 0 }),
+      ).rejects.toThrow(CMUX_DIALOG_NO_OPTION);
+      const changed = menu(OPTS);
+      await expect(
+        answerCmuxDialog(changed.cmux, "ws", { option: 2, label: "2. Delete data" }, { pollMs: 0 }),
+      ).rejects.toThrow(CMUX_DIALOG_CHANGED);
+      const tool = menu(
+        ["1. Yes", "2. Yes, and switch to accept edits", "3. No"],
+        0,
+        "Do you want to create a.sql?",
+      );
+      await expect(
+        answerCmuxDialog(tool.cmux, "ws", { option: 1, label: "1. Yes" }, { pollMs: 0 }),
+      ).rejects.toThrow(CMUX_DIALOG_PERMISSION);
+      for (const t of [gone, none, changed, tool]) expect(t.m.keys).toEqual([]);
+    });
+
+    it("stops if the dialog changes under it, before Enter", async () => {
+      const { m, cmux } = menu(OPTS);
+      const send = cmux.sendKey;
+      cmux.sendKey = async (ws, key, force) => {
+        await send(ws, key, force);
+        m.options = ["1. Yes, migrate", "2. No, wait", "3. Later"];
+      };
+      await expect(
+        answerCmuxDialog(cmux, "ws", { option: 3, label: "3. Neither" }, { pollMs: 0 }),
+      ).rejects.toThrow(CMUX_DIALOG_CHANGED);
+      expect(m.keys.map((k) => k.key)).not.toContain("enter");
+    });
   });
 
   it("knows Claude 2.1.332's create-file dialog, which has no title, as a tool prompt", () => {

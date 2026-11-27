@@ -264,7 +264,9 @@ import {
 } from "./cli-check.ts";
 import { type Cmux, CmuxError, type CmuxOptions, createCmux } from "./cmux.ts";
 import {
+  answerCmuxDialog,
   attachCmuxSession,
+  CMUX_DIALOG_NOT_WAITING,
   CMUX_DIALOG_REPORT_MS,
   CMUX_WORKSPACE_PREFIX,
   type CmuxDialog,
@@ -768,6 +770,11 @@ export interface Supervisor {
     },
   ): Promise<void>;
   interrupt(seatId: string): Promise<void>;
+  /**
+   * FLIGHT's answer to the dialog open in a seat's cmux workspace (`answerCmuxDialog`). Throws with
+   * the reason when the seat is not waiting on one in cmux, or the dialog is not the one named.
+   */
+  answerDialog(seatId: string, answer: { option: number; label: string }): Promise<void>;
   /** Ends the run and leaves the seat idle for its next ticket; `hold` benches it (stopped) instead. */
   endRun(seatId: string, opts?: { hold?: boolean }): Promise<void>;
   /** null when the seat has no live session, or it did not answer. */
@@ -5986,6 +5993,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           log(`${seatId}: could not mark its questions answered: ${errText(e)}`);
         }
       });
+    },
+
+    async answerDialog(seatId, answer) {
+      const l = live.get(seatId);
+      if (l === undefined || store.seatSession(seatId)?.state !== "needs-input")
+        throw new SupervisorError(409, CMUX_DIALOG_NOT_WAITING);
+      const saved = viaCmux(l.run) ? savedWorkspace(l.run.id) : null;
+      if (saved === null || cmux === null) throw new SupervisorError(409, CMUX_DIALOG_NOT_WAITING);
+      await answerCmuxDialog(cmux, saved.workspace, answer);
+      log(`${seatId}: FLIGHT answered its cmux dialog with option ${answer.option}`);
     },
 
     async interrupt(seatId) {

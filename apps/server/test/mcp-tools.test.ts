@@ -412,6 +412,7 @@ describe("the mc tools", () => {
         endAsideRun: vi.fn(),
         resumeRun: vi.fn(),
         interrupt: vi.fn(),
+        answerDialog: vi.fn(),
       },
       rules: vi.fn(),
       fetchTicket: vi.fn(),

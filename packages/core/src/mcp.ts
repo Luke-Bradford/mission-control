@@ -78,6 +78,7 @@ export const MC_TOOL_NAMES = {
   cmuxSessions: "cmux_sessions",
   cmuxSend: "cmux_send",
   cmuxOpen: "cmux_open",
+  answerDialog: "answer_dialog",
   setFlightMode: "set_flight_mode",
 } as const;
 
@@ -159,6 +160,7 @@ export const MC_TOOLS = {
   cmuxSessions: mcTool(MC_TOOL_NAMES.cmuxSessions),
   cmuxSend: mcTool(MC_TOOL_NAMES.cmuxSend),
   cmuxOpen: mcTool(MC_TOOL_NAMES.cmuxOpen),
+  answerDialog: mcTool(MC_TOOL_NAMES.answerDialog),
   setFlightMode: mcTool(MC_TOOL_NAMES.setFlightMode),
 } as const;
 
