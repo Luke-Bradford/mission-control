@@ -2,7 +2,7 @@
  * Files created by crew tools outside the hub data folder. Every path is narrowed to a configured
  * crew worktree or to the two Chromium names before it is read or removed.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   closeSync,
   createReadStream,
@@ -17,7 +17,7 @@ import {
   statSync,
   utimesSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 
@@ -89,6 +89,26 @@ const processTable = (): string[] | null => {
     return null;
   }
 };
+
+/** All paths with an open descriptor, including process working directories. Null keeps deletion conservative. */
+const openPaths = (): string[] | null => {
+  try {
+    const result = spawnSync("lsof", ["-Fn"], { encoding: "utf8", maxBuffer: 16 * 2 ** 20 });
+    if (result.error || result.signal || result.status === null) return null;
+    if (result.stderr !== "") return null;
+    // `lsof` uses 1 for an otherwise successful search with no matching files.
+    if (result.status !== 0 && result.status !== 1) return null;
+    return result.stdout
+      .split("\n")
+      .filter((line) => line.startsWith("n"))
+      .map((line) => line.slice(1));
+  } catch {
+    return null;
+  }
+};
+
+const pathInUse = (path: string, paths: readonly string[]): boolean =>
+  paths.some((open) => open === path || open.startsWith(`${path}${sep}`));
 
 const crewProjects = (root: string, worktrees: string | undefined): string[] => {
   if (worktrees === undefined) return [];
@@ -178,11 +198,22 @@ const cleanTranscript = async (
     } else if (!path.endsWith(".gz") && age >= CREW_TRANSCRIPT_GZIP_AFTER_MS) {
       const compressed = `${path}.gz`;
       const tmp = `${compressed}.tmp`;
-      await pipeline(createReadStream(path), createGzip(), createWriteStream(tmp, { flags: "wx" }));
-      renameSync(tmp, compressed);
-      utimesSync(compressed, st.atime, st.mtime);
-      rmSync(path, { force: true });
-      out.gzipped++;
+      // A stopped pass can leave this file behind. The source remains until the complete stream
+      // has been atomically renamed, and `finally` leaves the next hourly pass a clear retry.
+      rmSync(tmp, { force: true });
+      try {
+        await pipeline(
+          createReadStream(path),
+          createGzip(),
+          createWriteStream(tmp, { flags: "wx" }),
+        );
+        renameSync(tmp, compressed);
+        utimesSync(compressed, st.atime, st.mtime);
+        rmSync(path, { force: true });
+        out.gzipped++;
+      } finally {
+        rmSync(tmp, { force: true });
+      }
     }
   } catch {
     // The next hourly pass retries a file that another process changed or removed.
@@ -220,6 +251,7 @@ export async function cleanupCrewLeftovers(input: CrewLeftoverInput): Promise<Cr
   }
   const processes = input.processLines === undefined ? processTable() : input.processLines;
   if (processes === null) return out;
+  const open = openPaths();
   for (const entry of list(input.tmp)) {
     if (!BROWSER_LEFTOVER.test(entry.name)) continue;
     const path = join(input.tmp, entry.name);
@@ -231,6 +263,10 @@ export async function cleanupCrewLeftovers(input: CrewLeftoverInput): Promise<Cr
     }
     if (st.isSymbolicLink() || input.now - st.mtimeMs < BROWSER_LEFTOVER_AFTER_MS) continue;
     if (processes.some((line) => line.includes(path))) {
+      out.skippedLive++;
+      continue;
+    }
+    if (open === null || pathInUse(path, open)) {
       out.skippedLive++;
       continue;
     }

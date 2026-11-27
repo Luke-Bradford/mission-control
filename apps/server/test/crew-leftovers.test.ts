@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -106,6 +108,70 @@ it("leaves Claude folders whose hyphenated name collides with the crew root", as
   });
 
   expect(existsSync(transcript)).toBe(true);
+});
+
+it("leaves browser leftovers with an open file, even when its process argv has no path", async () => {
+  const tmp = join(root, "tmp");
+  const profile = join(tmp, "playwright_chromiumdev_profile-open");
+  const chrome = join(tmp, "com.google.Chrome.open");
+  const profileFile = join(profile, "cache");
+  const chromeFile = join(chrome, "cache");
+  for (const dir of [profile, chrome]) mkdirSync(dir, { recursive: true });
+  writeFileSync(profileFile, "profile");
+  writeFileSync(chromeFile, "chrome");
+  old(profile, 7);
+  old(chrome, 7);
+  const child = spawn(
+    process.execPath,
+    [
+      "-e",
+      "const fs=require('node:fs');for(const path of JSON.parse(process.env.HELD_FILES))fs.openSync(path,'r');process.stdout.write('ready');setInterval(()=>{},1e3)",
+    ],
+    { env: { ...process.env, HELD_FILES: JSON.stringify([profileFile, chromeFile]) } },
+  );
+  try {
+    if (child.stdout === null) throw new Error("The file-holder did not expose stdout.");
+    await once(child.stdout, "data");
+    const result = await cleanupCrewLeftovers({
+      now: NOW,
+      worktrees: join(root, "worktrees"),
+      claudeProjects: join(root, "claude", "projects"),
+      tmp,
+      liveWorktrees: new Set(),
+      processLines: [],
+    });
+
+    expect(result).toEqual({ gzipped: 0, deleted: 0, browserRemoved: 0, skippedLive: 2 });
+    expect(existsSync(profile)).toBe(true);
+    expect(existsSync(chrome)).toBe(true);
+  } finally {
+    child.kill();
+  }
+});
+
+it("retries compression after an interrupted pass leaves its temporary gzip", async () => {
+  const worktrees = join(root, "worktrees");
+  const projects = join(root, "claude", "projects");
+  const crew = join(projects, crewProjectName(join(worktrees, "mc", "seat")));
+  const transcript = join(crew, "session.jsonl");
+  mkdirSync(crew, { recursive: true });
+  writeFileSync(transcript, JSON.stringify({ cwd: join(worktrees, "mc", "seat") }));
+  writeFileSync(`${transcript}.gz.tmp`, "partial gzip");
+  old(transcript, 25);
+
+  const result = await cleanupCrewLeftovers({
+    now: NOW,
+    worktrees,
+    claudeProjects: projects,
+    tmp: join(root, "tmp"),
+    liveWorktrees: new Set(),
+    processLines: [],
+  });
+
+  expect(result).toEqual({ gzipped: 1, deleted: 0, browserRemoved: 0, skippedLive: 0 });
+  expect(existsSync(transcript)).toBe(false);
+  expect(existsSync(`${transcript}.gz`)).toBe(true);
+  expect(existsSync(`${transcript}.gz.tmp`)).toBe(false);
 });
 
 it("finds a crew gzip transcript from its bounded prefix", async () => {
