@@ -116,12 +116,12 @@ it("finds a crew gzip transcript from its bounded prefix", async () => {
   const transcript = join(crew, "large.jsonl.gz");
   writeFileSync(
     transcript,
-      gzipSync(
-        Buffer.concat([
-          Buffer.from(JSON.stringify({ cwd: join(worktrees, "mc", "seat") })),
-          Buffer.alloc(2 ** 20),
-        ]),
-      ),
+    gzipSync(
+      Buffer.concat([
+        Buffer.from(JSON.stringify({ cwd: join(worktrees, "mc", "seat") })),
+        Buffer.alloc(2 ** 20),
+      ]),
+    ),
   );
 
   await cleanupCrewLeftovers({
