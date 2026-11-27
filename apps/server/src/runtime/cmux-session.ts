@@ -140,11 +140,25 @@ export interface CmuxDialog {
 export const CMUX_DIALOG_REPORT_MS = 20_000;
 /** The most of a dialog's text a call to FLIGHT carries. */
 const DIALOG_REASON_MAX = 1500;
+/** The most of one option a call carries: every option keeps its number and a label. */
+const DIALOG_OPTION_MAX = 160;
 
-/** The call to FLIGHT about a dialog nobody has answered: what it asks and every option, numbered. */
+const cut = (s: string, max: number) =>
+  s.length > max ? `${s.slice(0, Math.max(0, max - 1))}…` : s;
+
+/**
+ * The call to FLIGHT about a dialog nobody has answered: what it asks and every option, numbered.
+ * The options are bounded first, so a long question is what gets cut, never an option.
+ */
 export function cmuxDialogReason(d: CmuxDialog): string {
-  const text = `A Claude dialog is open in this seat's cmux workspace and nobody has answered it. It asks: "${d.question}" Options: ${d.options.join(" / ")}.`;
-  return text.length > DIALOG_REASON_MAX ? `${text.slice(0, DIALOG_REASON_MAX - 1)}…` : text;
+  const head =
+    "A Claude dialog is open in this seat's cmux workspace and nobody has answered it. It asks: \"";
+  let options = d.options.map((o) => cut(o, DIALOG_OPTION_MAX)).join(" / ");
+  const tail = () => `" Options: ${options}.`;
+  if (head.length + tail().length > DIALOG_REASON_MAX)
+    options = cut(options, DIALOG_REASON_MAX - head.length - 12);
+  const room = DIALOG_REASON_MAX - head.length - tail().length;
+  return `${head}${cut(d.question, room)}${tail()}`;
 }
 
 /** The open dialog's question and options, read from the block under the last rule; null when none is open. */

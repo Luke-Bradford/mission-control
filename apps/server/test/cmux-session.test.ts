@@ -845,6 +845,15 @@ describe("startCmuxSession", () => {
     expect(
       cmuxDialogReason({ question: "x".repeat(5000), options: [] }).length,
     ).toBeLessThanOrEqual(1500);
+    // a long question never pushes the options out of FLIGHT's call
+    const long = cmuxDialogReason({
+      question: "q".repeat(1600),
+      options: ["1. Keep data", "2. Delete data", `3. ${"y".repeat(800)}`],
+    });
+    expect(long.length).toBeLessThanOrEqual(1500);
+    expect(long).toContain("1. Keep data");
+    expect(long).toContain("2. Delete data");
+    expect(long).toContain("3. yyy");
   });
 
   it("knows Claude 2.1.332's create-file dialog, which has no title, as a tool prompt", () => {
