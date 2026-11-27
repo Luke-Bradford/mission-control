@@ -8,15 +8,15 @@ The operator, 26 November: "I'm hoping mission control will come to a close, jus
 
 The operator, 27 November: "Why are we running so slowly? Whats stalled, why isn't flight smart enough to get this on track?"
 
-This holds until the operator changes it. Close the ticket and FLIGHT.md's floor still come first. In FLIGHT.md's wake order, an idle eBull or autonomy-engine build seat (GUIDO-EB, GUIDO-AE) comes right after a red main and blocked work. It comes before anything on Mission Control.
+This holds until the operator changes it. Close the ticket and FLIGHT.md's floor still come first. Then come FLIGHT.md's wake steps 1 to 4 for these repos. Next comes an idle eBull or autonomy-engine build seat (`guido-eb`, `guido-ae`). It comes before anything on Mission Control.
 
-1. **Keep the repo build seats working.** If one has no run and FLIGHT.md lets it start a ticket, start one in that wake. Take the next ticket in the order given by that repo's `guidance.direction` in the hub config. Use the repo's own pickable column (eBull: Todo; autonomy-engine: Ready) and its area labels. A seat with nothing it may start stays idle.
+1. **Keep the repo build seats working.** Handing a seat its repo's open PR with a failed review comes first. Otherwise, if FLIGHT.md lets it start a ticket, start one in that wake. For these repos, the order in the hub config's `guidance.direction` takes the place of a working list. Promote only the next ticket in that order, or start the seat on it with `mc start_seat`. Use the repo's pickable column (eBull: Todo; autonomy-engine: Ready) and its area labels. A seat with nothing it may start stays idle.
 2. **Answer a repo seat's question in the wake that brings it.** A seat waiting on FLIGHT is as urgent as an idle one.
-3. **On Mission Control, work that unblocks a repo seat goes first.** Today that includes the seat terminal pane (#2275), the dependency route (#2298) and the per-repo scoreboard (#2279). Other Mission Control work is bug fixes and small features.
-4. **FLIGHT never runs `git commit` in a seat's worktree.** When the hub refuses repo work it should allow, fold the gap into its open ticket and set it to P0. File a new one only if none fits. Holds, stops, budget stops and approvals are not gaps.
-5. **Once a day, compare each repo with its old loop.** Use merged PRs a week and tokens per merged PR, from Telemetry once #2279 lands. If a repo is worse, find the cost and fix it. Say so in that day's report.
+3. **On Mission Control, work that unblocks a repo seat goes first.** Today that includes the seat terminal pane (#2275), eBull's database access (#2286) and the dependency route (#2298). The per-repo scoreboard (#2279) comes next, because item 5 needs it. Other Mission Control work is bug fixes, and small features the operator asks for.
+4. **FLIGHT never runs `git commit` in a seat's worktree.** When the hub refuses repo work it should allow, fold the gap into its open ticket. Set that ticket to P0, and file a new one only if none fits. The refusals FLIGHT.md lists as not bugs are not gaps: holds, stops, pauses, budget stops, approvals and protected Needs-you items.
+5. **Once a day, compare each repo with its old loop.** Start once #2279 lands, using its figures: merged PRs a week, and tokens per merged PR (input, output and cache, as the hub counts runs). If a repo is worse, find the cost and fix it. Say so in the next reply to the operator.
 
-The loops' baseline was measured by the controller from the hub's loop records and GitHub, ISO weeks 39 to 42. autonomy-engine merged 76 to 100 PRs a week, and eBull 97 to 161. Together they used about 3.3B tokens a week, about 16M per merged PR.
+The loops' baseline was measured by the controller from the hub's loop records and GitHub, ISO weeks 39 to 42. autonomy-engine merged 76 to 100 PRs a week, and eBull 97 to 161. Together they used about 3.3B tokens a week, counted the same way. That is about 16M per merged PR, for the two repos combined; compare each repo against it until #2279 gives per-repo figures.
 
 ## Close the ticket
 
