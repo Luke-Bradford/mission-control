@@ -683,30 +683,38 @@ function setupApi(): Record<string, unknown> {
 }
 
 /** The QA queue: the open PRs, newest first. */
-export function qaQueue(tickets: readonly DemoTicket[]) {
+export function qaQueue(
+  tickets: readonly DemoTicket[],
+  repoForTicket: (ticket: DemoTicket) => string = () => DEMO_REPO,
+) {
   const sha = "a".repeat(40);
   const acceptancePrs = new Set(
     tickets.filter((ticket) => ticket.stage === "checks").map((ticket) => ticket.n + 1000),
   );
   return {
-    prs: openPrs(tickets).map((pr, i) => ({
-      repoId: DEMO_REPO,
-      number: pr.number,
-      title: pr.title,
-      url: pr.url,
-      branch: `feature/${pr.number - 1000}-demo`,
-      ticket: pr.ticket,
-      state: "open",
-      isDraft: false,
-      review: acceptancePrs.has(pr.number) ? "approved" : "none",
-      ci: acceptancePrs.has(pr.number) ? "passing" : "pending",
-      createdAt: NOW - (i + 2) * HOUR,
-      updatedAt: NOW - 5 * MIN,
-      mergedAt: null,
-      headSha: sha,
-      mergeable: "MERGEABLE",
-      ...(acceptancePrs.has(pr.number) ? { uat: { sha, since: NOW - 40 * MIN } } : {}),
-    })),
+    prs: openPrs(tickets).map((pr, i) => {
+      const ticket = tickets.find((item) => item.n + 1000 === pr.number);
+      const repoId = ticket ? repoForTicket(ticket) : DEMO_REPO;
+      return {
+        ...pr,
+        repoId,
+        number: pr.number,
+        title: pr.title,
+        url: pr.url.replaceAll(DEMO_REPO, repoId),
+        branch: `feature/${pr.number - 1000}-demo`,
+        ticket: ticket ? `${repoId}#${ticket.n}` : pr.ticket,
+        state: "open",
+        isDraft: false,
+        review: acceptancePrs.has(pr.number) ? "approved" : "none",
+        ci: acceptancePrs.has(pr.number) ? "passing" : "pending",
+        createdAt: NOW - (i + 2) * HOUR,
+        updatedAt: NOW - 5 * MIN,
+        mergedAt: null,
+        headSha: sha,
+        mergeable: "MERGEABLE",
+        ...(acceptancePrs.has(pr.number) ? { uat: { sha, since: NOW - 40 * MIN } } : {}),
+      };
+    }),
     flightId: "flight-1",
   };
 }
@@ -715,17 +723,22 @@ export function qaQueue(tickets: readonly DemoTicket[]) {
  * The saved-evidence reads for each open PR, copied from the QA fixture. That fixture reads the
  * clock when it loads, so it is moved onto `NOW` first, like the rest of the seed.
  */
-function qaPrApi(tickets: readonly DemoTicket[]): Record<string, unknown> {
+function qaPrApi(
+  tickets: readonly DemoTicket[],
+  repoForTicket: (ticket: DemoTicket) => string = () => DEMO_REPO,
+): Record<string, unknown> {
   const clock = Date.now();
   const fixture = shiftTimes(qaAcceptanceFixture(1), clock, NOW - clock);
   const out: Record<string, unknown> = {};
   for (const pr of allPrs(tickets)) {
+    const ticket = tickets.find((item) => item.n + 1000 === pr.number);
+    const repoId = ticket ? repoForTicket(ticket) : DEMO_REPO;
     for (const [path, value] of Object.entries(fixture)) {
       if (path === "/api/qa/queue") continue;
       const own = (text: string) =>
         text
-          .replaceAll('"mission-control"', `"${DEMO_REPO}"`)
-          .replaceAll("mission-control/", `${DEMO_REPO}/`)
+          .replaceAll('"mission-control"', `"${repoId}"`)
+          .replaceAll("mission-control/", `${repoId}/`)
           .replaceAll("1011", String(pr.number));
       const read = JSON.parse(own(JSON.stringify(value)));
       // QA's browser checks: the reviewer's before and after shots of the page the PR touches.
@@ -739,15 +752,14 @@ function qaPrApi(tickets: readonly DemoTicket[]): Record<string, unknown> {
         }));
       out[own(path)] = read;
     }
-    out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}`] = { reports: [] };
-    out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}&headSha=${"a".repeat(40)}`] = {
+    out[`/api/qa-reports?repoId=${repoId}&prNumber=${pr.number}`] = { reports: [] };
+    out[`/api/qa-reports?repoId=${repoId}&prNumber=${pr.number}&headSha=${"a".repeat(40)}`] = {
       reports: [],
     };
-    const ticket = tickets.find((item) => item.n + 1000 === pr.number);
-    out[`/api/repos/${DEMO_REPO}/prs/${pr.number}`] = {
-      repoId: DEMO_REPO,
+    out[`/api/repos/${repoId}/prs/${pr.number}`] = {
+      repoId,
       number: pr.number,
-      ticket: ticket ? `${DEMO_REPO}#${ticket.n}` : null,
+      ticket: ticket ? `${repoId}#${ticket.n}` : null,
     };
   }
   return out;
@@ -840,15 +852,25 @@ function flightApi(): Record<string, unknown> {
 /** Everything but the Overview's own answers; the keys are request paths. */
 export function demoPageAnswers(
   tickets: readonly DemoTicket[] = DEMO_TICKETS,
+  repoForTicket: (ticket: DemoTicket) => string = () => DEMO_REPO,
 ): Record<string, unknown> {
   const telemetry = telemetryView();
   const clock = Date.now();
+  const historyRepo = tickets[0] ? repoForTicket(tickets[0]) : "mission-control";
   // The history fixture is written for other repos; Demo's are its own.
   const history = JSON.parse(
     JSON.stringify(shiftTimes(qaHistoryApi(3), clock, NOW - clock))
-      .replaceAll("mission-control", DEMO_REPO)
+      .replaceAll("mission-control", historyRepo)
       .replaceAll('{"id":"sample"}', '{"id":"site-builder"}'),
   ) as Record<string, unknown>;
+  const historyPage = history["/api/qa/history?limit=50"] as {
+    entries: unknown[];
+    repositories: { id: string }[];
+  };
+  historyPage.repositories = DEMO_CONFIGURED_REPOS.map((id) => ({ id }));
+  for (const repoId of DEMO_CONFIGURED_REPOS)
+    history[`/api/qa/history?limit=50&repoId=${repoId}`] =
+      repoId === "mission-control" ? historyPage : { ...historyPage, entries: [] };
   for (const i of [0, 2]) {
     const report = JSON.parse(
       JSON.stringify(shiftTimes(qaHistorySavedReport(i), clock, NOW - clock)).replaceAll(
@@ -872,9 +894,9 @@ export function demoPageAnswers(
     ...commsApi(),
     ...setupApi(),
     ...flightApi(),
-    ...qaPrApi(tickets),
+    ...qaPrApi(tickets, repoForTicket),
     ...ticketItems(tickets),
-    "/api/qa/queue": qaQueue(tickets),
+    "/api/qa/queue": qaQueue(tickets, repoForTicket),
     "/api/plans": plansView(),
     [`/api/plans?repoId=${DEMO_REPO}`]: plansView(),
     "/api/dependencies": [],

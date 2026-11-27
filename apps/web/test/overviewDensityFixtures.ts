@@ -689,7 +689,7 @@ export function demoSeed(daySeed = 1) {
   };
   const api: Record<string, unknown> = {
     ...base.api,
-    ...demoPageAnswers(),
+    ...demoPageAnswers(DEMO_TICKETS, demoRepoForTicket),
     ...Object.fromEntries(
       rows.flatMap((row, index) => {
         const view = demoAgentView(row, index);

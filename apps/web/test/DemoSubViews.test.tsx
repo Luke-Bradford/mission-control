@@ -134,17 +134,17 @@ describe("Demo pages keep moving where a person looks", () => {
   });
 
   it("a ticket in progress has a history", async () => {
-    await at("/tickets/shop-app/102");
+    await at("/tickets/eBull/102");
     expect(document.body.textContent).not.toContain("has not touched this ticket");
     clean();
   });
 
   it("a PR that appears during the scene has its reads, and the flow lists the open PRs", async () => {
     play(40);
-    await at("/qa?repo=shop-app&pr=1101");
+    await at("/qa?repo=mission-control&pr=1101");
     clean();
     const flow = getState().api["/api/prs/flow"] as { repos: { rows: { pr: number }[] }[] };
-    const prs = (getState().api["/api/repos/shop-app/prs"] as { number: number }[]).map(
+    const prs = (getState().api["/api/repos/mission-control/prs"] as { number: number }[]).map(
       (p) => p.number,
     );
     expect(flow.repos[0]?.rows.map((r) => r.pr).sort()).toEqual([...prs].sort());
@@ -156,19 +156,19 @@ describe("Demo choices end in data", () => {
     await at("/qa?view=history");
     const select = await waitFor(() => {
       const found = [...document.querySelectorAll<HTMLSelectElement>("main select")].find((e) =>
-        [...e.options].some((o) => o.value === "shop-app"),
+        [...e.options].some((o) => o.value === "mission-control"),
       );
       if (!found) throw new Error("no repo filter");
       return found;
     });
-    expect([...select.options].map((o) => o.value)).not.toContain("mission-control");
+    expect([...select.options].map((o) => o.value)).not.toContain("shop-app");
     for (const option of [...select.options]) {
       await act(async () => void fireEvent.change(select, { target: { value: option.value } }));
       await settle();
       clean();
     }
     document.body.innerHTML = "";
-    await at("/qa?repo=shop-app&pr=1011&history=1");
+    await at("/qa?repo=mission-control&pr=1101&history=1");
     clean();
   });
 });
@@ -219,7 +219,7 @@ describe("Demo findings from round 3", () => {
     // The scene's moves fall on beats its seed picks; play until the second (ticket 201) has.
     for (let i = 0; i < 45 && getState().moves < 2; i++) playNext();
     expect(getState().tickets.find((t) => t.n === 201)?.stage).toBe("building");
-    await at("/tickets/shop-app/201");
+    await at("/tickets/mission-control/201");
     expect(document.body.textContent).not.toContain("has not touched this ticket");
     expect(document.body.textContent).not.toMatch(/Status\s*Ready/);
     document.body.innerHTML = "";

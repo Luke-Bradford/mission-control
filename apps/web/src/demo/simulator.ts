@@ -372,7 +372,7 @@ function moveTicket(s: DemoState, at: number, move: (typeof TICKET_MOVES)[number
     shift,
   );
   // The ticket's own page, the QA queue and the seat that took it all follow the move.
-  s.api["/api/qa/queue"] = shiftTimes(qaQueue(s.tickets), NOW, shift);
+  s.api["/api/qa/queue"] = shiftTimes(qaQueue(s.tickets, demoRepoForTicket), NOW, shift);
   if (move.to === "building" && move.seat) {
     for (const row of [
       rowsOf(s).find((r) => r.id === move.seat),
