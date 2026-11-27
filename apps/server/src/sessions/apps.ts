@@ -39,7 +39,7 @@ export interface CrewAppSeat {
   worktree: string;
 }
 interface CrewAppsDeps {
-  cmux: Pick<Cmux, "newPane" | "setStatus" | "readScreen" | "workspaces">;
+  cmux: Pick<Cmux, "closePane" | "newPane" | "setStatus" | "readScreen" | "workspaces">;
   run(command: string, args: string[]): Promise<string>;
   repos(): readonly CrewAppRepo[];
   seats(): readonly CrewAppSeat[];
@@ -83,22 +83,26 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     string,
     {
       workspace: string;
+      worktree: string;
       repo: CrewAppRepo;
-      urls: { url: string; answers: boolean | null }[];
+      portStart: number;
+      apps: { pane: string; url: string; answers: boolean | null }[];
       restartedAt?: number;
     }
   >();
   const repoOf = (id: string) => deps.repos().find((repo) => repo.id === id);
   const seatOf = (id: string) => deps.seats().find((seat) => seat.id === id);
-  const portOf = (seat: CrewAppSeat, index: number) =>
-    APP_PORT_START +
-    deps
-      .seats()
-      .filter((item) => item.worktree !== "")
-      .sort((a, b) => a.id.localeCompare(b.id))
-      .findIndex((item) => item.id === seat.id) *
-      PORT_BLOCK +
-    index;
+  const reservedPorts = new Map<string, number>();
+  const portStart = (seatId: string) => {
+    const reserved = reservedPorts.get(seatId);
+    if (reserved !== undefined) return reserved;
+    const occupied = new Set(reservedPorts.values());
+    let next = APP_PORT_START;
+    while (occupied.has(next)) next += PORT_BLOCK;
+    reservedPorts.set(seatId, next);
+    return next;
+  };
+  const portOf = (seatId: string, index: number) => portStart(seatId) + index;
   const checkJobs = (repo: CrewAppRepo) => {
     if (
       repo.id.toLowerCase() === "ebull" &&
@@ -108,16 +112,17 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
   };
   const stop = async (seatId: string) => {
     const app = running.get(seatId);
-    const seat = seatOf(seatId);
-    if (!app || !seat) return;
+    if (!app) return;
     for (const index of app.repo.commands.keys()) {
-      const pid = `${seat.worktree}/${pidOf(seatId, index)}`;
+      const pid = `${app.worktree}/${pidOf(seatId, index)}`;
       await deps.run("sh", [
         "-lc",
         `if test -r ${quote(pid)}; then kill "$(cat ${quote(pid)})" 2>/dev/null || true; fi`,
       ]);
     }
+    await Promise.all(app.apps.map((entry) => deps.cmux.closePane(entry.pane).catch(() => {})));
     running.delete(seatId);
+    reservedPorts.delete(seatId);
     deps.log?.(`Stopped ${seatId}'s ${app.repo.id} app panes.`);
   };
   const start = async (seatId: string) => {
@@ -132,19 +137,20 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
       throw new Error("This seat's repository has no app commands.");
     checkJobs(repo);
     if (running.has(seatId)) await stop(seatId);
-    const backendPort = portOf(seat, 0);
-    const urls = [];
+    const startPort = portStart(seat.id);
+    const backendPort = startPort;
+    const apps = [];
     for (const [index, entry] of repo.commands.entries()) {
-      const port = portOf(seat, index);
-      await deps.cmux.newPane(
+      const port = startPort + index;
+      const pane = await deps.cmux.newPane(
         workspace,
         seat.worktree,
         commandAt(repo.id, entry.command, port, backendPort, pidOf(seatId, index)),
       );
-      urls.push({ url: urlAt(entry.url, port), answers: null });
+      apps.push({ pane, url: urlAt(entry.url, port), answers: null });
     }
-    await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, urls[0]?.url ?? "");
-    running.set(seatId, { workspace, repo, urls });
+    await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, apps[0]?.url ?? "");
+    running.set(seatId, { workspace, worktree: seat.worktree, repo, portStart: startPort, apps });
     deps.log?.(`Started ${seatId}'s ${repo.id} app panes.`);
   };
   return {
@@ -156,18 +162,24 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     stop,
     async status(seatId) {
       const app = running.get(seatId);
-      return app
-        ? deps.cmux.readScreen(app.workspace, 40)
-        : "No app panes are running for this seat.";
+      if (!app) return "No app panes are running for this seat.";
+      return (
+        await Promise.all(
+          app.apps.map(
+            async (entry, index) =>
+              `App ${index + 1} (${entry.url}):\n${await deps.cmux.readScreen(entry.pane, 40)}`,
+          ),
+        )
+      ).join("\n\n");
     },
     async tick() {
       for (const [seatId] of running) if (!seatOf(seatId)) await stop(seatId);
       for (const seat of deps.seats()) if (!running.has(seat.id)) await start(seat.id);
       for (const [seatId, app] of running) {
         const answers = await Promise.all(
-          app.urls.map((entry) => probe(entry.url).catch(() => false)),
+          app.apps.map((entry) => probe(entry.url).catch(() => false)),
         );
-        app.urls.forEach((entry, index) => {
+        app.apps.forEach((entry, index) => {
           entry.answers = answers[index] ?? false;
         });
         if (
@@ -195,9 +207,9 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
             seat: seat.id,
             running: app !== undefined,
             apps:
-              app?.urls ??
+              app?.apps.map(({ url, answers }) => ({ url, answers })) ??
               repo.commands.map((entry, index) => ({
-                url: urlAt(entry.url, portOf(seat, index)),
+                url: urlAt(entry.url, portOf(seat.id, index)),
                 answers: null,
               })),
           },

@@ -100,7 +100,10 @@ export interface Cmux {
   openBrowser(ws: string, url: string): Promise<void>;
   newWorkspace(i: CmuxWorkspaceInput): Promise<string>;
   /** Opens another terminal pane in a workspace. */
-  newPane(ws: string, cwd: string, command: string): Promise<void>;
+  /** Opens a terminal pane and returns its surface identifier. */
+  newPane(ws: string, cwd: string, command: string): Promise<string>;
+  /** Closes one terminal pane. A pane already gone is not an error. */
+  closePane(pane: string): Promise<void>;
   /** The Claude records cmux holds (`cmux sessions`), from one shared call per second. */
   agents(): Promise<CmuxAgent[]>;
   /** "busy": a dialog is open or a draft is typed; nothing was sent. */
@@ -507,6 +510,12 @@ export function createCmux(
         command,
       ]);
       if (r.code !== 0) throw failed("new-pane", r);
+      return r.stdout.trim() || ws;
+    },
+    async closePane(pane) {
+      const r = await cmux(["close-pane", "--pane", pane]);
+      if (r.code !== 0 && !/not found|no such/i.test(`${r.stdout}\n${r.stderr}`))
+        throw failed("close-pane", r);
     },
     agents() {
       if (agentsCall !== null && Date.now() - agentsAt < AGENTS_CACHE_MS) return agentsCall;

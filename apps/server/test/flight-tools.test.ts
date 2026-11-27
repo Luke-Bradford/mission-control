@@ -489,7 +489,8 @@ beforeEach(() => {
       cmuxWorkspaces.push({ id, name: i.name, cwd: i.cwd });
       return id;
     },
-    newPane: async () => {},
+    newPane: async () => "pane",
+    closePane: async () => {},
     send: async (ws, text) => {
       cmuxSent.push({ ws, text });
       return "sent";
