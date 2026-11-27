@@ -1671,6 +1671,231 @@ describe("collectGithub pull requests", () => {
     expect(by.get(12)).toMatchObject({ state: "closed", review: "requested", ci: "pending" });
   });
 
+  it("keeps only the configured bot's current-head review", async () => {
+    const head = "a".repeat(40);
+    const botRepo = {
+      ...repo,
+      review: {
+        kind: "repo-bot" as const,
+        check: "Claude Code Review",
+        verdict: "comment" as const,
+        actor: "claude[bot]",
+      },
+    };
+    const { gql } = stub({
+      prPages: [
+        prPage([
+          pull(10, {
+            reviewDecision: "APPROVED",
+            commits: {
+              nodes: [
+                {
+                  commit: {
+                    oid: head,
+                    statusCheckRollup: {
+                      state: "SUCCESS",
+                      contexts: { nodes: [checkRun("Claude Code Review", "SUCCESS")] },
+                    },
+                  },
+                },
+              ],
+            },
+            reviews: {
+              nodes: [
+                {
+                  author: { login: "person" },
+                  state: "APPROVED",
+                  commit: { oid: head },
+                  body: "Looks good",
+                  comments: { nodes: [] },
+                },
+                {
+                  author: { login: "claude[bot]" },
+                  state: "APPROVED",
+                  commit: { oid: "b".repeat(40) },
+                  body: "Old",
+                  comments: { nodes: [] },
+                },
+                {
+                  author: { login: "claude[bot]" },
+                  state: "CHANGES_REQUESTED",
+                  commit: { oid: head },
+                  body: "Fix this",
+                  comments: {
+                    nodes: [
+                      { path: "apps/server/src/example.ts", line: 4, body: "Reject empty input." },
+                    ],
+                  },
+                },
+              ],
+            },
+          }),
+        ]),
+      ],
+    });
+    await collectGithub(botRepo, store, gql, NOW);
+    expect(prs()[0]?.repoBotReview).toEqual({
+      actor: "claude[bot]",
+      sha: head,
+      verdict: "changes",
+      findings: [
+        {
+          file: "apps/server/src/example.ts",
+          line: 4,
+          summary: "Reject empty input.",
+          scenario: "Reject empty input.",
+          fix: "Reject empty input.",
+        },
+      ],
+    });
+  });
+
+  it("accepts only a configured bot comment that names the current head", async () => {
+    const head = "a".repeat(40);
+    const botRepo = {
+      ...repo,
+      review: {
+        kind: "repo-bot" as const,
+        check: "Claude Code Review",
+        verdict: "comment" as const,
+        actor: "claude[bot]",
+      },
+    };
+    const { gql } = stub({
+      prPages: [
+        prPage([
+          pull(10, {
+            commits: {
+              nodes: [
+                {
+                  commit: {
+                    oid: head,
+                    statusCheckRollup: {
+                      state: "SUCCESS",
+                      contexts: { nodes: [checkRun("Claude Code Review", "SUCCESS")] },
+                    },
+                  },
+                },
+              ],
+            },
+            comments: {
+              nodes: [
+                { author: { login: "person" }, body: `${head}\nLooks good` },
+                { author: { login: "claude[bot]" }, body: `${"b".repeat(40)}\nApproved` },
+                {
+                  author: { login: "claude[bot]" },
+                  body: `${head}\nNot approved: approved earlier, but changes requested: validate input`,
+                },
+              ],
+            },
+          }),
+        ]),
+      ],
+    });
+    await collectGithub(botRepo, store, gql, NOW);
+    expect(prs()[0]?.repoBotReview).toMatchObject({
+      actor: "claude[bot]",
+      sha: head,
+      verdict: "changes",
+      findings: [
+        {
+          scenario: `${head}\nNot approved: approved earlier, but changes requested: validate input`,
+        },
+      ],
+    });
+  });
+
+  it("accepts a clean configured bot approval comment on the current head", async () => {
+    const head = "a".repeat(40);
+    const botRepo = {
+      ...repo,
+      review: {
+        kind: "repo-bot" as const,
+        check: "Claude Code Review",
+        verdict: "comment" as const,
+        actor: "claude[bot]",
+      },
+    };
+    const { gql } = stub({
+      prPages: [
+        prPage([
+          pull(10, {
+            commits: {
+              nodes: [
+                {
+                  commit: {
+                    oid: head,
+                    statusCheckRollup: {
+                      state: "SUCCESS",
+                      contexts: { nodes: [checkRun("Claude Code Review", "SUCCESS")] },
+                    },
+                  },
+                },
+              ],
+            },
+            comments: { nodes: [{ author: { login: "claude[bot]" }, body: `${head}\nApproved` }] },
+          }),
+        ]),
+      ],
+    });
+    await collectGithub(botRepo, store, gql, NOW);
+    expect(prs()[0]?.repoBotReview).toMatchObject({
+      actor: "claude[bot]",
+      sha: head,
+      verdict: "approved",
+    });
+  });
+
+  it("classifies current-head bot comment verdict markers", async () => {
+    const head = "a".repeat(40);
+    const botRepo = {
+      ...repo,
+      review: {
+        kind: "repo-bot" as const,
+        check: "Claude Code Review",
+        verdict: "comment" as const,
+        actor: "claude[bot]",
+      },
+    };
+    const botComment = (number: number, body: string) =>
+      pull(number, {
+        commits: {
+          nodes: [
+            {
+              commit: {
+                oid: head,
+                statusCheckRollup: {
+                  state: "SUCCESS",
+                  contexts: { nodes: [checkRun("Claude Code Review", "SUCCESS")] },
+                },
+              },
+            },
+          ],
+        },
+        comments: { nodes: [{ author: { login: "claude[bot]" }, body: `${head}\n${body}` }] },
+      });
+    const { gql } = stub({
+      prPages: [
+        prPage([
+          botComment(10, "No issues found"),
+          botComment(11, "Approved"),
+          botComment(12, "Issues found"),
+          botComment(13, "Approved earlier, but changes requested"),
+        ]),
+      ],
+    });
+    await collectGithub(botRepo, store, gql, NOW);
+    const verdicts = new Map(prs().map((pr) => [pr.number, pr.repoBotReview?.verdict]));
+    expect(verdicts).toEqual(
+      new Map([
+        [10, "approved"],
+        [11, "approved"],
+        [12, "changes"],
+        [13, "changes"],
+      ]),
+    );
+  });
+
   it("reads whether each PR comes from a fork and stores it", async () => {
     const { gql, calls } = stub({
       prPages: [

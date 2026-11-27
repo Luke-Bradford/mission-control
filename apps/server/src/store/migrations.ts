@@ -25,6 +25,7 @@ const PULL_REQUEST_LIST_COLUMNS = [
   "state",
   "is_draft",
   "review",
+  "repo_bot_review",
   "ci",
   "created_at",
   "updated_at",
@@ -160,6 +161,7 @@ class Migrations {
       this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
     // Whether a PR comes from a fork: a run never follows a fork's head (#2099).
     this.addColumn("pull_requests", "is_cross_repository", "INTEGER");
+    this.addColumn("pull_requests", "repo_bot_review", "TEXT");
     // A commit a run only follows, such as someone else's on top of its push (#2099).
     this.addColumn("run_commits", "followed", "INTEGER NOT NULL DEFAULT 0");
     // a hold kept past its calls (a suite left running in the background) survives a restart
