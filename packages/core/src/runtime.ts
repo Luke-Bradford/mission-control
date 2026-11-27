@@ -1222,8 +1222,9 @@ export function crewSandboxSettings(
       // A bare "*" matches every host. Claude applies deniedDomains before allowedDomains, so
       // loopback lives in the resolution deny list instead: an exact repo-local IP-and-port is
       // the sandbox's documented exception, while every other loopback destination stays shut.
+      // Put that exception before the catch-all, so the sandbox selects its precise rule.
       network: {
-        allowedDomains: ["*", ...(i.localServices ?? [])],
+        allowedDomains: [...(i.localServices ?? []), "*"],
         deniedDomains: [...SEAT_DENIED_HOSTS],
         deniedResolvedAddresses: [...SEAT_DENIED_RESOLVED_ADDRESSES],
       },

@@ -147,7 +147,7 @@ describe("crewCliArgs", () => {
       ),
     ).sandbox;
     expect(seat.network).toEqual({
-      allowedDomains: ["*", "127.0.0.1:5432", "127.0.0.1:6379"],
+      allowedDomains: ["127.0.0.1:5432", "127.0.0.1:6379", "*"],
       deniedDomains: [...SEAT_DENIED_HOSTS],
       deniedResolvedAddresses: [...SEAT_DENIED_RESOLVED_ADDRESSES],
     });
