@@ -172,7 +172,7 @@ export function lockfileProblems(
       continue;
     }
     for (const [id, record] of Object.entries(was)) {
-      if (!(id in now)) problems.push(`removes ${key} ${id}`);
+      if (!Object.hasOwn(now, id)) problems.push(`removes ${key} ${id}`);
       else if (!same(record, now[id])) problems.push(`changes ${key} ${id}`);
     }
   }
@@ -184,7 +184,7 @@ export function lockfileProblems(
   const fields = new Set<string>(DEP_FIELDS);
   const added: string[] = [];
   for (const [id, imp] of Object.entries(after.importers)) {
-    const was = id in b.importers ? b.importers[id] : {};
+    const was = Object.hasOwn(b.importers, id) ? b.importers[id] : {};
     if (!isObject(imp) || !isObject(was)) {
       problems.push(`has an importer ${id} that is not an object`);
       continue;
@@ -203,7 +203,7 @@ export function lockfileProblems(
     }
   }
   for (const id of Object.keys(b.importers)) {
-    if (!(id in after.importers)) problems.push(`removes importer ${id}`);
+    if (!Object.hasOwn(after.importers, id)) problems.push(`removes importer ${id}`);
   }
   return problems;
 }

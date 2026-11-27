@@ -144,6 +144,19 @@ describe("lockfileProblems", () => {
     ).toEqual([]);
   });
 
+  it("refuses removal of Object prototype-shaped importers and lock records", () => {
+    const before = {
+      ...lock({}, { constructor: {} }),
+      importers: { constructor: {} },
+      snapshots: { constructor: {} },
+    };
+    expect(lockfileProblems(before, lock({}), [])).toEqual([
+      "removes packages constructor",
+      "removes snapshots constructor",
+      "removes importer constructor",
+    ]);
+  });
+
   it("refuses a named package resolved at another version", () => {
     const after = lock({ hyparquet: { specifier: "^1.0.0", version: "1.40.0" } });
     expect(lockfileProblems(lock({}), after, [HYP])).toEqual([
