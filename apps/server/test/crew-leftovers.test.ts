@@ -232,6 +232,37 @@ it("checks candidate browser leftovers without blocking the event loop", async (
   }
 }, 5_000);
 
+it("leaves a browser leftover when its lsof check times out", async () => {
+  const tmp = join(root, "tmp");
+  const profile = join(tmp, "playwright_chromiumdev_profile-stuck-lsof");
+  const bin = join(root, "bin");
+  const lsof = join(bin, "lsof");
+  mkdirSync(profile, { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(lsof, "#!/bin/sh\nexec sleep 2\n");
+  chmodSync(lsof, 0o755);
+  old(profile, 7);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    const started = performance.now();
+    const result = await cleanupCrewLeftovers({
+      now: NOW,
+      worktrees: join(root, "worktrees"),
+      claudeProjects: join(root, "claude", "projects"),
+      tmp,
+      liveWorktrees: new Set(),
+      processLines: [],
+    });
+
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(result).toEqual({ gzipped: 0, deleted: 0, browserRemoved: 0, skippedLive: 1 });
+    expect(existsSync(profile)).toBe(true);
+  } finally {
+    process.env.PATH = path;
+  }
+}, 5_000);
+
 it("retries compression after an interrupted pass leaves its temporary gzip", async () => {
   const worktrees = join(root, "worktrees");
   const projects = join(root, "claude", "projects");
