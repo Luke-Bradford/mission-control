@@ -615,7 +615,8 @@ What each seat's process starts with:
   that only sent notices is dropped).
   The Comms copy of a CI failure is one line with a link, such as "CI failed on 341f108 in job
   web-core. https://github.com/o/mc/commit/<sha>/checks"; the seat still gets the whole log
-  excerpt, with the failing test and its error.
+  excerpt, with each failing test and its error: vitest `FAIL` and `×` lines, and Playwright's
+  numbered `1) [chromium] › …` lines, each with up to 10 lines of its error.
 - **Push and draft PR, made by the engine.** The push sends the run's own branch
   (`feature/<issue>-…`, never the default branch or another live run's) as a plain fast-forward: no force, no lease, no tags. It sends only
   commits the commit tool recorded for that branch, none of them a merge or a root commit, and only
@@ -1382,6 +1383,7 @@ never counts.
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |
 | `wake_stuck` | a set-aside run's wake met the same hub error (a 502, such as its dependencies not reinstalling) on two passes in a row; the hub keeps trying every pass. The evidence names the run and the error. Once per run |
+| `red_pr_idle` | a live run's PR is still red on its pushed sha 30 minutes after CI failed again on the hub's re-run, and its seat has started no turn, made no commit and sent no report since. The evidence names the run, the PR, the sha and whether the failure reached the seat. Once per run and sha |
 | `old_park` | a run has been parked for 15 minutes |
 | `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
 | `item_stale` | a Needs-you item for FLIGHT has gone 10 minutes untriaged (a PR ready to merge is `merge_stalled`) |

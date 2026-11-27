@@ -1546,6 +1546,44 @@ describe("ciExcerpt", () => {
       expect(out).toContain("[50 more failing lines in web-core not shown; inspect the CI log.]");
       expect(out.indexOf("× test/x")).toBeLessThan(out.indexOf("console first"));
     });
+
+    it("lists each failing Playwright test with up to 10 lines of its error", async () => {
+      const spec = (n: number, file: string, title: string) => [
+        L(`  ${n}) [chromium] › e2e/${file}:12:5 › ${title} ─────────────────`, "studio"),
+        L("    Error: expect(locator).toBeVisible() failed", "studio"),
+        ...Array.from({ length: 12 }, (_, i) => L(`    error detail ${n}.${i}`, "studio")),
+      ];
+      const out = await excerpt([
+        L("Running 40 tests using 2 workers", "studio"),
+        ...spec(1, "board.spec.ts", "shows the board"),
+        ...spec(2, "seats.spec.ts", "opens a seat"),
+        L("  2 failed", "studio"),
+        L("    [chromium] › e2e/board.spec.ts:12:5 › shows the board", "studio"),
+        L("  38 passed (1.2m)", "studio"),
+      ]);
+      expect(out).toContain("1) [chromium] › e2e/board.spec.ts:12:5 › shows the board");
+      expect(out).toContain("2) [chromium] › e2e/seats.spec.ts:12:5 › opens a seat");
+      expect(out).toContain("Error: expect(locator).toBeVisible() failed");
+      // the header and 10 lines of error under it, no more (the rest may show in the job's last lines)
+      const failures = out.slice(0, out.indexOf("[studio: last lines]"));
+      expect(failures).toContain("error detail 2.8");
+      expect(failures).not.toContain("error detail 2.9");
+      expect(failures).not.toContain("2 failed");
+    });
+
+    it("lists each failing vitest × test with the error lines under it", async () => {
+      const out = await excerpt([
+        L(" ❯ test/a.test.ts (3 tests | 2 failed) 12ms"),
+        L("   × a > adds 5ms"),
+        L("     → expected 1 to be 2 // Object.is equality"),
+        L("   ✓ a > keeps 1ms"),
+        L("   × a > subtracts 3ms"),
+        L("     → expected 3 to be 4 // Object.is equality"),
+        ...Array.from({ length: 20 }, (_, i) => L(`tail line ${i}`)),
+      ]);
+      expect(out).toContain("× a > adds 5ms\n→ expected 1 to be 2 // Object.is equality");
+      expect(out).toContain("× a > subtracts 3ms\n→ expected 3 to be 4 // Object.is equality");
+    });
   });
 
   it("asks for a 16 MiB log buffer", async () => {

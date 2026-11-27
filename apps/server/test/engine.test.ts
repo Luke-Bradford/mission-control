@@ -1744,6 +1744,31 @@ describe("CI and review", () => {
     expect(loopOf()).toMatchObject({ ciFails: 1, ciFailedSha: SHA });
   });
 
+  it("a fix push that fails, is re-run and fails again goes back to the seat with the failing tests", async () => {
+    await inCi();
+    await failCi();
+    await h.engine.reconcileRun(RUN);
+    expect(h.sent).toHaveLength(1);
+    // the seat's fix: a new push on its live session, never set aside
+    report("Fixed it", SHA_B);
+    await h.engine.reconcileRun(RUN);
+    setPr({ ci: "failing", headSha: SHA_B });
+    await h.engine.reconcileRun(RUN);
+    expect(h.reruns).toEqual([SHA, SHA_B]);
+    expect(h.sent).toHaveLength(1);
+    clock += 1000;
+    h.excerptTexts = [
+      "studio:\n1) [chromium] › e2e/board.spec.ts:12:5 › shows the board\nError: expect(locator).toBeVisible() failed",
+    ];
+    setPr({ ci: "failing", headSha: SHA_B });
+    await h.engine.reconcileRun(RUN);
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "working", ciFailedSha: SHA_B, relayedSha: SHA_B });
+    expect(h.sent).toHaveLength(2);
+    expect(h.sent[1]?.key).toBe(`ci:${RUN}:${SHA_B}`);
+    expect(h.sent[1]?.text).toContain("1) [chromium] › e2e/board.spec.ts:12:5 › shows the board");
+  });
+
   it("a re-run gh refused is not tried again; the next failure is the real one", async () => {
     h.rerunRuns = null;
     await inCi();

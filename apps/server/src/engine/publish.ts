@@ -389,6 +389,12 @@ const ERROR_LINE = /AssertionError|\b\w*Error:/;
 const CHECK_ERROR = /\berror TS\d+|^\d+:\d+\s+error\s/;
 /** A failed assertion's line vitest prints before its Failed Tests section. */
 const CROSS_LINE = /^[×✗✕]\s/;
+/** The error message vitest prints under a `×` line. */
+const ARROW_LINE = /^→\s/;
+/** A failing test as Playwright's list reporter numbers it: `1) [chromium] › e2e/a.spec.ts:12:5 › title`. */
+const PLAYWRIGHT_LINE = /^\d+\) \[[^\]]+\] › /;
+/** How many lines of its error follow a Playwright failure or a `×` line. */
+const TEST_ERROR_LINES = 10;
 /** A line that opens (or ends) a block of a test's console output. */
 const STREAM_LINE = /^(?:stderr|stdout) \|/;
 const BLOCK_END = /^(?:[✓×✗✕❯↓]|FAIL\b|RUN\b|Test Files|Tests\s|Duration)/;
@@ -416,8 +422,8 @@ const BIOME_HEADER = /^\S+(?::\d+:\d+)? \S+.*━{3}/;
 type JobLines = {
   /** A FAIL line with the error lines under it, or a type or lint error alone. */
   entries: string[][];
-  /** `×` lines and Biome headers, in log order. */
-  marks: string[];
+  /** `×` lines (each with the `→` lines under it) and Biome headers, in log order. */
+  marks: string[][];
   /** Bare errors and console output. */
   noise: string[];
   rest: string[];
@@ -426,7 +432,7 @@ type JobLines = {
 type Group = {
   job: string;
   entries: string[][];
-  marks: string[];
+  marks: string[][];
   noise: string[];
   rest: string[];
   /** Failing lines past FAILING_LINES_MAX, not kept at all. */
@@ -475,6 +481,10 @@ export function ciLogBody(log: string, max: number): string {
   let sinceOpen = 0;
   let sourced = false;
   let stream = false;
+  // lines still to keep under the open Playwright failure, and under the open `×` line
+  let testLeft = 0;
+  let mark: string[] | null = null;
+  let markLeft = 0;
   let lastJob: string | null = null;
   for (const raw of log.split("\n")) {
     const m = LOG_LINE.exec(raw);
@@ -493,6 +503,8 @@ export function ciLogBody(log: string, max: number): string {
     if (job !== lastJob) {
       open = null;
       stream = false;
+      testLeft = 0;
+      mark = null;
       lastJob = job;
     }
     if (STREAM_LINE.test(text)) stream = true;
@@ -500,6 +512,29 @@ export function ciLogBody(log: string, max: number): string {
     if (NOT_A_CAUSE.test(text)) continue;
     if (UNHANDLED_LINE.test(text)) open = null;
     const line = cut(text);
+    if (mark !== null && markLeft > 0 && ARROW_LINE.test(text)) {
+      mark.push(line);
+      markLeft--;
+      continue;
+    }
+    mark = null;
+    if (PLAYWRIGHT_LINE.test(text)) {
+      stream = false;
+      // a failure Playwright numbers once: its header and the first lines of its error
+      open = once(`${job}\t${line}`) ? [line] : null;
+      testLeft = open === null ? 0 : TEST_ERROR_LINES;
+      if (open !== null) {
+        g.entries.push(open);
+        g.fails++;
+      }
+      continue;
+    }
+    if (open !== null && testLeft > 0 && !FAIL_LINE.test(text)) {
+      open.push(line);
+      testLeft--;
+      continue;
+    }
+    testLeft = 0;
     if (FAIL_LINE.test(text)) {
       stream = false;
       // a name printed twice (at the failure and in the summary) keeps its first error lines
@@ -532,27 +567,40 @@ export function ciLogBody(log: string, max: number): string {
       sinceOpen++;
       if (CHECK_ERROR.test(text)) {
         if (once(`${job}\t${line}`)) g.entries.push([line]);
-      } else if (CROSS_LINE.test(text) || BIOME_HEADER.test(text)) addOnce(g.marks, line);
-      else if (stream || ERROR_LINE.test(text)) addOnce(g.noise, line);
+      } else if (CROSS_LINE.test(text) || BIOME_HEADER.test(text)) {
+        if (once(`${job}\t${line}`)) {
+          const unit = [line];
+          g.marks.push(unit);
+          if (CROSS_LINE.test(text)) {
+            mark = unit;
+            markLeft = TEST_ERROR_LINES;
+          }
+        }
+      } else if (stream || ERROR_LINE.test(text)) addOnce(g.noise, line);
       else g.rest.push(text);
     }
   }
   if (jobs.size > 1) jobs.delete(CI_SUMMARY_JOB);
   const groups: Group[] = [...jobs.entries()]
     .map(([job, g]) => {
+      // a job's failing units, kept whole up to FAILING_LINES_MAX lines
+      const capped = (units: string[][]): string[][] => {
+        const out: string[][] = [];
+        let kept = 0;
+        for (const u of units) {
+          kept += u.length;
+          if (kept > FAILING_LINES_MAX) break;
+          out.push(u);
+        }
+        return out;
+      };
       const allMarks = g.fails > 0 ? [] : g.marks;
-      const marks = allMarks.slice(0, FAILING_LINES_MAX);
-      const entries: string[][] = [];
-      let kept = 0;
-      for (const e of g.entries) {
-        kept += e.length;
-        if (kept > FAILING_LINES_MAX) break;
-        entries.push(e);
-      }
+      const marks = capped(allMarks);
+      const entries = capped(g.entries);
       const dropped =
-        g.entries.reduce((n, e) => n + e.length, 0) -
-        entries.reduce((n, e) => n + e.length, 0) +
-        (allMarks.length - marks.length);
+        g.entries.flat().length -
+        entries.flat().length +
+        (allMarks.flat().length - marks.flat().length);
       const failing = g.entries.length + marks.length > 0;
       return {
         job,
@@ -588,7 +636,7 @@ export function ciLogBody(log: string, max: number): string {
     { name: "", units: (x) => x.entries, shown: groups.map(() => []) },
     {
       name: "",
-      units: (x) => x.marks.map((l) => [l]),
+      units: (x) => x.marks,
       shown: groups.map(() => []),
     },
     {
@@ -650,10 +698,10 @@ export function ciLogBody(log: string, max: number): string {
     });
   }
   groups.forEach((x, gi) => {
-    const total = x.entries.flat().length + x.marks.length + x.dropped;
+    const total = x.entries.flat().length + x.marks.flat().length + x.dropped;
     const shown =
       (tier0.shown[gi] as string[][]).flat().length +
-      ((tiers[1] as Tier).shown[gi] as string[][]).length;
+      ((tiers[1] as Tier).shown[gi] as string[][]).flat().length;
     const note = omittedText(total - shown, x.job);
     // a notice only when it fits: the body never goes past `max`
     if (total > shown && byteLength(`${out.join("\n")}\n${note}`) <= max) out.push(note);

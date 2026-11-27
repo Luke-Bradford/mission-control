@@ -1,6 +1,7 @@
 /** Durable, evidence-backed wake causes. Only successful delivery marks a cause as told. */
 import {
   BLOCKING_SEVERITIES,
+  CI_FAILED_EVENT_PREFIX,
   COMMS_CAPCOM,
   COMMS_CONTROLLER,
   FLIGHT_CONTROLLER_WAIT_MS,
@@ -15,6 +16,7 @@ import {
   FLIGHT_MERGE_STALL_MS,
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_OLD_PARK_MS,
+  FLIGHT_RED_PR_IDLE_MS,
   FLIGHT_RETIRED_SIGNAL_KINDS,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
@@ -393,6 +395,40 @@ export function flightSignals(i: {
     const run = store.run(event.runId);
     if (run?.endedAt != null) continue;
     raise("wake_stuck", event.runId, event.at, `${event.runId}: ${event.text}`);
+  }
+  // a PR red after its one re-run, whose seat has done nothing since: the hand-back did not land
+  const redAt = new Map<string, number>();
+  for (const event of store.loopEvents(cutoff, repo)) {
+    // the re-run's own event is not the failure the seat is owed
+    if (!event.text.startsWith(CI_FAILED_EVENT_PREFIX) || event.key.includes(":rerun:")) continue;
+    redAt.set(event.runId, Math.max(redAt.get(event.runId) ?? 0, event.at));
+  }
+  for (const [runId, failedAt] of redAt) {
+    const run = store.run(runId);
+    const loop = run?.loop;
+    const pushed = store.runPush(runId);
+    if (!run || run.endedAt !== null || !loop || loop.phase !== "working" || loop.prNumber === null)
+      continue;
+    if (pushed === null || loop.ciFailedSha !== pushed.sha) continue;
+    const pr = store.pullRequest(run.repoId, loop.prNumber);
+    if (pr?.state !== "open" || pr.ci !== "failing" || pr.headSha !== pushed.sha) continue;
+    const row = store.seatSession(run.agentId);
+    const own = row?.runId === runId;
+    if (own && row.state === "running") continue;
+    const active = Math.max(
+      failedAt,
+      store.newestRunCommit(runId)?.at ?? 0,
+      store.latestEvidence(runId)?.at ?? 0,
+      own ? (row.lastTurnStartedAt ?? 0) : 0,
+      own ? (row.lastTurnEndedAt ?? 0) : 0,
+    );
+    if (now - active < FLIGHT_RED_PR_IDLE_MS) continue;
+    raise(
+      "red_pr_idle",
+      `${runId}:${pushed.sha}`,
+      failedAt,
+      `${run.agentId} run ${runId}: PR #${pr.number} (${run.ticket ?? "no ticket"}) red on ${pushed.sha.slice(0, 7)} since ${new Date(failedAt).toISOString()} after its re-run; nothing from the seat since ${new Date(active).toISOString()}${loop.relayedSha === pushed.sha ? "" : "; the failure was not sent to it"}`,
+    );
   }
   for (const [key, entries] of parks) {
     if (entries.length >= 2) {
