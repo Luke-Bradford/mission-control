@@ -161,7 +161,8 @@ it("leaves browser leftovers with an open file, even when its process argv has n
 });
 
 it("leaves an open browser profile when the temp folder is reached through a link (#2294)", async () => {
-  // macOS: $TMPDIR is /var/..., a link to /private/var/...; lsof reports the real path
+  // macOS: $TMPDIR is /var/..., a link to /private/var/...; lsof reports the real path. This test
+  // cannot tell a match from lsof being unavailable; the open-file test above proves lsof works.
   const real = join(root, "real-tmp");
   const tmp = join(root, "linked-tmp");
   mkdirSync(real, { recursive: true });
@@ -196,7 +197,8 @@ it("leaves an open browser profile when the temp folder is reached through a lin
   } finally {
     child.kill();
   }
-});
+  // a system-wide lsof takes about 10 s on macOS
+}, 30_000);
 
 it("retries compression after an interrupted pass leaves its temporary gzip", async () => {
   const worktrees = join(root, "worktrees");
