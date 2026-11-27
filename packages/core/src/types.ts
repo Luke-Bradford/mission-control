@@ -987,6 +987,10 @@ export interface MachineSample {
   agents: { count: number; rssBytes: number; cpuPct: number } | null;
   /** The test-lock holder's command and every process under it; null when the lock is free. Optional: older stored samples lack it. */
   testRun?: { count: number; rssBytes: number; cpuPct: number } | null;
+  /** File descriptors open in the hub process, measured by the hub watchdog. */
+  hubOpenFiles?: number | null;
+  /** The hub process file-descriptor limit, measured with `ulimit -n`. */
+  hubOpenFileLimit?: number | null;
 }
 
 /** `/api/machine`: the latest sample, with the crew's seat capacity for the Machine panel's agents row. */

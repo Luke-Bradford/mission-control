@@ -174,6 +174,12 @@ import { hubFileServiceRestart } from "./telemetry/file-service-restart.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import {
+  createHubWatchdog,
+  HUB_WATCHDOG_RESTART_SETTING,
+  realWatchdogProbe,
+  WATCHDOG_INTERVAL_MS,
+} from "./watchdog.ts";
+import {
   commitsOf,
   createAutoUpdate,
   createHeldUpdateNote,
@@ -1167,6 +1173,19 @@ export async function main(): Promise<void> {
       cliHold.reason !== null ||
       crewReloader.status().pending.some((p) => p.seatId === seatId),
     log: (line) => log(line),
+    startupNotice: () => {
+      const raw = store.getSetting(HUB_WATCHDOG_RESTART_SETTING);
+      if (raw === null) return null;
+      try {
+        const restart = JSON.parse(raw) as { cause?: unknown };
+        return typeof restart.cause === "string"
+          ? ` The hub restarted itself after its watchdog found: ${restart.cause}.`
+          : null;
+      } catch {
+        return null;
+      }
+    },
+    clearStartupNotice: () => store.setSetting(HUB_WATCHDOG_RESTART_SETTING, ""),
   });
 
   // Update runs in this process's own checkout, and never on a preview server.
@@ -1238,6 +1257,24 @@ export async function main(): Promise<void> {
   };
   let leftoverFootprint: Awaited<ReturnType<typeof crewLeftoverFootprint>> | null = null;
   let crewTranscriptFootprint: ReturnType<typeof transcriptFootprint> = null;
+  const watchdog = createHubWatchdog({
+    now: Date.now,
+    probe: realWatchdogProbe,
+    event: (text) => store.addHubEvent(text, Date.now()),
+    notice: (text) =>
+      store.raiseNote({
+        key: "hub-watchdog-restarting",
+        kind: "flag",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text,
+        at: Date.now(),
+      }),
+    setting: (key) => store.getSetting(key),
+    setSetting: (key, value) => store.setSetting(key, value),
+    exit: (code) => process.exit(code),
+  });
   const app = buildApp({
     sessions,
     onSessionSidebarChange: (on) => {
@@ -1272,7 +1309,18 @@ export async function main(): Promise<void> {
     profilesPath,
     // A setup that created fields, or an added repo, refreshes the boards now, not at the next poll.
     refreshBoards: () => scheduler.refreshBoards(),
-    machine: () => scheduler.machine(),
+    machine: () => {
+      const sample = scheduler.machine();
+      const files = watchdog.files();
+      return sample === null
+        ? null
+        : {
+            ...sample,
+            hubOpenFiles: files?.openFiles ?? null,
+            hubOpenFileLimit: files?.limit ?? null,
+          };
+    },
+    watchdogHealth: () => watchdog.health(),
     onStreamCount: (count) => {
       browserStreamCount = count;
     },
@@ -1374,6 +1422,11 @@ export async function main(): Promise<void> {
     }
   }
   await app.listen({ host: HOST, port });
+  const watchdogTick = () => void watchdog.check();
+  watchdogTick();
+  const watchdogTimer = setInterval(watchdogTick, WATCHDOG_INTERVAL_MS);
+  watchdogTimer.unref();
+  app.addHook("onClose", async () => clearInterval(watchdogTimer));
   // External service tooling can identify this hub without inspecting a process command line.
   if (!preview) {
     const pidPath = join(dirname(dbPath), "server.pid");

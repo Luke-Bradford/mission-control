@@ -717,6 +717,8 @@ export function createUpdater(deps: UpdaterDeps): Updater {
   let checkedAt: number | null = null;
   /** Whether the last fetch attempt succeeded; null before any. */
   let fetchOk: boolean | null = null;
+  /** The latest fetch error, retained so `/api/version` does not hide a local spawn failure. */
+  let fetchError: string | null = null;
   let fetching: Promise<void> | null = null;
 
   const git = (args: string[]) =>
@@ -734,9 +736,11 @@ export function createUpdater(deps: UpdaterDeps): Updater {
       await git(["fetch", "origin", MAIN]);
       checkedAt = now();
       fetchOk = true;
+      fetchError = null;
       return { ok: true };
     } catch (error) {
       fetchOk = false;
+      fetchError = errText(error);
       return { ok: false, error };
     }
   }
@@ -968,7 +972,7 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     // a web-only change waits for no seat
     const reason = other ?? ((await webOnly()) ? null : deps.crewRefusal());
     const current = n === 0 && (running === null || head === running);
-    const why = reason ?? (current ? UP_TO_DATE_MAIN : null);
+    const why = reason ?? (fetchOk === false ? fetchError : current ? UP_TO_DATE_MAIN : null);
     return { sha, behind: n, checkedAt, canUpdate: why === null, reason: why };
   }
 

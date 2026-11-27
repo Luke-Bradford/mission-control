@@ -75,6 +75,7 @@ import {
   fullAt5h,
   GITHUB_RATE_SETTING,
   type GithubRateState,
+  type HealthRow,
   GUARD_ACK_PREFIX,
   GUARD_ALLOW_OUTPUT,
   GUARD_BODY_LIMIT,
@@ -631,6 +632,8 @@ export interface AppDeps {
   bus: ChangeBus;
   /** The latest machine sample (for `/api/machine`); default: none yet. */
   machine?: () => MachineSample | null;
+  /** The hub's own fork and descriptor check, included in `/api/health`. */
+  watchdogHealth?: () => HealthRow;
   /** Receives the number of open browser event streams. */
   onStreamCount?: (count: number) => void;
   now?: () => number;
@@ -4193,9 +4196,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const recent = ticks.recent();
         const last = recent.at(-1);
         const running = ticks.running();
-        if (recent.length === 0 && running === null) return store.status();
+        const watchdog = deps.watchdogHealth?.();
+        if (recent.length === 0 && running === null)
+          return watchdog === undefined ? store.status() : [...store.status(), watchdog];
         return [
           ...store.status(),
+          ...(watchdog === undefined ? [] : [watchdog]),
           // the engine's recent tick durations; `error` names a tick still running past its interval
           {
             collector: TICKS_COLLECTOR,

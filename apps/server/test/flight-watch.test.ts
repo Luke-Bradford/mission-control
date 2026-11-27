@@ -243,7 +243,10 @@ const noFlight = () => {
 };
 
 const makeWatch = (
-  over: Pick<FlightWatchDeps, "refreshAuthors" | "log" | "blocked" | "announcedMax"> = {},
+  over: Pick<
+    FlightWatchDeps,
+    "refreshAuthors" | "log" | "blocked" | "announcedMax" | "startupNotice" | "clearStartupNotice"
+  > = {},
 ) => {
   watch = createFlightWatch({
     ...over,
@@ -450,6 +453,14 @@ const stored = (number: number, over: Partial<PullRequestView> = {}): PullReques
 const listed = () => flightState({ config, store, busy: [], now: nowMs }).prs;
 
 describe("FLIGHT's PR list", () => {
+  it("names a watchdog restart in FLIGHT's first wake", async () => {
+    const clear = vi.fn();
+    makeWatch({ startupNotice: () => " The hub restarted itself after its watchdog found: spawn EBADF.", clearStartupNotice: clear });
+    await watch.check();
+    expect(startCalls[0]?.first).toContain("watchdog found: spawn EBADF");
+    expect(clear).toHaveBeenCalledOnce();
+  });
+
   it("keeps a PR listed, marked stale with its last good read, when a poll could not read it", () => {
     store.upsertPullRequests("mc", [stored(7)], T0);
     expect(listed()).toEqual([

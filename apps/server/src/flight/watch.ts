@@ -124,6 +124,9 @@ export interface FlightWatchDeps {
   blocked?: (seatId: string) => boolean;
   now?: () => number;
   log?: (line: string) => void;
+  /** A durable hub-start notice that belongs in FLIGHT's first fresh-session message. */
+  startupNotice?: () => string | null;
+  clearStartupNotice?: () => void;
 }
 
 export interface FlightWatch {
@@ -572,13 +575,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           .find((m) => memoryTopicKey(m.topic) === FLIGHT_HANDOVER_TOPIC);
         const { runId } = await supervisor.startWatch(id, {
           firstPieces: wakePieces(digest),
-          first: wakeLine(
+          first: `${wakeLine(
             state,
             digest,
             causes.length > 0 ? causes : ["initial"],
             freshStartLine(note ?? null),
-          ),
+          )}${deps.startupNotice?.() ?? ""}`,
         });
+        deps.clearStartupNotice?.();
         clearDown(t);
         processGone = false;
         lastStartThrew = false;

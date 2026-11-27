@@ -5752,6 +5752,28 @@ describe("boards, escalations, health", () => {
     });
   });
 
+  it("health includes a failed hub spawn check", async () => {
+    const watched = buildApp({
+      config,
+      store,
+      bus,
+      watchdogHealth: () => ({
+        collector: "watchdog",
+        ok: false,
+        error: "spawn EBADF",
+        at: clock,
+        lastOkAt: null,
+      }),
+    });
+    try {
+      expect((await watched.inject("/api/health")).json()).toContainEqual(
+        expect.objectContaining({ collector: "watchdog", ok: false, error: "spawn EBADF" }),
+      );
+    } finally {
+      await watched.close();
+    }
+  });
+
   it("escalations and health return the store rows", async () => {
     store.replaceEscalations("shop-app", [escalation({})]);
     store.setStatus("github:shop-app", false, "github: HTTP 502");
