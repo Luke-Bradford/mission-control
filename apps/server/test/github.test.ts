@@ -47,6 +47,7 @@ const Q = {
   default_if_ignored: "hold",
   answers: ["yes", "no"],
 };
+const GITHUB_NODE_LIMIT = 500_000;
 
 function item(
   n: number,
@@ -322,6 +323,29 @@ const prPage = (nodes: unknown[], next: string | null = null) => ({
     pullRequests: { pageInfo: { hasNextPage: next !== null, endCursor: next }, nodes },
   },
 });
+
+/** Counts GraphQL connection nodes at their largest permitted pagination size. */
+function possibleNodes(query: string, multiplier = 1): number {
+  const connection = /(?:\b\w+\s*:\s*)?\b\w+\s*\(([^)]*)\)\s*\{/g;
+  let total = 0;
+  while (true) {
+    const match = connection.exec(query);
+    if (match === null) break;
+    const open = connection.lastIndex - 1;
+    let depth = 1;
+    let close = open;
+    while (depth > 0 && ++close < query.length) {
+      if (query[close] === "{") depth++;
+      if (query[close] === "}") depth--;
+    }
+    const pageSize = /\b(?:first|last):\s*(\d+)/.exec(match[1] ?? "");
+    const childMultiplier = pageSize === null ? multiplier : multiplier * Number(pageSize[1]);
+    if (pageSize !== null) total += childMultiplier;
+    total += possibleNodes(query.slice(open + 1, close), childMultiplier);
+    connection.lastIndex = close + 1;
+  }
+  return total;
+}
 
 const page = (nodes: unknown[], next: string | null = null, typename = "User") => ({
   repositoryOwner: {
@@ -1539,6 +1563,18 @@ describe("parseChecks", () => {
 
 describe("collectGithub pull requests", () => {
   const prs = () => store.pullRequests("shop-app");
+
+  it("keeps the PR list query below GitHub's possible-node limit", async () => {
+    const queries: string[] = [];
+    const gql: Gql = async (query) => {
+      queries.push(query);
+      return prPage([pull(1)]);
+    };
+    await collectGithub(repo, store, gql, NOW);
+    const query = queries.find((candidate) => candidate.includes("query PullRequests"));
+    expect(query).toBeDefined();
+    expect(possibleNodes(query ?? "")).toBeLessThan(GITHUB_NODE_LIMIT);
+  });
 
   it("stores all closing issues in this repo separately from the branch ticket", async () => {
     const { gql, calls } = stub({
