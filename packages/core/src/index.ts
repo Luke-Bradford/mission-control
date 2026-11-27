@@ -30,6 +30,7 @@ export * from "./needs-you.ts";
 export * from "./needs-you-actions.ts";
 export * from "./needs-you-entry.ts";
 export * from "./pace.ts";
+export * from "./package-allowance.ts";
 export * from "./path-grants.ts";
 export * from "./plain-talk.ts";
 export * from "./pr-evidence.ts";

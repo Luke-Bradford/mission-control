@@ -57,6 +57,7 @@ import {
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
+import { allowRunDependencies, markDependenciesAdded } from "../src/repo/dependency-allowance.ts";
 import { setRunPathGrants } from "../src/repo/path-grants.ts";
 import { Store } from "../src/store.ts";
 
@@ -204,6 +205,27 @@ describe("openPr", () => {
     expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
       title: "#7 Fix the thing",
       body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\nCloses #7.",
+    });
+  });
+
+  it("lists each package the run's commits added, with version and licence", async () => {
+    allowRunDependencies(
+      store,
+      "r1",
+      ["package.json", "pnpm-lock.yaml"],
+      [
+        { name: "hyparquet", version: "1.33.2", licence: "MIT" },
+        { name: "hyparquet-writer", version: "0.18.1", licence: "MIT" },
+        { name: "left-pad", version: "1.3.0", licence: "WTFPL" },
+      ],
+    );
+    markDependenciesAdded(store, "r1", ["hyparquet", "hyparquet-writer"]);
+    ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+    tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+    await createPublisher(deps()).openPr(run(), TICKET, "Changed it.");
+    expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
+      title: "#7 Fix the thing",
+      body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\n## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT\n- `hyparquet-writer` 0.18.1, licence MIT\n\nCloses #7.",
     });
   });
 
@@ -2600,6 +2622,27 @@ describe("merge steps", () => {
         "merge-base": `${BASE}\n`,
         "rev-list": `${SHA}\n`,
         diff: "src/a.ts\0docs/b.md\0package.json\0",
+      };
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({
+        facts: { strays: ["docs/b.md"] },
+      });
+    });
+
+    it("leaves the files of the run's dependency allowance out of the strays", async () => {
+      store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
+      allowRunDependencies(
+        store,
+        R.id,
+        ["package.json", "pnpm-lock.yaml"],
+        [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }],
+      );
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [HAVE_MAIN]: "",
+        [ANCESTOR]: "",
+        "merge-base": `${BASE}\n`,
+        "rev-list": `${SHA}\n`,
+        diff: "src/a.ts\0docs/b.md\0package.json\0pnpm-lock.yaml\0",
       };
       expect(await withArea().gateFacts(R, SHA)).toMatchObject({
         facts: { strays: ["docs/b.md"] },

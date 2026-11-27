@@ -16,6 +16,7 @@ import {
   AWAY_QUOTA_REFUSED,
   AWAY_WRITES_REFUSED,
   accountStoppedText,
+  allowanceFileProblem,
   answeredText,
   answerMessageText,
   askerRunEndedText,
@@ -81,11 +82,15 @@ import {
   DEFAULT_PROFILES,
   DRAFT_BAD_TARGET,
   DRAFT_REPLY_DESCRIPTION,
+  dependencyAllowedText,
+  dependencyDecisionText,
+  dependencyFileRefusedText,
   draftedReplyText,
   duplicateLabelText,
   duplicateTitleText,
   EDIT_UNCONFIRMED_TEXT,
   END_UNREADABLE_TEXT,
+  EXACT_VERSION,
   eligibleToStart,
   endDirtyText,
   endedAsideDecision,
@@ -174,6 +179,7 @@ import {
   LEDGER_FULL_TEXT,
   LEDGER_KIND_CHANGE_TEXT,
   LEDGER_TRACK_CLOSED_TEXT,
+  LICENCE,
   LIST_TICKETS_DESCRIPTION,
   type LoopKind,
   labelCountText,
@@ -204,6 +210,7 @@ import {
   moveWrongColumnText,
   NEW_LOOP,
   NOT_ON_BOARD,
+  NPM_NAME,
   needsYouEntryFaults,
   noOpenQuestionText,
   notAcceptedText,
@@ -394,6 +401,7 @@ import type { PrEvidenceStore } from "../pr-evidence/store.ts";
 import { waitReader } from "../queue/dependencies.ts";
 import { QueueReorderError } from "../queue/queue-reorder.ts";
 import { cleanText } from "../repo/clean.ts";
+import { allowRunDependencies } from "../repo/dependency-allowance.ts";
 import { parseTicket } from "../run/view.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
@@ -853,6 +861,22 @@ const StartSeatArgs = z
   });
 /** A developer run by its id: `accept_ruling`, `sync_main` and `end_run` take this. */
 const RunArgs = z.strictObject({ runId: z.string().min(1).max(200), basis: basisArg });
+/** `allow_dependency`: the packages, exact versions and licences, and the files they go in. */
+const AllowDependencyArgs = z.strictObject({
+  runId: z.string().min(1).max(200),
+  files: z.array(z.string().min(1).max(300)).min(1).max(10),
+  packages: z
+    .array(
+      z.strictObject({
+        name: z.string().max(214).regex(NPM_NAME),
+        version: z.string().max(100).regex(EXACT_VERSION),
+        licence: z.string().regex(LICENCE),
+      }),
+    )
+    .min(1)
+    .max(20),
+  basis: basisArg,
+});
 const MessageSeatArgs = z
   .strictObject({
     seat: z.string().regex(SEAT_ID),
@@ -2040,6 +2064,34 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     bus.emit("agents");
     bus.emit("flight");
     return { text: said };
+  }
+
+  /**
+   * Lets one developer run add the named packages: its commit tool then takes those manifest and
+   * lockfile changes, when they add just these packages (`manifestChange`, `lockfileProblems`).
+   */
+  async function allowDependency(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, AllowDependencyArgs, args);
+    if (!c.ok) return c.result;
+    const found = devRun(c.args.runId);
+    if (isRefusal(found)) return found;
+    const { run, seat, call } = found;
+    const { files, packages, basis } = c.args;
+    for (const f of files) {
+      const why = allowanceFileProblem(f);
+      if (why !== null) return fail(dependencyFileRefusedText(f, why));
+    }
+    allowRunDependencies(store, run.id, files, packages);
+    record(now(), {
+      kind: "dependency",
+      seatId: seat,
+      targetRunId: run.id,
+      about: aboutRun(call, run),
+      decision: dependencyDecisionText(call, packages, files),
+      basis,
+    });
+    bus.emit("flight");
+    return { text: dependencyAllowedText(call, packages, files) };
   }
 
   async function endRun(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -4783,6 +4835,39 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           repoOf()?.id ?? "",
           async () => breakerRefusal() ?? acceptRuling(ctx, args),
         ),
+    },
+    {
+      name: MC_TOOL_NAMES.allowDependency,
+      description: `Let a developer run add new packages its ticket needs: name each package with its exact version and licence, and the package.json and pnpm-lock.yaml paths. That run's commit tool then takes those files when the change adds just these packages; its PR lists them. Install them (pnpm add) in the seat's worktree first if the seat cannot.`,
+      inputSchema: objectSchema(
+        {
+          runId: RUN_ID_SCHEMA,
+          files: {
+            type: "array",
+            items: { type: "string", minLength: 1, maxLength: 300 },
+            minItems: 1,
+            maxItems: 10,
+          },
+          packages: {
+            type: "array",
+            items: objectSchema(
+              {
+                name: { type: "string", maxLength: 214 },
+                version: { type: "string", description: "Exact, such as 1.33.2: no range." },
+                licence: { type: "string", maxLength: 100 },
+              },
+              ["name", "version", "licence"],
+            ),
+            minItems: 1,
+            maxItems: 20,
+          },
+          basis: BASIS_SCHEMA,
+        },
+        ["runId", "files", "packages", "basis"],
+      ),
+      modes: [],
+      grantable: ["read-only"],
+      call: allowDependency,
     },
     {
       name: MC_TOOL_NAMES.syncMain,

@@ -11,6 +11,7 @@
 import { lstat, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  ADDED_DEPENDENCIES_HEADING,
   ADVICE_REASON_MAX,
   ADVICE_STEPS,
   ASK_FLIGHT_COMMS_POINTER,
@@ -53,6 +54,7 @@ import {
   DEFAULT_PROFILES,
   DONE_WHEN_STATUSES,
   type DoneWhenEntry,
+  dependencyChangeText,
   doneWhenBadLineText,
   doneWhenCount,
   doneWhenMissingText,
@@ -90,8 +92,10 @@ import {
   fixKey,
   formerSubmoduleText,
   grantedPath,
+  isManifest,
   isProtectedPath,
   liftPark,
+  lockfileProblems,
   MC_AUDIT_ALREADY,
   MC_AUDIT_NOT_AUDIT,
   MC_AUDIT_SAVED,
@@ -142,6 +146,7 @@ import {
   MC_TOOL_NAMES,
   MINOR_HEADING,
   MODEL_ADVICE_FIELD_MAX,
+  manifestChange,
   mcToolHitText,
   NOTHING_TO_COMMIT,
   NOTHING_TO_PUSH,
@@ -220,6 +225,7 @@ import {
   VERDICTS,
   withSection,
 } from "@mc/core";
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { activeAway } from "../away.ts";
 import { BoundedMap } from "../bounded.ts";
@@ -248,6 +254,7 @@ import {
   previewRequest,
 } from "../preview/browser.ts";
 import { createQaReports, QaReportError, type QaReportService } from "../qa/reports.ts";
+import { markDependenciesAdded, runDependencyAllowance } from "../repo/dependency-allowance.ts";
 import { runPathGrants } from "../repo/path-grants.ts";
 import { isExternalReview } from "../review/external-key.ts";
 import { openOlderFindings } from "../review/older-findings.ts";
@@ -2078,7 +2085,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         .trimEnd();
       const joined = section === null ? text : `${text}\n\n${section}`;
       return withSection(
-        staged ? `${joined}\n\n${marker}` : joined,
+        withSection(
+          staged ? `${joined}\n\n${marker}` : joined,
+          ADDED_DEPENDENCIES_HEADING,
+          sectionOf(current, ADDED_DEPENDENCIES_HEADING),
+        ),
         EVIDENCE_HEADING,
         sectionOf(current, EVIDENCE_HEADING),
       );
@@ -2152,6 +2163,10 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       const extra = config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
       /** Files outside the area that FLIGHT approved for this run alone. */
       const grants = runPathGrants(store, run.id);
+      /** The packages FLIGHT allowed this run to add, and the manifest and lockfile they go in. */
+      const allowance = runDependencyAllowance(store, run.id);
+      /** Allowed packages this commit's manifests add; recorded once it is made. */
+      let depsAdded: string[] = [];
       /** What this call has deleted so far: every answer from then on says so. */
       const removed: string[] = [];
       /** The advisory lines about files another open run changed; appended to a commit's answer. */
@@ -2408,6 +2423,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         const kept: string[] = [];
         const links: string[] = [];
         const foreign: string[] = [];
+        /** Files in the run's dependency allowance: their change is checked, not refused. */
+        const allowedDeps: string[] = [];
         for (const p of paths) {
           if (NOT_PRINTABLE_ASCII.test(p)) {
             // fail closed, before any other check: no name of this kind is committed
@@ -2415,6 +2432,9 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           } else if (fromMain.has(p)) {
             // main's own version of the path: no area, protected or stray check applies
             if (special.has(p)) links.push(p);
+          } else if (grantedPath(allowance.files, p)) {
+            if (special.has(p)) links.push(p);
+            else allowedDeps.push(p);
           } else if (!grantedPath(grants, p) && isProtectedPath(p, extra)) {
             kept.push(p);
           } else if (!grantedPath(grants, p) && !pathInArea(seat.area, p)) {
@@ -2451,6 +2471,42 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         }
         // a merge commits even with nothing to add: it joins main's history
         if (paths.length === 0 && mergeHead === null) return { text: NOTHING_TO_COMMIT };
+
+        const depRefusals: string[] = [];
+        depsAdded = [];
+        for (const p of allowedDeps) {
+          const read = (spec: string) =>
+            g(["show", spec], {
+              timeoutMs: CREW_GIT_SLOW_MS,
+              maxBuffer: PUSH_SCAN_MAX_BUFFER,
+            }).then(
+              (x) => x,
+              () => null,
+            );
+          const before = await read(`HEAD:${p}`);
+          const after = await read(`:${p}`);
+          let problems: string[];
+          if (after === null) problems = ["is deleted"];
+          else if (isManifest(p)) {
+            const change = manifestChange(before, after, allowance.packages);
+            problems = change.problems;
+            depsAdded.push(...change.added);
+          } else {
+            const parsed = (text: string | null): unknown => {
+              if (text === null) return null;
+              try {
+                return parseYaml(text);
+              } catch {
+                return undefined;
+              }
+            };
+            problems = lockfileProblems(parsed(before), parsed(after), allowance.packages);
+          }
+          if (problems.length > 0) depRefusals.push(dependencyChangeText(p, problems));
+        }
+        if (depRefusals.length > 0) {
+          return { text: [...depRefusals, REVERT_STRAYS].join("\n"), isError: true };
+        }
 
         if (mergeHead !== null) {
           const marked = await withConflictMarkers(
@@ -2532,6 +2588,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           { env: gitIdentity(name), timeoutMs: CREW_GIT_SLOW_MS },
         );
         committed = true;
+        if (depsAdded.length > 0) markDependenciesAdded(store, run.id, depsAdded);
         return recordCommit((await g(["rev-parse", "--verify", "HEAD"])).trim());
       }
     });

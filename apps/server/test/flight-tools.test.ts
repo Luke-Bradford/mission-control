@@ -109,6 +109,7 @@ import {
   NEW_LOOP,
   NOT_ON_BOARD,
   needsYouItems,
+  notDevRunText,
   notOnBoardText,
   OPERATOR_HEADER,
   openPrText,
@@ -195,6 +196,7 @@ import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
 import { stageReviewEvidence } from "../src/pr-evidence/review.ts";
 import { type PrEvidenceStore, prEvidenceStore } from "../src/pr-evidence/store.ts";
+import { runDependencyAllowance } from "../src/repo/dependency-allowance.ts";
 import type { Cmux } from "../src/runtime/cmux.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { createSessions } from "../src/sessions/sessions.ts";
@@ -1436,6 +1438,7 @@ describe("tool list", () => {
       "send_to_planner",
       "end_run",
       "accept_ruling",
+      "allow_dependency",
       "sync_main",
       "create_ticket",
       "comment_ticket",
@@ -3675,6 +3678,74 @@ describe("accept_ruling", () => {
 
   it("takes no extra arguments", async () => {
     expect((await call("accept_ruling", A({ seat: "guido-1" }))).isError).toBe(true);
+  });
+});
+
+describe("allow_dependency", () => {
+  const HYP = { name: "hyparquet", version: "1.33.2", licence: "MIT" };
+  const A = (over: Record<string, unknown> = {}) => ({
+    runId: "r-g",
+    files: ["package.json", "pnpm-lock.yaml"],
+    packages: [HYP],
+    basis: "the ticket needs a Parquet codec; MIT, maintained",
+    ...over,
+  });
+  beforeEach(() => {
+    live("guido-1", "r-g", { ticket: "mc#7" });
+  });
+
+  it("allows the named packages in the named files for that run, and logs the decision", async () => {
+    const r = await call("allow_dependency", A());
+    expect(r.isError).toBeUndefined();
+    expect(r.text).toBe(
+      "Allowed GUIDO-1 to add hyparquet 1.33.2 (MIT) in package.json, pnpm-lock.yaml, for this run only. GUIDO-1 commits them with mc commit. Recorded in Decided without you.",
+    );
+    expect(runDependencyAllowance(store, "r-g")).toEqual({
+      files: ["package.json", "pnpm-lock.yaml"],
+      packages: [HYP],
+      added: [],
+    });
+    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
+      kind: "dependency",
+      targetRunId: "r-g",
+      decision: "Allowed GUIDO-1 to add hyparquet 1.33.2 (MIT) in package.json, pnpm-lock.yaml",
+    });
+  });
+
+  it("adds to an earlier allowance for the same run", async () => {
+    await call("allow_dependency", A());
+    const w = { name: "hyparquet-writer", version: "0.18.1", licence: "MIT" };
+    await call("allow_dependency", A({ files: ["apps/server/package.json"], packages: [w] }));
+    expect(runDependencyAllowance(store, "r-g")).toEqual({
+      files: ["package.json", "pnpm-lock.yaml", "apps/server/package.json"],
+      packages: [HYP, w],
+      added: [],
+    });
+  });
+
+  it("refuses another file than a manifest or lockfile, and one the crew's rules run from", async () => {
+    const r = await call("allow_dependency", A({ files: ["tsconfig.json"] }));
+    expect(r).toEqual({
+      text: "Not allowed: tsconfig.json: only a package.json or pnpm-lock.yaml can be allowed.",
+      isError: true,
+    });
+    expect((await call("allow_dependency", A({ files: [".github/package.json"] }))).isError).toBe(
+      true,
+    );
+    expect(runDependencyAllowance(store, "r-g").files).toEqual([]);
+    expect(store.flightDecisions(0, 10)).toEqual([]);
+  });
+
+  it("refuses a range, a bad name, and a run that is not an unended developer run", async () => {
+    for (const p of [
+      { ...HYP, version: "^1.33.2" },
+      { ...HYP, name: "Bad Name" },
+      { ...HYP, licence: "" },
+    ]) {
+      expect((await call("allow_dependency", A({ packages: [p] }))).isError).toBe(true);
+    }
+    expect((await call("allow_dependency", A({ runId: "nope" }))).text).toBe(notDevRunText("nope"));
+    expect(store.flightDecisions(0, 10)).toEqual([]);
   });
 });
 
