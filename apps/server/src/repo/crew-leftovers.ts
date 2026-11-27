@@ -12,6 +12,7 @@ import {
   openSync,
   readdirSync,
   readSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -105,6 +106,14 @@ const openPaths = (): string[] | null => {
       .map((line) => line.slice(1));
   } catch {
     return null;
+  }
+};
+
+const realPath = (path: string): string => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
   }
 };
 
@@ -269,7 +278,8 @@ export async function cleanupCrewLeftovers(input: CrewLeftoverInput): Promise<Cr
       out.skippedLive++;
       continue;
     }
-    if (open === null || pathInUse(path, open)) {
+    // `lsof` reports real paths; on macOS `$TMPDIR` is `/var/...`, a link to `/private/var/...` (#2294)
+    if (open === null || pathInUse(realPath(path), open)) {
       out.skippedLive++;
       continue;
     }

@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -154,6 +155,44 @@ it("leaves browser leftovers with an open file, even when its process argv has n
     expect(result).toEqual({ gzipped: 0, deleted: 0, browserRemoved: 0, skippedLive: 2 });
     expect(existsSync(profile)).toBe(true);
     expect(existsSync(chrome)).toBe(true);
+  } finally {
+    child.kill();
+  }
+});
+
+it("leaves an open browser profile when the temp folder is reached through a link (#2294)", async () => {
+  // macOS: $TMPDIR is /var/..., a link to /private/var/...; lsof reports the real path
+  const real = join(root, "real-tmp");
+  const tmp = join(root, "linked-tmp");
+  mkdirSync(real, { recursive: true });
+  symlinkSync(real, tmp);
+  const profile = join(tmp, "playwright_chromiumdev_profile-linked");
+  const held = join(profile, "cache");
+  mkdirSync(profile, { recursive: true });
+  writeFileSync(held, "profile");
+  old(profile, 7);
+  const child = spawn(
+    process.execPath,
+    [
+      "-e",
+      "require('node:fs').openSync(process.env.HELD_FILE,'r');process.stdout.write('ready');setInterval(()=>{},1e3)",
+    ],
+    { env: { ...process.env, HELD_FILE: held } },
+  );
+  try {
+    if (child.stdout === null) throw new Error("The file-holder did not expose stdout.");
+    await once(child.stdout, "data");
+    const result = await cleanupCrewLeftovers({
+      now: NOW,
+      worktrees: join(root, "worktrees"),
+      claudeProjects: join(root, "claude", "projects"),
+      tmp,
+      liveWorktrees: new Set(),
+      processLines: [],
+    });
+
+    expect(result.browserRemoved).toBe(0);
+    expect(existsSync(profile)).toBe(true);
   } finally {
     child.kill();
   }
