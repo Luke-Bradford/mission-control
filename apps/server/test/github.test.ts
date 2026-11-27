@@ -328,8 +328,9 @@ const prPage = (nodes: unknown[], next: string | null = null) => ({
 function possibleNodes(query: string, multiplier = 1): number {
   const connection = /(?:\b\w+\s*:\s*)?\b\w+\s*\(([^)]*)\)\s*\{/g;
   let total = 0;
-  let match: RegExpExecArray | null;
-  while ((match = connection.exec(query)) !== null) {
+  while (true) {
+    const match = connection.exec(query);
+    if (match === null) break;
     const open = connection.lastIndex - 1;
     let depth = 1;
     let close = open;
