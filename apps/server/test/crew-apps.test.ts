@@ -37,7 +37,11 @@ describe("crew apps", () => {
     expect(cmux.newPane).toHaveBeenCalledTimes(1);
     expect(cmux.setStatus).toHaveBeenCalledWith("app-workspace", "app", "http://127.0.0.1:5173");
     expect(run).toHaveBeenCalledWith("git", expect.arrayContaining(["fetch", "origin", "main"]));
-    expect(cmux.newPane).toHaveBeenCalledWith("app-workspace", "/crew/apps/studio", "pnpm api");
+    expect(cmux.newPane).toHaveBeenCalledWith(
+      "app-workspace",
+      "/crew/apps/studio",
+      "PORT=5174 pnpm api",
+    );
   });
 
   it("renders the real app defaults with separate loopback ports and eBull's backend proxy", async () => {
@@ -68,20 +72,21 @@ describe("crew apps", () => {
     expect(cmux.newWorkspace).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        command: "cd studio && pnpm install && pnpm dev -- --host 127.0.0.1 --port 5173",
+        command:
+          "PORT=5173 cd studio && pnpm install --frozen-lockfile && pnpm dev -- --host 127.0.0.1 --port 5173",
       }),
     );
     expect(cmux.newWorkspace).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         command:
-          "uv run uvicorn app.main:app --reload --reload-dir app --host 127.0.0.1 --port 5174",
+          "PORT=5174 BACKEND_PORT=5174 uv run uvicorn app.main:app --reload --reload-dir app --host 127.0.0.1 --port 5174",
       }),
     );
     expect(cmux.newPane).toHaveBeenCalledWith(
       "workspace",
       "/crew/apps/ebull",
-      "cd frontend && VITE_API_PROXY_TARGET=http://127.0.0.1:5174 pnpm dev -- --host 127.0.0.1 --port 5175",
+      "PORT=5175 BACKEND_PORT=5174 cd frontend && VITE_API_PROXY_TARGET=http://127.0.0.1:5174 pnpm dev -- --host 127.0.0.1 --port 5175",
     );
     expect(apps.view()).toEqual([
       expect.objectContaining({ apps: [{ url: "http://127.0.0.1:5173", answers: null }] }),

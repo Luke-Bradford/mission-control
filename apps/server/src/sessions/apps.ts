@@ -10,7 +10,10 @@ export const APP_PORT_START = 5173;
 /** The operator-approved development commands for the two initial crew applications. */
 export const CREW_APP_DEFAULTS: Readonly<Record<string, readonly CrewAppCommand[]>> = {
   "autonomy-engine": [
-    { command: "cd studio && pnpm install && pnpm dev", url: "http://127.0.0.1:$PORT" },
+    {
+      command: "cd studio && pnpm install --frozen-lockfile && pnpm dev",
+      url: "http://127.0.0.1:$PORT",
+    },
   ],
   ebull: [
     {
@@ -72,13 +75,14 @@ const portOf = (repos: readonly CrewAppRepo[], target: string, command: number) 
 const urlAt = (url: string, port: number) => url.replaceAll("$PORT", String(port));
 const commandAt = (repo: string, command: string, port: number, backendPort?: number) => {
   const rendered = command.replaceAll("$PORT", String(port));
-  if (!/pnpm dev$/.test(rendered)) return rendered;
+  const environment = `PORT=${port}${backendPort === undefined ? "" : ` BACKEND_PORT=${backendPort}`}`;
+  if (!/pnpm dev$/.test(rendered)) return `${environment} ${rendered}`;
   const vite = `${rendered} -- --host 127.0.0.1 --port ${port}`;
-  if (repo.toLowerCase() !== "ebull" || backendPort === undefined) return vite;
-  return vite.replace(
+  if (repo.toLowerCase() !== "ebull" || backendPort === undefined) return `${environment} ${vite}`;
+  return `${environment} ${vite.replace(
     "cd frontend && ",
     `cd frontend && VITE_API_PROXY_TARGET=http://127.0.0.1:${backendPort} `,
-  );
+  )}`;
 };
 
 /** App worktrees are private to the hub and always detached at the freshly fetched origin/main. */
@@ -137,7 +141,12 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     const workspace = await deps.cmux.newWorkspace({
       name: appName(repo.id),
       cwd: worktree,
-      command: commandAt(repo.id, first.command, firstPort),
+      command: commandAt(
+        repo.id,
+        first.command,
+        firstPort,
+        repo.id.toLowerCase() === "ebull" ? firstPort : undefined,
+      ),
     });
     const urls = [{ url: urlAt(first.url, firstPort), answers: null }];
     for (const [index, command] of repo.commands.slice(1).entries()) {
@@ -145,7 +154,12 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
       await deps.cmux.newPane(
         workspace,
         worktree,
-        commandAt(repo.id, command.command, port, firstPort),
+        commandAt(
+          repo.id,
+          command.command,
+          port,
+          repo.id.toLowerCase() === "ebull" ? firstPort : undefined,
+        ),
       );
       urls.push({ url: urlAt(command.url, port), answers: null });
     }
