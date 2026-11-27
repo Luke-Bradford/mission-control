@@ -595,7 +595,10 @@ describe("why the recorder dropped a check call", () => {
 
   describe("a check whose tool handed back before its process ended", () => {
     const WORKTREE = "/work/trees/guido-1-9";
-    const watching = (alive: { now: boolean }) =>
+    const watching = (
+      alive: { now: boolean },
+      options: { onLost?: (runId: string, commands: readonly string[]) => void } = {},
+    ) =>
       createCheckRecorder({
         store: { addCheckRun: (row) => void rows.push(row) },
         checks: async () => CHECKS,
@@ -603,6 +606,7 @@ describe("why the recorder dropped a check call", () => {
         worktree: async () => WORKTREE,
         processAlive: async () => alive.now,
         pollMs: 5,
+        ...options,
       });
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -725,7 +729,8 @@ describe("why the recorder dropped a check call", () => {
 
     it("frees the checkout and says so when the process ends with no completion", async () => {
       const alive = { now: true };
-      const r = watching(alive);
+      const lost: string[][] = [];
+      const r = watching(alive, { onLost: (_runId, commands) => lost.push([...commands]) });
       await r.admit?.(KEY, LINT);
       await r.begin(KEY, LINT);
       r.dropRun("r1");
@@ -734,6 +739,7 @@ describe("why the recorder dropped a check call", () => {
       await wait(40);
       expect(r.pending("r1")).toEqual([]);
       expect(reasons(r)).toEqual([["session-lost", LINT, HEAD]]);
+      expect(lost).toEqual([[LINT]]);
       expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
     });
   });

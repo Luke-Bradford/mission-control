@@ -646,12 +646,26 @@ export async function main(): Promise<void> {
   // The checks a repo configures (`mc.checks`): seats' shell calls are recorded against the commit
   // they ran on, and `mc push` asks for the record.
   const runChecks = configuredChecks(store, engineRules);
+  let supervisor!: import("./runtime/supervisor.ts").Supervisor;
   const checkRecorder = createCheckRecorder({
     store,
     checks: runChecks,
     state: cloneState(config, store),
     worktree: seatWorktree(store),
     processAlive,
+    onLost: (runId, commands) => {
+      const run = store.run(runId);
+      if (run === null) return;
+      void supervisor
+        .message(
+          run.agentId,
+          `The test command ended without a final result: ${commands.join(", ")}. Run it again; do not keep polling the lost command.`,
+          { interrupt: true, questions: "none", expectedRunId: runId },
+        )
+        .catch((e: unknown) =>
+          log(`checks: could not tell ${run.agentId} about a lost command: ${String(e)}`),
+        );
+    },
     log: (line) => log(line),
   });
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
@@ -691,7 +705,7 @@ export async function main(): Promise<void> {
             config.crew?.sessions.find((s) => s.repoId === repoId)?.checkout ?? null,
           log: (line) => log(line),
         });
-  const supervisor = createSupervisor({
+  supervisor = createSupervisor({
     // every Claude seat runs as a cmux workspace the operator can see, type into and clear
     cmuxCommand: [CMUX_COMMAND],
     auditPack: (seatId) =>

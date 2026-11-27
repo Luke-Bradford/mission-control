@@ -184,6 +184,8 @@ export interface CheckRecorderDeps {
   processAlive?: (worktree: string) => Promise<boolean>;
   /** How often a kept call's process is looked at (ms). */
   pollMs?: number;
+  /** A check process ended before its Codex command returned an exit code. */
+  onLost?: (runId: string, commands: readonly string[]) => void;
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -244,7 +246,10 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         started.delete(id);
         was = true;
       }
-    if (was && !call.timedOut) noteDrop(call.runId, reason, call.matched, call.head, call.command);
+    if (was && !call.timedOut) {
+      noteDrop(call.runId, reason, call.matched, call.head, call.command);
+      if (reason === "session-lost") d.onLost?.(call.runId, call.matched);
+    }
   };
   const reading = async (runId: string): Promise<boolean> => {
     const wt = d.worktree === undefined ? null : await d.worktree(runId).catch(() => null);
