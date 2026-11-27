@@ -1260,6 +1260,28 @@ describe("startRun", () => {
     expect(env.pnpm_config_pm_on_fail).toBe("ignore");
   });
 
+  it("gives declared Postgres and Redis services only to the seat through their Unix sockets", async () => {
+    const { sup } = make({
+      repo: { localServices: ["127.0.0.1:5432", "127.0.0.1:6379"] },
+    });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const start = recorded()[0];
+    const env = start.env as Record<string, string>;
+    const socketDir = join(dirname(env.TMPDIR as string), "local-services", runId);
+    const postgresSocket = join(socketDir, ".s.PGSQL.5432");
+    const redisSocket = join(socketDir, ".s.PGSQL.6379");
+    const argv = start.argv as string[];
+    const network = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.network;
+
+    expect(env.PGHOST).toBe(socketDir);
+    expect(env.REDIS_URL).toBe(`unix://${redisSocket}`);
+    expect(network.allowUnixSockets).toEqual([postgresSocket, redisSocket]);
+    expect(network.deniedResolvedAddresses).toContain("127.0.0.0/8");
+    await sup.endRun("guido-1");
+  });
+
   it.each([1000, 9999999999])(
     "keeps UID %s temp paths private and within Claude's limit",
     (uid) => {
