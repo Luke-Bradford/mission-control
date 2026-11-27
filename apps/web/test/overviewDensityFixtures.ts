@@ -769,6 +769,11 @@ export function demoSeed(daySeed = 1) {
       summary: null,
     })),
   );
+  const memory = api[`/api/flight/memory?repo=${DEMO_REPO}`];
+  for (const repoId of repos)
+    api[`/api/flight/memory?repo=${repoId}`] = JSON.parse(
+      JSON.stringify(memory).replaceAll(DEMO_REPO, repoId),
+    );
   for (const [index, repoId] of repos.entries()) {
     const own = index === 2 ? [] : DEMO_TICKETS.filter((_, ticket) => ticket % 2 === index);
     const replaceRepo = <T>(value: T): T =>
