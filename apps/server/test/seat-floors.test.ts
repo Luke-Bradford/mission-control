@@ -537,11 +537,13 @@ const loopbackProbe = (port: number, hosts: readonly string[] = ["127.0.0.1"]) =
     )
     .join("; ")}`;
 
-/** Reach one declared local service before attempting two loopback ports that must stay closed. */
+/** Open the declared Unix socket as a native client before attempting closed loopback ports. */
 const localServiceProbe = (serviceSocket: string, hubPort: number, otherPort: number) =>
   [
     "echo ran",
-    `/usr/bin/curl -fsS -m 3 --unix-socket '${serviceSocket}' http://localhost/ >/dev/null`,
+    `${process.execPath} --input-type=commonjs -e ${JSON.stringify(
+      `const net = require("node:net"); const socket = net.connect({ path: ${JSON.stringify(serviceSocket)} }); socket.once("connect", () => socket.write("GET / HTTP/1.0\\r\\n\\r\\n")); socket.once("data", () => process.exit(0)); socket.once("error", () => process.exit(1)); setTimeout(() => process.exit(1), 3000);`,
+    )}`,
     'echo "service=$?"',
     `/usr/bin/curl -s -m 3 -o /dev/null http://127.0.0.1:${hubPort}/api/operator/bootstrap`,
     'echo "hub=$?"',
@@ -756,7 +758,7 @@ describe.skipIf(claudeCli === null)("a Claude seat cannot reach the hub on loopb
     120_000,
   );
 
-  it("reaches its declared local service but never the hub or another loopback port", async () => {
+  it("reaches its declared service through a native Unix socket but never the hub or another loopback port", async () => {
     const service = await listenOnLoopback();
     const hub = await listenOnLoopback();
     const other = await listenOnLoopback();

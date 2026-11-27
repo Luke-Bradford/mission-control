@@ -1165,17 +1165,15 @@ function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
 
 /**
  * What a seat's network may not reach: the hub and every other service on this Mac's loopback, and
- * the link-local range (cloud metadata). A repo can add exact loopback host:port pairs to its
- * sandbox's allow list. The hub's own routes trust loopback callers more than the open internet,
- * so config validation never permits its port.
+ * the link-local range (cloud metadata). Declared local services use exact hub-owned Unix sockets;
+ * config validation never permits the hub's port because its routes trust loopback callers.
  */
 export const SEAT_DENIED_HOSTS = ["localhost"] as const;
 
 /**
- * Loopback and link-local addresses which a permitted hostname may not resolve to. Claude's
- * sandbox permits a precise IP-and-port in `allowedDomains` to bypass this resolution check;
- * unlike `deniedDomains`, it therefore leaves a repo's declared local service reachable without
- * opening the rest of loopback.
+ * Loopback and link-local addresses which a permitted hostname may not resolve to. Declared local
+ * services do not bypass this list: the hub connects to their configured TCP endpoint and exposes
+ * an exact Unix socket to the seat instead.
  */
 export const SEAT_DENIED_RESOLVED_ADDRESSES = [
   "127.0.0.0/8",
