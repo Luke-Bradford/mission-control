@@ -4022,6 +4022,17 @@ describe("push and draft_pr", () => {
       expect(body.endsWith("Opened by GUIDO-1 (Mission Control).\n")).toBe(true);
     });
 
+    it("keeps the added dependencies section when the seat rewrites its PR body", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      const added = "## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT";
+      ghState(view({ body: `#42\n\n## What changed\n\nold\n\n${added}\n\nCloses #42.\n` }));
+      await edit("New text.");
+      const body = edits()[0]?.body ?? "";
+      expect(body).toContain("New text.");
+      expect(body).toContain(added);
+      expect(body.match(/## Added dependencies/g)).toHaveLength(1);
+    });
+
     it("keeps a staged body's Part of line last, with no closing line", async () => {
       store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
       ghState(view({ body: `#42\n\n## What changed\n\nold\n\n${MINORS}\nPart of #42.\n` }));

@@ -86,7 +86,7 @@ function compareDeps(
   added: string[],
 ): void {
   for (const [name, value] of Object.entries(after)) {
-    if (name in before) {
+    if (Object.hasOwn(before, name)) {
       if (!same(before[name], value)) problems.push(`changes ${name} in ${where}`);
       continue;
     }
@@ -100,7 +100,7 @@ function compareDeps(
     else if (!added.includes(name)) added.push(name);
   }
   for (const name of Object.keys(before)) {
-    if (!(name in after)) problems.push(`removes ${name} from ${where}`);
+    if (!Object.hasOwn(after, name)) problems.push(`removes ${name} from ${where}`);
   }
 }
 

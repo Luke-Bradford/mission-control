@@ -13,6 +13,7 @@ import {
 
 const HYP: AllowedPackage = { name: "hyparquet", version: "1.33.2", licence: "MIT" };
 const WRITER: AllowedPackage = { name: "hyparquet-writer", version: "0.18.1", licence: "MIT" };
+const CONSTRUCTOR: AllowedPackage = { name: "constructor", version: "1.0.0", licence: "MIT" };
 
 const manifest = (deps: Record<string, string>, extra: Record<string, unknown> = {}) =>
   `${JSON.stringify({ name: "x", version: "1.0.0", ...extra, dependencies: deps }, null, 2)}\n`;
@@ -75,6 +76,20 @@ describe("manifestChange", () => {
     ).toEqual(["changes something besides the added dependencies"]);
   });
 
+  it("treats Object prototype-shaped dependency names as own keys", () => {
+    expect(
+      manifestChange(
+        manifest({ constructor: "1.0.0" }),
+        manifest({ hyparquet: "1.33.2" }),
+        [HYP],
+      ).problems,
+    ).toEqual(["removes constructor from dependencies"]);
+    expect(manifestChange(manifest({}), manifest({ constructor: "1.0.0" }), [CONSTRUCTOR])).toEqual({
+      problems: [],
+      added: ["constructor"],
+    });
+  });
+
   it("refuses a manifest that is not a JSON object", () => {
     expect(manifestChange(manifest({}), "not json", [HYP]).problems).toEqual([
       "is not a JSON object",
@@ -117,6 +132,15 @@ describe("lockfileProblems", () => {
       "changes zod in importer . dependencies",
       "adds left-pad, which FLIGHT did not allow",
     ]);
+  });
+
+  it("treats Object prototype-shaped importer dependency names as own keys", () => {
+    const constructor = { specifier: "1.0.0", version: "1.0.0" };
+    const hyparquet = { specifier: "1.33.2", version: "1.33.2" };
+    expect(lockfileProblems(lock({ constructor }), lock({ hyparquet }), [HYP])).toEqual([
+      "removes constructor from importer . dependencies",
+    ]);
+    expect(lockfileProblems(lock({}), lock({ constructor }), [CONSTRUCTOR])).toEqual([]);
   });
 
   it("refuses a named package resolved at another version", () => {

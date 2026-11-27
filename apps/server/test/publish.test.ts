@@ -2220,6 +2220,25 @@ describe("postMinorFindings", () => {
     expect(posted?.indexOf("Seat rewrite.")).toBeLessThan(posted?.indexOf(MINOR_HEADING) ?? 0);
   });
 
+  it("replaces a seat body's added dependencies section from the current allowance", async () => {
+    allowRunDependencies(store, R.id, ["package.json"], [
+      { name: "hyparquet", version: "1.33.2", licence: "MIT" },
+    ]);
+    markDependenciesAdded(store, R.id, [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }]);
+    answer(
+      JSON.stringify({
+        headRefName: BRANCH,
+        state: "OPEN",
+        body: "Seat rewrite.\n\n## Added dependencies\n\n- `old-package` 1.0.0, licence ISC\n\nCloses #7.\n",
+      }),
+    );
+    await createPublisher(deps()).postMinorFindings(R, review([minor("first")]));
+    expect(posted).toContain("Seat rewrite.");
+    expect(posted).toContain("- `hyparquet` 1.33.2, licence MIT");
+    expect(posted).not.toContain("old-package");
+    expect(posted?.match(/## Added dependencies/g)).toHaveLength(1);
+  });
+
   it("gives a seat's body Part of, not Closes, once a later note says Part of", async () => {
     store.addEvidence(R.id, "Part of #7: stage 2.", START + 1000);
     answer(
