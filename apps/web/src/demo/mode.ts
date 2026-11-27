@@ -65,7 +65,10 @@ const DEMO_PR_EVIDENCE =
 export async function demoSend(path: string, init: RequestInit): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
   if (method !== "GET") return demoRefusal();
-  if (DEMO_PICTURE_ROUTES.some((prefix) => path.startsWith(prefix)) || DEMO_PR_EVIDENCE.test(path)) {
+  if (
+    DEMO_PICTURE_ROUTES.some((prefix) => path.startsWith(prefix)) ||
+    DEMO_PR_EVIDENCE.test(path)
+  ) {
     const { pictureBytes, pictureFor } = await import("./picture.ts");
     const bytes = pictureBytes(pictureFor(path));
     return new Response(bytes, { status: 200, headers: { "content-type": "image/png" } });

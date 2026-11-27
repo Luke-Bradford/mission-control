@@ -850,7 +850,9 @@ function EvidenceImage({ path, alt }: { path: string; alt: string }) {
         <img src={url} alt={alt} loading="lazy" />
       </a>
     );
-  return <p>{error ? "The evidence image could not be loaded." : "Loading screenshot evidence…"}</p>;
+  return (
+    <p>{error ? "The evidence image could not be loaded." : "Loading screenshot evidence…"}</p>
+  );
 }
 
 function Thread({
