@@ -3313,9 +3313,9 @@ describe("GET /api/machine", () => {
     const crew = join(dir, "crew");
     mkdirSync(crew);
     const path = join(crew, "r1.jsonl");
-      store.upsertRun(
-        run({ id: "r1", agentId: "a-1", transcriptPath: path, endedAt: NOW, status: "ok" }),
-      );
+    store.upsertRun(
+      run({ id: "r1", agentId: "a-1", transcriptPath: path, endedAt: NOW, status: "ok" }),
+    );
     writeFileSync(path, Buffer.alloc(100));
 
     expect((await get("/api/machine")).json().transcripts).toBeNull();
