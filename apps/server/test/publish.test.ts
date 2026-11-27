@@ -2221,9 +2221,12 @@ describe("postMinorFindings", () => {
   });
 
   it("replaces a seat body's added dependencies section from the current allowance", async () => {
-    allowRunDependencies(store, R.id, ["package.json"], [
-      { name: "hyparquet", version: "1.33.2", licence: "MIT" },
-    ]);
+    allowRunDependencies(
+      store,
+      R.id,
+      ["package.json"],
+      [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }],
+    );
     markDependenciesAdded(store, R.id, [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }]);
     answer(
       JSON.stringify({

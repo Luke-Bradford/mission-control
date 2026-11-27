@@ -78,16 +78,15 @@ describe("manifestChange", () => {
 
   it("treats Object prototype-shaped dependency names as own keys", () => {
     expect(
-      manifestChange(
-        manifest({ constructor: "1.0.0" }),
-        manifest({ hyparquet: "1.33.2" }),
-        [HYP],
-      ).problems,
+      manifestChange(manifest({ constructor: "1.0.0" }), manifest({ hyparquet: "1.33.2" }), [HYP])
+        .problems,
     ).toEqual(["removes constructor from dependencies"]);
-    expect(manifestChange(manifest({}), manifest({ constructor: "1.0.0" }), [CONSTRUCTOR])).toEqual({
-      problems: [],
-      added: ["constructor"],
-    });
+    expect(manifestChange(manifest({}), manifest({ constructor: "1.0.0" }), [CONSTRUCTOR])).toEqual(
+      {
+        problems: [],
+        added: ["constructor"],
+      },
+    );
   });
 
   it("refuses a manifest that is not a JSON object", () => {
@@ -135,12 +134,12 @@ describe("lockfileProblems", () => {
   });
 
   it("treats Object prototype-shaped importer dependency names as own keys", () => {
-    const constructor = { specifier: "1.0.0", version: "1.0.0" };
+    const constructorEntry = { specifier: "1.0.0", version: "1.0.0" };
     const hyparquet = { specifier: "1.33.2", version: "1.33.2" };
-    expect(lockfileProblems(lock({ constructor }), lock({ hyparquet }), [HYP])).toEqual([
+    expect(lockfileProblems(lock({ constructor: constructorEntry }), lock({ hyparquet }), [HYP])).toEqual([
       "removes constructor from importer . dependencies",
     ]);
-    expect(lockfileProblems(lock({}), lock({ constructor }), [CONSTRUCTOR])).toEqual([]);
+    expect(lockfileProblems(lock({}), lock({ constructor: constructorEntry }), [CONSTRUCTOR])).toEqual([]);
   });
 
   it("refuses a named package resolved at another version", () => {
