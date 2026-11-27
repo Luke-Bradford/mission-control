@@ -31,6 +31,35 @@ describe("crew apps", () => {
     );
     expect(pane.setStatus).toHaveBeenCalledWith("ws", "app", "http://127.0.0.1:5173");
   });
+  it("keeps autonomy-engine and eBull in their own live seat workspaces", async () => {
+    const ae = { id: "guido-ae", repoId: "autonomy-engine", worktree: "/crew/autonomy" };
+    const pane = cmux();
+    pane.workspaces.mockResolvedValue([
+      { id: "ae", name: "guido-ae · #2", cwd: ae.worktree },
+      { id: "eb", name: "guido-eb · #1", cwd: seat.worktree },
+    ]);
+    const apps = createCrewApps({
+      cmux: pane,
+      run: vi.fn(),
+      repos: () => [
+        { id: "autonomy-engine", commands: CREW_APP_DEFAULTS["autonomy-engine"] ?? [] },
+        { id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] },
+      ],
+      seats: () => [ae, seat],
+    });
+    await apps.start(ae.id);
+    await apps.start(seat.id);
+    expect(pane.newPane).toHaveBeenCalledWith(
+      "ae",
+      ae.worktree,
+      expect.stringContaining("PORT=5173"),
+    );
+    expect(pane.newPane).toHaveBeenCalledWith(
+      "eb",
+      seat.worktree,
+      expect.stringContaining("PORT=5183"),
+    );
+  });
   it("restarts a stopped endpoint once in five minutes and stops it when its run ends", async () => {
     let seats = [seat];
     let at = 0;
