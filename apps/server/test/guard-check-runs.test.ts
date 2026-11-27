@@ -731,16 +731,16 @@ describe("why the recorder dropped a check call", () => {
       const alive = { now: true };
       const lost: string[][] = [];
       const r = watching(alive, { onLost: (_runId, commands) => lost.push([...commands]) });
-      await r.admit?.(KEY, LINT);
-      await r.begin(KEY, LINT);
+      const focused = "pnpm -s vitest apps/server/test/guard-check-runs.test.ts";
+      await r.admit?.(KEY, focused);
       r.dropRun("r1");
       await wait(20);
       alive.now = false;
       await wait(40);
       expect(r.pending("r1")).toEqual([]);
-      expect(reasons(r)).toEqual([["session-lost", LINT, HEAD]]);
-      expect(lost).toEqual([[LINT]]);
-      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+      expect(reasons(r)).toEqual([]);
+      expect(lost).toEqual([[focused]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, focused)).toBeNull();
     });
   });
 

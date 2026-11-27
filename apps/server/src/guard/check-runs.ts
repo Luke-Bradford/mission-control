@@ -285,6 +285,11 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
           // a process never seen is a plain turn end; one that went with no completion is lost
           const reason = sawAlive || expired ? "session-lost" : "turn-ended";
           for (const call of calls) forget(call, reason);
+          // A focused test command has no configured-check receipt, but it still holds the
+          // checkout. Once its process is gone, its seat must get the same rerun instruction.
+          const reservation = reservations.get(runId);
+          if (reason === "session-lost" && calls.size === 0 && reservation !== undefined)
+            d.onLost?.(runId, [reservation.command]);
           reservations.delete(runId);
           return;
         }
