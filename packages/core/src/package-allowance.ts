@@ -3,6 +3,7 @@
  * manifest and lockfile paths, for one run (`allow_dependency`). The commit tool then accepts those
  * files when their change adds just the named packages; the PR lists what was added.
  */
+import { unclosedMarkdown } from "./guard.ts";
 import { NESTED_PROTECTED_PROBLEM, pathGrantProblem } from "./path-grants.ts";
 
 export interface AllowedPackage {
@@ -13,8 +14,9 @@ export interface AllowedPackage {
 
 /** An npm package name, scoped or not. */
 export const NPM_NAME = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
-/** One exact version: no range. */
-export const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+/** One exact SemVer 2.0.0 version (semver.org's own pattern): no range, no leading zero. */
+export const EXACT_VERSION =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 /** A licence as the package states it, such as MIT or (MIT OR Apache-2.0). */
 export const LICENCE = /^[A-Za-z0-9.+()\- ]{1,100}$/;
 
@@ -26,8 +28,10 @@ const DEP_FIELDS = [
   "optionalDependencies",
   "peerDependencies",
 ] as const;
-/** The lockfile parts a new package may add to: `importers` is checked entry by entry. */
-const LOCK_GROWS = new Set(["importers", "packages", "snapshots"]);
+/** The lockfile's records of resolved packages: a new package may add records, never change one. */
+const LOCK_RECORDS = ["packages", "snapshots"] as const;
+/** The lockfile parts a new package may add to, each checked entry by entry. */
+const LOCK_GROWS = new Set<string>(["importers", ...LOCK_RECORDS]);
 
 const baseName = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
 
@@ -143,8 +147,9 @@ export function manifestChange(
 
 /**
  * What goes beyond the named packages in a parsed pnpm lockfile: each importer may only gain
- * direct entries for them, resolved at the named version (a peer suffix allowed). New
- * `packages` and `snapshots` entries are their dependencies, shown in the PR's lockfile diff.
+ * direct entries for them, resolved at the named version (a peer suffix allowed). `packages` and
+ * `snapshots` may only gain records (their dependencies, shown in the PR's lockfile diff): a
+ * record already there keeps its resolution, integrity and the rest exactly.
  */
 export function lockfileProblems(
   before: unknown,
@@ -158,6 +163,18 @@ export function lockfileProblems(
   const problems: string[] = [];
   for (const key of new Set([...Object.keys(b), ...Object.keys(after)])) {
     if (!LOCK_GROWS.has(key) && !same(b[key], after[key])) problems.push(`changes ${key}`);
+  }
+  for (const key of LOCK_RECORDS) {
+    const was = b[key] ?? {};
+    const now = after[key] ?? {};
+    if (!isObject(was) || !isObject(now)) {
+      problems.push(`has ${key} that is not an object`);
+      continue;
+    }
+    for (const [id, record] of Object.entries(was)) {
+      if (!(id in now)) problems.push(`removes ${key} ${id}`);
+      else if (!same(record, now[id])) problems.push(`changes ${key} ${id}`);
+    }
   }
   const resolved = (value: unknown, version: string): string | null => {
     const v = isObject(value) ? value.version : value;
@@ -193,17 +210,42 @@ export function lockfileProblems(
 
 export const ADDED_DEPENDENCIES_HEADING = "## Added dependencies";
 
+const addedLine = (p: AllowedPackage): string =>
+  `- \`${p.name}\` ${p.version}, licence ${p.licence}`;
+/** One line as `addedLine` writes it: the name alone in a code span. */
+const ADDED_LINE = /^- `([^`]+)` (\S+), licence (.+)$/;
+
 /**
  * The PR body's section listing each added package, or null when none was added. A scoped name
- * loses its `@` (`scope/pkg`): GitHub text never carries a bare `@name`.
+ * is written whole, `@` included, in a code span: GitHub does not mention inside code, and
+ * `inertAddedDependencies` lets these lines through the mention check.
  */
 export function addedDependenciesSection(added: readonly AllowedPackage[]): string | null {
   if (added.length === 0) return null;
-  return [
-    ADDED_DEPENDENCIES_HEADING,
-    "",
-    ...added.map((p) => `- \`${p.name.replace(/^@/, "")}\` ${p.version}, licence ${p.licence}`),
-  ].join("\n");
+  return [ADDED_DEPENDENCIES_HEADING, "", ...added.map(addedLine)].join("\n");
+}
+
+/**
+ * `body` for the mention check: in the Added dependencies section, each line as
+ * `addedDependenciesSection` writes it has its scoped name's `@` dropped. Only the lines just
+ * after the heading and its blank line are read, and only when the text before the heading is not
+ * in an open code or HTML block, so each name sits in a code span on GitHub. Anything else, an
+ * `@` after the name included, is left for the check to find.
+ */
+export function inertAddedDependencies(body: string): string {
+  const lines = body.split("\n");
+  const start = lines.indexOf(ADDED_DEPENDENCIES_HEADING);
+  if (start < 0 || lines[start + 1] !== "") return body;
+  if (unclosedMarkdown(lines.slice(0, start).join("\n"))) return body;
+  for (let i = start + 2; i < lines.length; i++) {
+    const m = ADDED_LINE.exec(lines[i] ?? "");
+    const [, name = "", version = "", licence = ""] = m ?? [];
+    const fits =
+      m !== null && NPM_NAME.test(name) && EXACT_VERSION.test(version) && LICENCE.test(licence);
+    if (!fits) break;
+    lines[i] = addedLine({ name: name.replace(/^@/, ""), version, licence });
+  }
+  return lines.join("\n");
 }
 
 const packageList = (packages: readonly AllowedPackage[]): string =>

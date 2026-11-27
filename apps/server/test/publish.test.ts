@@ -217,15 +217,43 @@ describe("openPr", () => {
         { name: "hyparquet", version: "1.33.2", licence: "MIT" },
         { name: "hyparquet-writer", version: "0.18.1", licence: "MIT" },
         { name: "left-pad", version: "1.3.0", licence: "WTFPL" },
+        { name: "@scope/pkg", version: "2.0.0", licence: "Apache-2.0" },
       ],
     );
-    markDependenciesAdded(store, "r1", ["hyparquet", "hyparquet-writer"]);
+    markDependenciesAdded(store, "r1", [
+      { name: "hyparquet", version: "1.33.2", licence: "MIT" },
+      { name: "hyparquet-writer", version: "0.18.1", licence: "MIT" },
+      { name: "@scope/pkg", version: "2.0.0", licence: "Apache-2.0" },
+    ]);
+    ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+    tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+    await createPublisher(deps()).openPr(run(), TICKET, "Changed it.");
+    // the scoped name is whole, in a code span, and passes the text check: the title is kept
+    expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
+      title: "#7 Fix the thing",
+      body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\n## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT\n- `hyparquet-writer` 0.18.1, licence MIT\n- `@scope/pkg` 2.0.0, licence Apache-2.0\n\nCloses #7.",
+    });
+  });
+
+  it("lists a committed package as committed, whatever a later allowance names", async () => {
+    const files = ["package.json", "pnpm-lock.yaml"];
+    allowRunDependencies(store, "r1", files, [
+      { name: "hyparquet", version: "1.33.2", licence: "MIT" },
+    ]);
+    markDependenciesAdded(store, "r1", [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }]);
+    allowRunDependencies(store, "r1", files, [
+      { name: "hyparquet", version: "1.40.0", licence: "GPL-3.0" },
+    ]);
+    // a second commit of the same name does not rewrite the record either
+    markDependenciesAdded(store, "r1", [
+      { name: "hyparquet", version: "1.40.0", licence: "GPL-3.0" },
+    ]);
     ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
     tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
     await createPublisher(deps()).openPr(run(), TICKET, "Changed it.");
     expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
       title: "#7 Fix the thing",
-      body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\n## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT\n- `hyparquet-writer` 0.18.1, licence MIT\n\nCloses #7.",
+      body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\n## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT\n\nCloses #7.",
     });
   });
 

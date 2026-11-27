@@ -6,8 +6,11 @@ import type { Store } from "../store.ts";
 export interface DependencyAllowance {
   files: string[];
   packages: AllowedPackage[];
-  /** Names of the allowed packages a commit has added to a manifest. */
-  added: string[];
+  /**
+   * Each package a commit added, as it was allowed when that commit was made: a later allowance
+   * of the same name does not change it. The PR's Added dependencies section lists these.
+   */
+  added: AllowedPackage[];
 }
 
 const KEY = (runId: string): string => `run-dependency:${runId}`;
@@ -15,6 +18,16 @@ const NONE: DependencyAllowance = { files: [], packages: [], added: [] };
 
 const strings = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+
+const packagesOf = (v: unknown): AllowedPackage[] =>
+  (Array.isArray(v) ? v : []).filter(
+    (p): p is AllowedPackage =>
+      typeof p === "object" &&
+      p !== null &&
+      typeof p.name === "string" &&
+      typeof p.version === "string" &&
+      typeof p.licence === "string",
+  );
 
 /** The run's allowance; empty for a run FLIGHT allowed nothing. */
 export function runDependencyAllowance(
@@ -26,21 +39,16 @@ export function runDependencyAllowance(
   try {
     const v = parseJson<unknown>(raw, undefined, rethrowJson) as Record<string, unknown> | null;
     if (typeof v !== "object" || v === null) return NONE;
-    const packages = (Array.isArray(v.packages) ? v.packages : []).filter(
-      (p): p is AllowedPackage =>
-        typeof p === "object" &&
-        p !== null &&
-        typeof p.name === "string" &&
-        typeof p.version === "string" &&
-        typeof p.licence === "string",
-    );
-    return { files: strings(v.files), packages, added: strings(v.added) };
+    return { files: strings(v.files), packages: packagesOf(v.packages), added: packagesOf(v.added) };
   } catch {
     return NONE;
   }
 }
 
-/** Adds to the run's allowance: a package named again takes the newer version and licence. */
+/**
+ * Adds to the run's allowance: a package named again takes the newer version and licence for
+ * commits from now on. What a commit already added keeps its record.
+ */
 export function allowRunDependencies(
   store: Pick<Store, "getSetting" | "setSetting">,
   runId: string,
@@ -57,23 +65,27 @@ export function allowRunDependencies(
   store.setSetting(KEY(runId), JSON.stringify(next));
 }
 
-/** Records packages a commit added, once each. */
+/** Records the packages a commit added, as allowed then; a name already recorded keeps its record. */
 export function markDependenciesAdded(
   store: Pick<Store, "getSetting" | "setSetting">,
   runId: string,
-  names: readonly string[],
+  packages: readonly AllowedPackage[],
 ): void {
   const was = runDependencyAllowance(store, runId);
-  const added = [...new Set([...was.added, ...names])];
+  const added = [...was.added];
+  for (const p of packages) {
+    if (!added.some((a) => a.name === p.name)) {
+      added.push({ name: p.name, version: p.version, licence: p.licence });
+    }
+  }
   if (added.length === was.added.length) return;
   store.setSetting(KEY(runId), JSON.stringify({ ...was, added }));
 }
 
-/** The allowed packages the run's commits added, in the order FLIGHT named them. */
+/** The packages the run's commits added, in the order they were committed. */
 export function addedDependencies(
   store: Pick<Store, "getSetting">,
   runId: string,
 ): AllowedPackage[] {
-  const a = runDependencyAllowance(store, runId);
-  return a.packages.filter((p) => a.added.includes(p.name));
+  return runDependencyAllowance(store, runId).added;
 }

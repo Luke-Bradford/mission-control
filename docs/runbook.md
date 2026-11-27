@@ -1153,8 +1153,8 @@ A seat that needs a new package asks FLIGHT with `mc ask_flight`. The commit too
 `mc allow_dependency { runId, files, packages, basis }`:
 - `files` lists the manifest and lockfile paths. Only files named `package.json` or `pnpm-lock.yaml`
   can be listed, nested ones included.
-- `packages` lists each package with its exact version and its licence, such as
-  `{ name: "hyparquet", version: "1.33.2", licence: "MIT" }`.
+- `packages` lists each package with its exact SemVer version (no range, no leading zero) and its
+  licence, such as `{ name: "hyparquet", version: "1.33.2", licence: "MIT" }`.
 
 The call logs a `dependency` decision ("Allowed GUIDO-1 to add hyparquet 1.33.2 (MIT) in
 package.json, pnpm-lock.yaml"). The allowance is for that run only. A second call adds to it.
@@ -1169,11 +1169,15 @@ accepts an allowed file only when its change adds just the named packages:
   field (`scripts`, for one).
 - **A lockfile** may only gain direct entries for the named packages in its `importers`, each
   resolved at the named version. New transitive `packages` and `snapshots` entries are allowed; the
-  PR shows them in the lockfile diff. Any change to another top-level key, such as `overrides` or
-  `settings`, is refused.
+  PR shows them in the lockfile diff. An entry already there must stay exactly as it was: changing
+  or removing its resolution, integrity or anything else is refused. Any change to another
+  top-level key, such as `overrides` or `settings`, is refused.
 
 The push's stray check counts the allowed files as granted. The PR body gets an `## Added
-dependencies` section, with each added package's version and licence. The section survives a seat's
+dependencies` section, with each added package's version and licence as allowed when its commit
+was made; a later allowance of the same name does not change that line. A scoped name is written
+whole in a code span, where GitHub mentions no one, and the PR text check lets just those lines
+through. The section survives a seat's
 `pr_body` rewrite and RETRO's minor-findings update. It is written when the PR opens and at the
 review's minor-findings update, so a package added after the review shows only from the next
 update on. The merge gates do not change.

@@ -3739,6 +3739,10 @@ describe("allow_dependency", () => {
   it("refuses a range, a bad name, and a run that is not an unended developer run", async () => {
     for (const p of [
       { ...HYP, version: "^1.33.2" },
+      { ...HYP, version: "01.33.2" },
+      { ...HYP, version: "1.33.2-" },
+      { ...HYP, version: "1.33.2-01" },
+      { ...HYP, version: "1.33.2-a..b" },
       { ...HYP, name: "Bad Name" },
       { ...HYP, licence: "" },
     ]) {

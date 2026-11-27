@@ -92,6 +92,7 @@ import {
   fixKey,
   formerSubmoduleText,
   grantedPath,
+  inertAddedDependencies,
   isManifest,
   isProtectedPath,
   liftPark,
@@ -1251,7 +1252,8 @@ export function prTextProblem(
   }
   const ref = firstNamedRef(text);
   if (ref !== null) return { problem: "named", ref };
-  const first = firstPrNotifier(text, {
+  // the hub's Added dependencies lines hold scoped names in code spans, where GitHub mentions no one
+  const first = firstPrNotifier(inertAddedDependencies(text), {
     repo: own.repo,
     issue: own.issue,
     allowOwnRepoRefs: own.allowOwnRepoRefs === true,
@@ -2588,7 +2590,10 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           { env: gitIdentity(name), timeoutMs: CREW_GIT_SLOW_MS },
         );
         committed = true;
-        if (depsAdded.length > 0) markDependenciesAdded(store, run.id, depsAdded);
+        if (depsAdded.length > 0) {
+          const added = allowance.packages.filter((p) => depsAdded.includes(p.name));
+          markDependenciesAdded(store, run.id, added);
+        }
         return recordCommit((await g(["rev-parse", "--verify", "HEAD"])).trim());
       }
     });

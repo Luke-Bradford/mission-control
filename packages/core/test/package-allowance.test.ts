@@ -3,6 +3,9 @@ import {
   type AllowedPackage,
   addedDependenciesSection,
   allowanceFileProblem,
+  EXACT_VERSION,
+  firstPrNotifier,
+  inertAddedDependencies,
   isAllowanceFile,
   lockfileProblems,
   manifestChange,
@@ -123,6 +126,37 @@ describe("lockfileProblems", () => {
     ]);
   });
 
+  it("refuses a changed or removed package record, and accepts new ones", () => {
+    const deps = { hyparquet: { specifier: "1.33.2", version: "1.33.2" } };
+    const packages = { "zod@4.1.0": { resolution: { integrity: "sha512-good" } } };
+    const before = { ...lock({}, packages), snapshots: { "zod@4.1.0": {} } };
+    const grown = {
+      ...lock(deps, { ...packages, "hyparquet@1.33.2": { resolution: { integrity: "sha512-h" } } }),
+      snapshots: { "zod@4.1.0": {}, "hyparquet@1.33.2": {} },
+    };
+    expect(lockfileProblems(before, grown, [HYP])).toEqual([]);
+    const evil = { resolution: { integrity: "sha512-evil", tarball: "https://evil.example/z.tgz" } };
+    expect(
+      lockfileProblems(before, { ...grown, packages: { ...grown.packages, "zod@4.1.0": evil } }, [
+        HYP,
+      ]),
+    ).toEqual(["changes packages zod@4.1.0"]);
+    const { "zod@4.1.0": _gone, ...rest } = grown.packages;
+    expect(lockfileProblems(before, { ...grown, packages: rest }, [HYP])).toEqual([
+      "removes packages zod@4.1.0",
+    ]);
+    expect(
+      lockfileProblems(
+        before,
+        { ...grown, snapshots: { "zod@4.1.0": { dependencies: { x: "1.0.0" } } } },
+        [HYP],
+      ),
+    ).toEqual(["changes snapshots zod@4.1.0"]);
+    expect(lockfileProblems(before, { ...grown, snapshots: {} }, [HYP])).toEqual([
+      "removes snapshots zod@4.1.0",
+    ]);
+  });
+
   it("refuses a lockfile with no importers", () => {
     expect(lockfileProblems(lock({}), "x", [HYP])).toEqual(["is not a pnpm lockfile"]);
   });
@@ -141,15 +175,68 @@ describe("allowance files", () => {
   });
 });
 
+describe("EXACT_VERSION", () => {
+  it.each(["1.33.2", "0.0.0", "1.2.3-rc.1", "1.2.3-0.a-b", "1.2.3+build.5", "10.20.30-alpha+001"])(
+    "accepts %j",
+    (v) => expect(EXACT_VERSION.test(v)).toBe(true),
+  );
+  it.each([
+    "01.2.3",
+    "1.02.3",
+    "1.2.03",
+    "1.2.3-",
+    "1.2.3-a..b",
+    "1.2.3-01",
+    "1.2.3+",
+    "1.2.3+a..b",
+    "1.2",
+    "^1.2.3",
+    "~1.2.3",
+    ">=1.2.3",
+    "1.x.3",
+    "v1.2.3",
+  ])("refuses %j", (v) => expect(EXACT_VERSION.test(v)).toBe(false));
+});
+
+describe("inertAddedDependencies", () => {
+  const own = { repo: "o/r", issue: 7 };
+  const body = (lines: string[]) =>
+    ["Did it.", "", "## Added dependencies", "", ...lines, "", "Closes #7."].join("\n");
+
+  it("lets the scoped names of the hub's section through the mention check", () => {
+    const section = addedDependenciesSection([
+      { name: "@scope/pkg", version: "2.0.0", licence: "MIT" },
+    ]);
+    const text = `Did it.\n\n${section}\n\nCloses #7.`;
+    expect(firstPrNotifier(text, own)).toBe("@scope/pkg");
+    expect(firstPrNotifier(inertAddedDependencies(text), own)).toBeNull();
+  });
+
+  it("leaves a mention anywhere else, or in a line not shaped as the hub writes it", () => {
+    for (const text of [
+      body(["- `hyparquet` 1.33.2, licence MIT", "@someone"]),
+      body(["- @scope/pkg 2.0.0, licence MIT"]),
+      body(["- `@scope/pkg` 2.0.0, licence MIT @someone"]),
+      body(["- `@scope/pkg` ^2.0.0, licence MIT"]),
+      `@someone\n\n${body(["- `@scope/pkg` 2.0.0, licence MIT"])}`,
+      // in an open HTML block the backticks are not code
+      `<pre>\n${body(["- `@scope/pkg` 2.0.0, licence MIT"])}`,
+      ["## Added dependencies", "- `@scope/pkg` 2.0.0, licence MIT"].join("\n"),
+    ]) {
+      expect(firstPrNotifier(inertAddedDependencies(text), own)).not.toBeNull();
+    }
+  });
+});
+
 describe("addedDependenciesSection", () => {
-  it("lists each added package with version and licence, a scoped name without its @", () => {
+  it("lists each added package with version and licence, a scoped name whole", () => {
     expect(
       addedDependenciesSection([
         HYP,
         { name: "@scope/pkg", version: "2.0.0", licence: "Apache-2.0" },
       ]),
     ).toBe(
-      "## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT\n- `scope/pkg` 2.0.0, licence Apache-2.0",
+      "## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT\n- `@scope/pkg` 2.0.0, licence Apache-2.0",
     );
     expect(addedDependenciesSection([])).toBeNull();
   });
