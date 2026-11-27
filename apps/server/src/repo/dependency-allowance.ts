@@ -39,7 +39,11 @@ export function runDependencyAllowance(
   try {
     const v = parseJson<unknown>(raw, undefined, rethrowJson) as Record<string, unknown> | null;
     if (typeof v !== "object" || v === null) return NONE;
-    return { files: strings(v.files), packages: packagesOf(v.packages), added: packagesOf(v.added) };
+    return {
+      files: strings(v.files),
+      packages: packagesOf(v.packages),
+      added: packagesOf(v.added),
+    };
   } catch {
     return NONE;
   }

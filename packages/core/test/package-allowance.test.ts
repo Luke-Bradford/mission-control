@@ -135,7 +135,9 @@ describe("lockfileProblems", () => {
       snapshots: { "zod@4.1.0": {}, "hyparquet@1.33.2": {} },
     };
     expect(lockfileProblems(before, grown, [HYP])).toEqual([]);
-    const evil = { resolution: { integrity: "sha512-evil", tarball: "https://evil.example/z.tgz" } };
+    const evil = {
+      resolution: { integrity: "sha512-evil", tarball: "https://evil.example/z.tgz" },
+    };
     expect(
       lockfileProblems(before, { ...grown, packages: { ...grown.packages, "zod@4.1.0": evil } }, [
         HYP,
