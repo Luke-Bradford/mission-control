@@ -87,7 +87,9 @@ server with no updater, where it is disabled with the reason as its tooltip. Its
 - `Could not reach origin; last checked 4 min ago.` (or `no earlier check`): the fetch failed, or
   failed on the last attempt inside the 15 s floor (an ISO time before the timezone loads). The
   server answers 502 with `checkedAt` beside its error text, and the toolbar keeps its last
-  numbers; the answer is never taken from a stale `origin/main`.
+  numbers; the answer is never taken from a stale `origin/main`. The error text and its
+  `fetchError` field name the fetch's own reason (`Could not fetch origin: spawn EBADF; …`, or
+  git's `fatal:` line), so a hub that can no longer start processes does not read as a network fault.
 
 **Update** is enabled when `main` is ahead, or a failed update is waiting to finish (and no
 refusal below applies). After you confirm, the hub runs, in its own checkout:

@@ -548,6 +548,8 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
             diskFreeBytes: 412 * 2 ** 30,
             diskTotalBytes: 1000 * 2 ** 30,
             agents: { count: 3, rssBytes: 2 * 2 ** 30, cpuPct: 80 },
+            hubOpenFiles: 820,
+            hubOpenFileLimit: 1000,
           }
         : null,
       warning: null,

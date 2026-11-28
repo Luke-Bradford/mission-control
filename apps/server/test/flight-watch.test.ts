@@ -244,7 +244,10 @@ const noFlight = () => {
 };
 
 const makeWatch = (
-  over: Pick<FlightWatchDeps, "refreshAuthors" | "log" | "blocked" | "announcedMax"> = {},
+  over: Pick<
+    FlightWatchDeps,
+    "refreshAuthors" | "log" | "blocked" | "announcedMax" | "startupNotice" | "clearStartupNotice"
+  > = {},
 ) => {
   watch = createFlightWatch({
     ...over,
@@ -451,6 +454,41 @@ const stored = (number: number, over: Partial<PullRequestView> = {}): PullReques
 const listed = () => flightState({ config, store, busy: [], now: nowMs }).prs;
 
 describe("FLIGHT's PR list", () => {
+  it("names a watchdog restart in a fresh FLIGHT's first wake, above its digest", async () => {
+    const clear = vi.fn();
+    makeWatch({
+      startupNotice: () => "The hub restarted itself after its watchdog found: spawn EBADF.",
+      clearStartupNotice: clear,
+    });
+    await watch.check();
+    const first = startCalls[0]?.first ?? "";
+    expect(first).toContain("watchdog found: spawn EBADF");
+    expect(() => JSON.parse(first.split("\n").at(-1) ?? "")).not.toThrow();
+    expect(clear).toHaveBeenCalledOnce();
+  });
+
+  it("names a watchdog restart in the first wake sent to a FLIGHT that outlived the restart", async () => {
+    liveCrew();
+    let pending: string | null = "The hub restarted itself after its watchdog found: spawn EBADF.";
+    makeWatch({
+      startupNotice: () => pending,
+      clearStartupNotice: () => {
+        pending = null;
+      },
+    });
+    sendFails = true;
+    ask();
+    await watch.check();
+    expect(pending).not.toBeNull(); // a wake that did not reach FLIGHT keeps the notice
+    sendFails = false;
+    await watch.check();
+    const sent = sendCalls.at(-1)?.text ?? "";
+    expect(startCalls).toEqual([]);
+    expect(sent).toContain("watchdog found: spawn EBADF");
+    expect(() => JSON.parse(sent.split("\n").at(-1) ?? "")).not.toThrow();
+    expect(pending).toBeNull();
+  });
+
   it("keeps a PR listed, marked stale with its last good read, when a poll could not read it", () => {
     store.upsertPullRequests("mc", [stored(7)], T0);
     expect(listed()).toEqual([

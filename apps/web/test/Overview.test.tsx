@@ -230,6 +230,18 @@ describe("Overview panels", () => {
     expect(container.querySelector("#nbanner")).toBeNull();
   });
 
+  it("shows the hub file-limit reading in the mounted machine row", async () => {
+    stub({ machine: sample({ hubOpenFiles: 800, hubOpenFileLimit: 1000 }) });
+    const { container } = render(<Overview />);
+
+    const files = await within(container.querySelector("#macP") as HTMLElement).findByTestId(
+      "hub-open-files",
+    );
+    expect(files.textContent).toContain(
+      "800 / 1,000 open files · at or above the 80% restart threshold",
+    );
+  });
+
   it("no longer carries the KPI strip, the Timeline, the quota summary, the history or the Loops strip", async () => {
     stub({ rows: [crewRow({ kind: "loop", id: "observed-loop" })] });
     const { container } = render(<Overview />);
@@ -1637,7 +1649,7 @@ describe("Machine panel", () => {
     const mach = container.querySelector("#machP") as HTMLElement;
     await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(4));
     expect(mach.querySelectorAll(".stack i").length).toBe(0);
-    for (const row of mach.querySelectorAll(".resrow")) expect(row.textContent).toContain("—");
+    for (const row of [...mach.querySelectorAll(".resrow")]) expect(row.textContent).toContain("—");
     expect(mach.querySelector(".res")?.getAttribute("title")).toContain(
       "Claude/Codex processes (—)",
     );

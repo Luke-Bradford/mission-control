@@ -125,6 +125,9 @@ export interface FlightWatchDeps {
   blocked?: (seatId: string) => boolean;
   now?: () => number;
   log?: (line: string) => void;
+  /** A durable hub-start notice that belongs in FLIGHT's first fresh-session message. */
+  startupNotice?: () => string | null;
+  clearStartupNotice?: () => void;
 }
 
 export interface FlightWatch {
@@ -173,6 +176,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   const { config, store, bus, supervisor, enabled } = deps;
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
+  /** The wake's preface with a pending hub-start notice after it: it sits above the digest line. */
+  const withStartupNotice = (preface: string): string =>
+    [preface, deps.startupNotice?.() ?? ""].filter((part) => part !== "").join(" ");
 
   /** The run that has been asked for its handover, and when. */
   let handover: { runId: string; at: number } | null = null;
@@ -577,9 +583,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
             state,
             digest,
             causes.length > 0 ? causes : ["initial"],
-            freshStartLine(note ?? null),
+            withStartupNotice(freshStartLine(note ?? null)),
           ),
         });
+        deps.clearStartupNotice?.();
         clearDown(t);
         processGone = false;
         lastStartThrew = false;
@@ -755,11 +762,15 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       );
       const causes = changedWakeFacts(lastFacts, wake);
       if (
-        (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes), {
-          wake: n + 1,
-          pieces: wakePieces(digest),
-        })) === "sent"
+        (await supervisor.send(
+          runId,
+          wakeKey(runId, n + 1),
+          wakeLine(state, digest, causes, withStartupNotice("")),
+          { wake: n + 1, pieces: wakePieces(digest) },
+        )) === "sent"
       ) {
+        // a FLIGHT that outlived the hub's restart hears its cause here, once
+        deps.clearStartupNotice?.();
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);

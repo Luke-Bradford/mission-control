@@ -5755,6 +5755,28 @@ describe("boards, escalations, health", () => {
     });
   });
 
+  it("health includes a failed hub spawn check", async () => {
+    const watched = buildApp({
+      config,
+      store,
+      bus,
+      watchdogHealth: () => ({
+        collector: "watchdog",
+        ok: false,
+        error: "spawn EBADF",
+        at: clock,
+        lastOkAt: null,
+      }),
+    });
+    try {
+      expect((await watched.inject("/api/health")).json()).toContainEqual(
+        expect.objectContaining({ collector: "watchdog", ok: false, error: "spawn EBADF" }),
+      );
+    } finally {
+      await watched.close();
+    }
+  });
+
   it("escalations and health return the store rows", async () => {
     store.replaceEscalations("shop-app", [escalation({})]);
     store.setStatus("github:shop-app", false, "github: HTTP 502");
@@ -7898,6 +7920,22 @@ describe("update routes", () => {
     expect(r.json()).toEqual({
       error: "Could not reach origin; last checked 2026-10-20.",
       checkedAt: 1234,
+      fetchError: null,
+    });
+  });
+
+  it("POST /api/version/check names a local spawn failure beside its last good check", async () => {
+    updaterCheckError = new UpdateError(
+      502,
+      "Could not fetch origin: spawn EBADF; last checked 2026-10-20.",
+      { checkedAt: 1234, fetchError: "spawn EBADF" },
+    );
+    const r = await post("/api/version/check");
+    expect(r.statusCode).toBe(502);
+    expect(r.json()).toEqual({
+      error: "Could not fetch origin: spawn EBADF; last checked 2026-10-20.",
+      checkedAt: 1234,
+      fetchError: "spawn EBADF",
     });
   });
 

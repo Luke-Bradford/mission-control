@@ -2072,7 +2072,7 @@ describe("Setup toolbar: Update", () => {
     /** GET answers `current` (what a refetch sees); the POST swaps it for `next`. */
     function withCheck(
       current: VersionInfo,
-      next: VersionInfo | { fails: string; checkedAt: number | null },
+      next: VersionInfo | { fails: string; checkedAt: number | null; fetchError?: string },
     ) {
       let now = current;
       const posted: unknown[] = [];
@@ -2081,7 +2081,10 @@ describe("Setup toolbar: Update", () => {
         "POST /api/version/check": (init: RequestInit | undefined) => {
           posted.push(JSON.parse(String(init?.body)));
           if ("fails" in next)
-            return { status: 502, body: { error: next.fails, checkedAt: next.checkedAt } };
+            return {
+              status: 502,
+              body: { error: next.fails, checkedAt: next.checkedAt, fetchError: next.fetchError },
+            };
           now = next;
           return { status: 200, body: next };
         },
@@ -2164,6 +2167,19 @@ describe("Setup toolbar: Update", () => {
         expect((checkBtn() as HTMLButtonElement).disabled).toBe(false);
       },
     );
+
+    it("toasts the process-start error when the server provides it", async () => {
+      withCheck(version(), {
+        fails: "Could not reach origin.",
+        checkedAt: NOW - 4 * MIN,
+        fetchError: "spawn EBADF",
+      });
+      render(<Toast />);
+      at("sessions");
+      await within(toolbar()).findByText(/^Version/);
+      fireEvent.click(checkBtn());
+      expect(await screen.findByText("spawn EBADF")).toBeTruthy();
+    });
 
     it("toasts that it could not compare when the count is null", async () => {
       withCheck(version(), version({ behind: null, canUpdate: false, reason: "not on main" }));

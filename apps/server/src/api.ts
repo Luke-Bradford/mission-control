@@ -88,6 +88,7 @@ import {
   guardAckKey,
   guardDenyOutput,
   guardPermissionOutput,
+  type HealthRow,
   HUB_SETTING_KEYS,
   HUD_RENDERER_HEADER,
   type HubSettingKey,
@@ -639,6 +640,8 @@ export interface AppDeps {
   bus: ChangeBus;
   /** The latest machine sample (for `/api/machine`); default: none yet. */
   machine?: () => MachineSample | null;
+  /** The hub's own fork and descriptor check, included in `/api/health`. */
+  watchdogHealth?: () => HealthRow;
   /** Receives the number of open browser event streams. */
   onStreamCount?: (count: number) => void;
   now?: () => number;
@@ -4257,9 +4260,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const recent = ticks.recent();
         const last = recent.at(-1);
         const running = ticks.running();
-        if (recent.length === 0 && running === null) return store.status();
+        const watchdog = deps.watchdogHealth?.();
+        if (recent.length === 0 && running === null)
+          return watchdog === undefined ? store.status() : [...store.status(), watchdog];
         return [
           ...store.status(),
+          ...(watchdog === undefined ? [] : [watchdog]),
           // the engine's recent tick durations; `error` names a tick still running past its interval
           {
             collector: TICKS_COLLECTOR,
@@ -6173,7 +6179,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         } catch (e) {
           captureError(reply, e);
           if (e instanceof UpdateError) {
-            return reply.code(e.status).send({ error: e.message, checkedAt: e.checkedAt ?? null });
+            return reply.code(e.status).send({
+              error: e.message,
+              checkedAt: e.checkedAt ?? null,
+              fetchError: e.fetchError ?? null,
+            });
           }
           reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "version check failed");
           return reply.code(500).send({ error: CHECK_FAILED });

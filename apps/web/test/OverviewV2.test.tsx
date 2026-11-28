@@ -132,6 +132,7 @@ it("shows machine history as CPU and memory graphs", async () => {
   expect(await screen.findByRole("img", { name: "CPU history" })).toBeTruthy();
   expect(screen.getByRole("img", { name: "Memory history" })).toBeTruthy();
 });
+
 it("marks the projected quota at reset", async () => {
   stubFetch({ "/api/health": [] });
   const { container } = render(<QuotaMeter row={limit7d({ projected: 84 })} now={NOW} />);
@@ -179,7 +180,7 @@ it.each([
   const cpu = "machine" in overview && overview.machine?.cpu ? "20%" : "—";
   expect(
     [...container.querySelectorAll("#macP .mac-measure b")].map((el) => el.textContent),
-  ).toEqual([cpu, "—", "—", "—", "free"]);
+  ).toEqual([cpu, "—", "—", "—", "free", "unknown"]);
   expect(
     [...container.querySelectorAll("#pipelineP .ph b[data-metric]")].map((el) => el.textContent),
   ).toEqual(["—", "—", "—"]);

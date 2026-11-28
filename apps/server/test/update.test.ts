@@ -440,7 +440,7 @@ describe("check", () => {
     expect(err).toBeInstanceOf(UpdateError);
     expect((err as UpdateError).status).toBe(502);
     expect((err as UpdateError).message).toBe(
-      `Could not reach origin; last checked ${new Date(good).toISOString()}.`,
+      `Could not fetch origin: fatal: Could not read from remote repository.; last checked ${new Date(good).toISOString()}.`,
     );
     expect((err as UpdateError).checkedAt).toBe(good);
     expect(fetches(calls)).toBe(2);
@@ -455,12 +455,29 @@ describe("check", () => {
     expect(await u.check()).toMatchObject({ checkedAt: t - 1000 }); // inside the floor, last ok
   });
 
+  it("names a local spawn failure, not an unreachable origin, when the forced fetch cannot start git", async () => {
+    const { exec } = fakeExec();
+    const { u } = updater({
+      exec: async (file, args, o) => {
+        if (args.includes("fetch")) throw new Error("spawn EBADF");
+        return exec(file, args, o);
+      },
+    });
+    await expect(u.check()).rejects.toMatchObject({
+      status: 502,
+      message: "Could not fetch origin: spawn EBADF; no earlier check.",
+      checkedAt: null,
+      fetchError: "spawn EBADF",
+    });
+  });
+
   it("says there was no earlier check when none ever succeeded", async () => {
     git(hub, "remote", "set-url", "origin", join(dir, "gone.git"));
     const { u } = updater();
     await expect(u.check()).rejects.toMatchObject({
       status: 502,
-      message: "Could not reach origin; no earlier check.",
+      message:
+        "Could not fetch origin: fatal: Could not read from remote repository.; no earlier check.",
     });
   });
 

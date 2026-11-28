@@ -60,8 +60,11 @@ const UPDATING = "Updating… the HUD reconnects when the hub is back.";
 
 /** A failed check: the 502 carries `checkedAt`, shown in relative time like the toolbar's. */
 function checkError(err: unknown, now: number, tz: string | null): string {
-  if (err instanceof ApiError && err.status === 502 && tz) {
-    const at = (err.body as { checkedAt?: unknown } | undefined)?.checkedAt;
+  if (err instanceof ApiError && err.status === 502) {
+    const body = err.body as { checkedAt?: unknown; fetchError?: unknown } | undefined;
+    if (typeof body?.fetchError === "string" && body.fetchError.length > 0) return body.fetchError;
+    const at = body?.checkedAt;
+    if (!tz) return err.message;
     if (typeof at === "number") return `Could not reach origin; last checked ${rel(at, now, tz)}.`;
     if (at === null) return "Could not reach origin; no earlier check.";
   }

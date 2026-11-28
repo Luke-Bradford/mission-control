@@ -69,6 +69,7 @@ describe("MacRow", () => {
       Swap: "1.5 GiB",
       Disk: "412 GiB",
       Lock: "free",
+      "Hub files": "unknown",
     });
     expect(container.querySelector("#macP")?.getAttribute("aria-label")).toBe("This machine");
     const title = within(container.querySelector("#macP") as HTMLElement).getByRole("link", {
@@ -87,6 +88,7 @@ describe("MacRow", () => {
       Swap: "—",
       Disk: "—",
       Lock: "free",
+      "Hub files": "unknown",
     });
     expect(container.querySelector(".mac-measure svg")).toBeNull();
     expect(container.querySelector(".mac-warning")).toBeNull();
@@ -100,6 +102,28 @@ describe("MacRow", () => {
     await waitFor(() => expect(measures(container).CPU).toBe("37%"));
     expect(measures(container).Swap).toBe("—");
     expect(measures(container).Mem).toBe("—");
+  });
+
+  it("shows the hub file limit and its 80% restart threshold", async () => {
+    const { container } = show({
+      latest: sample({ hubOpenFiles: 800, hubOpenFileLimit: 1000 }),
+      warning: null,
+    });
+
+    const files = await screen.findByTestId("hub-open-files");
+    expect(files.textContent).toContain(
+      "800 / 1,000 open files · at or above the 80% restart threshold",
+    );
+    expect(files.classList.contains("warn-t")).toBe(true);
+    expect(container.querySelector("#macP")?.contains(files)).toBe(true);
+  });
+
+  it("shows a hub file reading below the restart threshold", async () => {
+    show({ latest: sample({ hubOpenFiles: 799, hubOpenFileLimit: 1000 }), warning: null });
+
+    const files = await screen.findByTestId("hub-open-files");
+    expect(files.textContent).toContain("799 / 1,000 open files · below the 80% restart threshold");
+    expect(files.classList.contains("warn-t")).toBe(false);
   });
 
   it("says the hub is holding new work, and why, when the machine reports a warning", async () => {
