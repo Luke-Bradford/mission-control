@@ -1529,6 +1529,7 @@ describe("tool list", () => {
       "recall",
       "cmux_sessions",
       "cmux_send",
+      "answer_dialog",
       "cmux_open",
       "set_flight_mode",
       "hold_item",
