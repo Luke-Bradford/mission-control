@@ -1,5 +1,5 @@
 /** Keeps a live seat's development app in panes of that seat's cmux workspace. */
-import { SESSION_APP_STATUS_KEY } from "@mc/core";
+import { SESSION_APP_HEALTH_STATUS_KEY, SESSION_APP_STATUS_KEY } from "@mc/core";
 import type { Cmux } from "../runtime/cmux.ts";
 import { probeLocal } from "./sessions.ts";
 
@@ -8,7 +8,6 @@ export class CrewAppError extends Error {}
 
 export const APP_RESTART_MS = 5 * 60_000;
 export const APP_PORT_START = 5173;
-export const SESSION_APP_HEALTH_STATUS_KEY = "app-health";
 export const CREW_APP_STATE_SETTING = "crew-app-panes";
 const PORT_BLOCK = 10;
 export const CREW_APP_DEFAULTS: Readonly<Record<string, readonly CrewAppCommand[]>> = {
@@ -188,7 +187,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     save();
     deps.log?.(`Stopped ${seatId}'s ${app.repo.id} app panes.`);
   };
-  const start = async (seatId: string) => {
+  const start = async (seatId: string, restartedAt?: number) => {
     const seat = seatOf(seatId);
     if (!seat) throw new CrewAppError("No live cmux workspace for this seat.");
     const workspace = await seatWorkspace(deps.cmux, seat.id);
@@ -212,12 +211,19 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     }
     await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, apps[0]?.url ?? "");
     await deps.cmux.setStatus(workspace, SESSION_APP_HEALTH_STATUS_KEY, appStatus(apps));
-    running.set(seatId, { workspace, worktree: seat.worktree, repo, portStart: startPort, apps });
+    running.set(seatId, {
+      workspace,
+      worktree: seat.worktree,
+      repo,
+      portStart: startPort,
+      apps,
+      restartedAt,
+    });
     save();
     deps.log?.(`Started ${seatId}'s ${repo.id} app panes.`);
   };
   return {
-    start,
+    start: (seatId) => start(seatId),
     async restart(seatId) {
       await stop(seatId);
       await start(seatId);
@@ -263,11 +269,9 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
           (app.restartedAt !== undefined && now() - app.restartedAt < APP_RESTART_MS)
         )
           continue;
-        app.restartedAt = now();
         deps.log?.(`Restarting ${seatId}'s ${app.repo.id} app panes because an app stopped.`);
-        await start(seatId);
-        const restarted = running.get(seatId);
-        if (restarted) restarted.restartedAt = app.restartedAt;
+        // saved with the new panes, so a hub restart inside the window keeps the throttle
+        await start(seatId, now());
       }
     },
     view() {

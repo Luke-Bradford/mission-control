@@ -213,6 +213,36 @@ describe("crew apps", () => {
     expect(afterRestart.view()[0]?.running).toBe(true);
     expect(pane.newPane).toHaveBeenCalledTimes(2);
   });
+  it("keeps the five-minute restart throttle across a hub restart", async () => {
+    let at = 0;
+    const pane = cmux();
+    const state = {
+      value: null as string | null,
+      get: () => state.value,
+      set: (value: string) => {
+        state.value = value;
+      },
+    };
+    const deps = {
+      cmux: pane,
+      repos: () => [{ id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] }],
+      seats: () => [seat],
+      now: () => at,
+      probe: vi.fn().mockResolvedValue(false),
+      state,
+    };
+    const beforeRestart = createCrewApps(deps);
+    await beforeRestart.start(seat.id);
+    pane.readPane.mockRejectedValue(new Error("pane is gone"));
+    at = 1_000;
+    await beforeRestart.tick();
+    expect(pane.newPane).toHaveBeenCalledTimes(4);
+
+    at = APP_RESTART_MS;
+    const afterRestart = createCrewApps(deps);
+    await afterRestart.tick();
+    expect(pane.newPane).toHaveBeenCalledTimes(4);
+  });
   it("refuses eBull's launchd-owned jobs command", async () => {
     const apps = createCrewApps({
       cmux: cmux(),

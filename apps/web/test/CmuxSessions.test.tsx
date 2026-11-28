@@ -167,6 +167,34 @@ describe("Sessions page", () => {
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
   });
 
+  it("gives every crew app endpoint a focusable link that carries its health word", async () => {
+    const endpoints = [
+      { url: "http://127.0.0.1:5173", answers: true, word: "Answers" },
+      { url: "http://127.0.0.1:5174", answers: false, word: "Not answering" },
+      { url: "http://127.0.0.1:5175", answers: null, word: "Not checked" },
+    ];
+    const fetch = stubFetch({
+      [PATH]: VIEW,
+      [SIDEBAR_PATH]: { on: true },
+      [APPS_PATH]: [
+        {
+          id: "guido-eb",
+          name: "guido-eb · ebull",
+          running: true,
+          apps: endpoints.map(({ url, answers }) => ({ url, answers })),
+        },
+      ],
+    });
+    render(<Sessions />);
+    await settled(fetch, APPS_PATH);
+    for (const { url, word } of endpoints) {
+      const link = screen.getByRole("link", { name: url.replace("http://", ""), description: word });
+      link.focus();
+      expect(document.activeElement).toBe(link);
+      expect(link.getAttribute("href")).toBe(url);
+    }
+  });
+
   it("refreshes crew app health after one minute without navigation", async () => {
     vi.useRealTimers();
     vi.useFakeTimers();

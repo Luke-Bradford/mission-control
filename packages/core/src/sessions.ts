@@ -66,6 +66,11 @@ export type CmuxSessionsView =
 
 /** The status key a session sets to name the app it looks after. */
 export const SESSION_APP_STATUS_KEY = "app";
+/**
+ * The status key the hub sets on a seat's workspace with each crew app endpoint's health, for
+ * cmux's sidebar; never shown as the session's own status.
+ */
+export const SESSION_APP_HEALTH_STATUS_KEY = "app-health";
 /** The longest text one write may carry. */
 export const SESSION_TEXT_MAX = 4000;
 /** The longest last line, status and inbox text a row carries. */

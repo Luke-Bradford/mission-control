@@ -218,6 +218,7 @@ function CrewApps({
   }[];
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const healthId = useId();
   const change = async (id: string, action: "start" | "stop") => {
     setBusy(id);
     try {
@@ -239,12 +240,17 @@ function CrewApps({
           <span className={`sess-ans ${app.running ? "ok" : "muted"}`}>
             {app.running ? "Running" : "Stopped"}
           </span>
-          {app.apps.map((endpoint) => (
+          {app.apps.map((endpoint, index) => (
             <span className="sess-appcell" key={endpoint.url}>
-              <a className="sess-applink" href={endpoint.url}>
+              <a
+                className="sess-applink"
+                href={endpoint.url}
+                aria-describedby={`${healthId}-${app.id}-${index}`}
+              >
                 {shortUrl(endpoint.url)}
               </a>
               <span
+                id={`${healthId}-${app.id}-${index}`}
                 className={`sess-ans ${endpoint.answers === true ? "ok" : endpoint.answers === false ? "crit" : "muted"}`}
               >
                 {endpoint.answers === true
