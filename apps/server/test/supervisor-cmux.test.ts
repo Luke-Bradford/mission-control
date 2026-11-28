@@ -16,12 +16,8 @@ import { join } from "node:path";
 import { CMUX_NEEDS_INPUT_TEXT, FLIGHT_SIGNALS_SETTING, type Run } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { agentViews } from "../src/hud/hud.ts";
-import {
-  CMUX_WORKSPACE_PREFIX,
-  cmuxKeeperKey,
-  cmuxSourceKey,
-  cmuxWorkspaceKey,
-} from "../src/runtime/cmux-session.ts";
+import { cmuxSeatWorkspaceKey } from "../src/runtime/cmux-seat-workspaces.ts";
+import { cmuxKeeperKey, cmuxSourceKey, cmuxWorkspaceKey } from "../src/runtime/cmux-session.ts";
 import { crewKeeperDir } from "../src/store/crew-paths.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
@@ -47,7 +43,7 @@ skipTestsIf(await blockedHere("crew-run"));
 interface FakeCmux {
   workspaces: { id: string; name: string; cwd: string; command: string; goneAt?: number }[];
   sessions: { session_id: string; lifecycle: string; pid: number; workspace_id: string }[];
-  sent: { text: string }[];
+  sent: { ws: string; text: string }[];
   keys: { key: string; force: boolean }[];
   closed: string[];
   closeAttempts?: string[];
@@ -72,6 +68,18 @@ const lifecycle = (l: string) =>
   patch((s) => {
     for (const r of s.sessions) r.lifecycle = l;
   });
+/** The workspace the hub keeps for a seat in the Mission Control group. */
+const seatWs = (seatId = "guido-1") => store.getSetting(cmuxSeatWorkspaceKey(seatId)) as string;
+/** A run's launcher, sent into its seat's shell: `cd '<worktree>' && '<launcher>'`. */
+const isLaunch = (text: string) => /^cd '[^']+' && '/.test(text);
+const launches = () => (cmuxState().sent ?? []).filter((m) => isLaunch(m.text));
+const briefs = () => (cmuxState().sent ?? []).filter((m) => !isLaunch(m.text));
+/** The folder a launch changes to. */
+const launchedIn = (text: string) => /^cd '([^']+)' && /.exec(text)?.[1] as string;
+/** Every seat, and the group's anchor, has one workspace: the harness has three seats. */
+const GROUP_WORKSPACES = 4;
+/** Waits longer than `until`: a start first sets up the seats' workspaces in cmux. */
+const untilStarted = (fn: () => unknown) => vi.waitFor(fn, { timeout: 15_000, interval: 20 });
 /** The path a long message names. */
 const messagePath = (text: string) => /Read (\S+) and act on it\.$/.exec(text)?.[1] as string;
 const direction = () => {
@@ -102,18 +110,22 @@ async function started(over: { cmuxDialogReportMs?: number } = {}) {
   const made = make({ cmuxState: stateFile(), ...over });
   made.sup.start();
   const { runId } = await made.sup.startRun("guido-1", 42);
-  await until(() => expect(cmuxState().sent).toHaveLength(1));
+  await untilStarted(() => expect(briefs()).toHaveLength(1));
   return { ...made, runId };
 }
 
 describe("a Claude run in cmux", () => {
-  it("starts a Claude run in a cmux workspace", async () => {
+  it("starts a Claude run in its seat's workspace", async () => {
     const { runId } = await started();
     const state = cmuxState();
-    expect(state.workspaces).toHaveLength(1);
-    expect(state.workspaces[0]?.name).toBe("guido-1 · mc#42");
+    expect(state.workspaces).toHaveLength(GROUP_WORKSPACES);
+    const own = state.workspaces.find((w) => w.id === seatWs());
+    expect(own?.name).toBe("guido-1 · o/mc");
+    // the launcher goes into the seat's shell, in the run's worktree
+    expect(launches()).toHaveLength(1);
+    expect(launches()[0]?.ws).toBe(seatWs());
     const worktree = store.seatSession("guido-1")?.worktree as string;
-    expect(realpathSync(state.workspaces[0]?.cwd as string)).toBe(realpathSync(worktree));
+    expect(realpathSync(launchedIn(launches()[0]?.text as string))).toBe(realpathSync(worktree));
     // the hub's own settings and MCP config, interactive, claude's own session id
     const launcher = readFileSync(join(crewKeeperDir(dbPath, runId), "launch.zsh"), "utf8");
     for (const flag of [
@@ -126,11 +138,11 @@ describe("a Claude run in cmux", () => {
     for (const gone of ["'-p'", "'--output-format'", "'--max-budget-usd'"])
       expect(launcher).not.toContain(gone);
     // the brief is a message pointing at its file
-    const text = cmuxState().sent[0]?.text as string;
+    const text = briefs()[0]?.text as string;
     expect(text).toMatch(/^Mission Control sent you a message\. Read .+ and act on it\.$/);
     expect(readFileSync(messagePath(text), "utf8")).toContain("Fix the stop race");
     expect(JSON.parse(store.getSetting(cmuxWorkspaceKey(runId)) as string)).toMatchObject({
-      workspace: state.workspaces[0]?.id,
+      workspace: seatWs(),
       pid: process.pid,
     });
     // the turn: running, then idle with the run still open
@@ -338,7 +350,7 @@ describe("a Claude run in cmux", () => {
     expect(copiedTs(first.runId)).toEqual(["1", "2", "3"]);
   });
 
-  it("a hub restart with the saved pid dead resumes in a new workspace without copying Claude's transcript again", async () => {
+  it("a hub restart with the saved pid dead resumes in the seat's workspace without copying Claude's transcript again", async () => {
     const first = await started();
     claudeLines("1", "2");
     await until(() => expect(copiedTs(first.runId)).toEqual(["1", "2"]));
@@ -360,7 +372,10 @@ describe("a Claude run in cmux", () => {
         readFileSync(join(crewKeeperDir(dbPath, first.runId), "launch.zsh"), "utf8"),
       ).toContain("'--resume'"),
     );
-    await until(() => expect(cmuxState().closed).toHaveLength(1));
+    // the seat's workspace stays: the resume is launched into it again
+    await until(() => expect(launches()).toHaveLength(2));
+    expect(launches().map((m) => m.ws)).toEqual([seatWs(), seatWs()]);
+    expect(cmuxState().closed ?? []).toEqual([]);
     await until(() => expect(cmuxState().sessions).toHaveLength(1));
     claudeLines("3");
     await until(() => expect(copiedTs(first.runId)).toEqual(["1", "2", "3"]));
@@ -396,8 +411,9 @@ describe("a Claude run in cmux", () => {
     const made = make({ cmuxState: stateFile(), cmuxStartWaitMs: 300 });
     made.sup.start();
     const { runId } = await made.sup.startRun("guido-1", 42);
-    await until(() => expect(cmuxState().closed).toHaveLength(1));
-    await until(() => expect(userLines().join("\n")).toContain("Fix the stop race"));
+    await untilStarted(() => expect(userLines().join("\n")).toContain("Fix the stop race"));
+    // the seat's workspace stays for its next run
+    expect(cmuxState().closed ?? []).not.toContain(seatWs());
     const argv = recorded()[0].argv as string[];
     expect(argv).toContain("-p");
     expect(argv).toContain("--settings");
@@ -407,11 +423,11 @@ describe("a Claude run in cmux", () => {
     // the run carries on: its turn ends idle, not in error
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     expect(store.run(runId)?.endedAt).toBeNull();
-    expect(cmuxState().sent ?? []).toEqual([]);
+    expect(briefs()).toEqual([]);
   });
 
-  it("a workspace cmux cannot find goes on under a keeper", async () => {
-    // cmux answers its ping, but the workspace it is asked for never shows in its list
+  it("a seat workspace cmux cannot find goes on under a keeper", async () => {
+    // cmux answers its ping, but the workspaces it is asked for never show in its list
     fakeCmux({ autoClaude: false, hideWorkspaces: true });
     const made = make({ cmuxState: stateFile() });
     made.sup.start();
@@ -428,13 +444,16 @@ describe("a Claude run in cmux", () => {
     const { runId } = await started();
     claudeLines("1", "2");
     await until(() => expect(copiedTs(runId)).toEqual(["1", "2"]));
-    const first = cmuxState().workspaces[0]?.id;
+    // a Claude the hub did not start runs in the seat's workspace: it goes, and the seat gets a new one
+    const first = seatWs();
     patch((s) => {
       for (const r of s.sessions) r.pid = process.pid + 1;
     });
     await until(() => expect(cmuxState().closed).toEqual([first]));
-    await until(() => expect(cmuxState().workspaces.map((w) => w.id)).not.toContain(first));
-    await until(() => expect(cmuxState().workspaces).toHaveLength(1));
+    await untilStarted(() => expect(seatWs()).not.toBe(first));
+    await untilStarted(() => expect(launches().at(-1)?.ws).toBe(seatWs()));
+    expect(cmuxState().workspaces.map((w) => w.id)).not.toContain(first);
+    expect(cmuxState().workspaces).toHaveLength(GROUP_WORKSPACES);
     const launcher = readFileSync(join(crewKeeperDir(dbPath, runId), "launch.zsh"), "utf8");
     expect(launcher).toContain("'--resume'");
     expect(launcher).toContain("'--settings'");
@@ -447,116 +466,97 @@ describe("a Claude run in cmux", () => {
 
   it("a restart starts its new workspace only once cmux stops listing the closed one", async () => {
     const { runId } = await started();
-    const first = cmuxState().workspaces[0]?.id;
+    const first = seatWs();
     // cmux answers the close at once but lists the workspace a second longer
     patch((s) => {
       s.linger = 1000;
       for (const r of s.sessions) r.pid = process.pid + 1;
     });
     await until(() => expect(cmuxState().closed).toEqual([first]));
-    await until(() =>
-      expect(cmuxState().workspaces.some((w) => w.id !== first && w.goneAt === undefined)).toBe(
-        true,
-      ),
-    );
+    await untilStarted(() => expect(seatWs()).not.toBe(first));
+    await untilStarted(() => expect(launches().at(-1)?.ws).toBe(seatWs()));
     // no new workspace was made while the old one of its name was still listed
     expect(cmuxState().sameName ?? []).toEqual([]);
     expect(store.run(runId)?.endedAt).toBeNull();
-  }, 10_000);
+  }, 20_000);
 
-  it("closes the workspace when the run ends", async () => {
+  it("keeps the seat's workspace when the run ends, idle with its last ticket", async () => {
     const { sup, runId } = await started();
-    const ws = cmuxState().workspaces[0]?.id;
+    const ws = seatWs();
     await sup.endRun("guido-1");
-    expect(cmuxState().closed).toContain(ws);
+    expect(cmuxState().closed ?? []).not.toContain(ws);
+    expect(cmuxState().workspaces.map((w) => w.id)).toContain(ws);
     expect(store.getSetting(cmuxWorkspaceKey(runId))).toBeNull();
     expect(store.run(runId)?.endedAt).not.toBeNull();
+    await until(() =>
+      expect((cmuxState().statuses as Record<string, Record<string, string>>)[ws]).toMatchObject({
+        "mc-seat": "Idle · mc#42",
+      }),
+    );
   });
 
-  it("keeps a closed workspace when cmux cannot verify that it disappeared", async () => {
-    fakeCmux({ claudePid: 999_999 });
-    const { sup } = make({ cmuxState: stateFile() });
-    sup.start();
-    const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(cmuxState().sent).toHaveLength(1));
+  it("ends a run when cmux cannot list its workspaces, and keeps the seat's workspace", async () => {
+    const { sup, runId } = await started();
+    const ws = seatWs();
     patch((s) => {
       s.listWorkspacesFails = true;
     });
 
     await sup.endRun("guido-1");
 
-    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
-  });
-
-  it("retries closing a workspace when Claude exits", async () => {
-    const claude = spawn("sleep", ["60"], { stdio: "ignore" });
-    fakeCmux({ claudePid: claude.pid, noClose: true });
-    const { sup } = make({ cmuxState: stateFile() });
-    sup.start();
-    const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(cmuxState().sent).toHaveLength(1));
-    const workspace = cmuxState().workspaces[0]?.id;
-
-    claude.kill("SIGKILL");
-
-    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
-    await until(() =>
-      expect(cmuxState().closeAttempts?.filter((id) => id === workspace)).toHaveLength(2),
-    );
-    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
-  });
-
-  it("a workspace cmux will not close after Claude exits keeps the seat's next start until it closes", async () => {
-    const claude = spawn("sleep", ["60"], { stdio: "ignore" });
-    fakeCmux({ claudePid: claude.pid });
-    const { sup } = make({ cmuxState: stateFile() });
-    sup.start();
-    const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(cmuxState().sent).toHaveLength(1));
-    const name = cmuxState().workspaces[0]?.name;
-    const named = () => cmuxState().workspaces.filter((w) => w.name === name);
-    patch((s) => {
-      s.noClose = true;
-      s.claudePid = process.pid;
-    });
-    claude.kill("SIGKILL");
-    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
-    // Claude is dead, but cmux still lists its workspace: the hub keeps it to close
-    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
-    await expect(sup.startRun("guido-1", 42)).rejects.toThrow(/earlier cmux workspace/);
-    expect(named()).toHaveLength(1);
-    patch((s) => {
-      s.noClose = false;
-    });
-    const next = await sup.startRun("guido-1", 42);
-    await until(() => expect(cmuxState().sent).toHaveLength(2));
-    expect(named()).toHaveLength(1);
-    expect(named()[0]?.id).toBe(
-      JSON.parse(store.getSetting(cmuxWorkspaceKey(next.runId)) as string).workspace,
-    );
+    expect(store.run(runId)?.endedAt).not.toBeNull();
     expect(store.getSetting(cmuxWorkspaceKey(runId))).toBeNull();
+    expect(cmuxState().closeAttempts ?? []).not.toContain(ws);
   });
 
-  it("keeps an older saved workspace before opening another one", async () => {
+  it("a Claude exit leaves the seat's workspace open for its next run", async () => {
     const claude = spawn("sleep", ["60"], { stdio: "ignore" });
     fakeCmux({ claudePid: claude.pid });
     const { sup } = make({ cmuxState: stateFile() });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(cmuxState().sent).toHaveLength(1));
+    await untilStarted(() => expect(briefs()).toHaveLength(1));
+    const ws = seatWs();
+
+    claude.kill("SIGKILL");
+
+    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    expect(cmuxState().closeAttempts ?? []).not.toContain(ws);
+    expect(cmuxState().workspaces.map((w) => w.id)).toContain(ws);
+    expect(store.getSetting(cmuxWorkspaceKey(runId))).toBeNull();
     patch((s) => {
-      s.noClose = true;
       s.claudePid = process.pid;
     });
-    claude.kill("SIGKILL");
-    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
-    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
+    await sup.startRun("guido-1", 42);
+    await untilStarted(() => expect(launches()).toHaveLength(2));
+    expect(launches().map((m) => m.ws)).toEqual([ws, ws]);
+  });
 
-    // Ten newer keeper runs must not hide the old workspace from a later cmux start.
+  it("five runs in a row on one seat start in its one workspace", async () => {
+    fakeCmux();
+    const { sup } = make({ cmuxState: stateFile() });
+    sup.start();
+    for (let n = 1; n <= 5; n++) {
+      await sup.startRun("guido-1", 42);
+      await untilStarted(() => expect(briefs()).toHaveLength(n));
+      await sup.endRun("guido-1");
+    }
+    const ws = seatWs();
+    expect(launches().map((m) => m.ws)).toEqual([ws, ws, ws, ws, ws]);
+    expect(cmuxState().workspaces).toHaveLength(GROUP_WORKSPACES);
+    expect(cmuxState().workspaces.filter((w) => w.name === "guido-1 · o/mc")).toHaveLength(1);
+    expect(cmuxState().closed ?? []).toEqual([]);
+    expect(cmuxState().sameName ?? []).toEqual([]);
+  }, 60_000);
+
+  it("keeper runs while cmux is down leave the seat's workspace for its next cmux start", async () => {
+    const { sup } = await started();
+    const ws = seatWs();
+    await sup.endRun("guido-1");
     patch((s) => {
       s.down = true;
     });
-    for (let n = 0; n < 10; n++) {
+    for (let n = 0; n < 3; n++) {
       await sup.startRun("guido-1", 42);
       await sup.endRun("guido-1");
     }
@@ -564,13 +564,13 @@ describe("a Claude run in cmux", () => {
       s.down = false;
     });
 
-    expect(
-      store.runsWithSettingPrefix("guido-1", CMUX_WORKSPACE_PREFIX).map((run) => run.id),
-    ).toContain(runId);
-    await expect(sup.startRun("guido-1", 42)).rejects.toThrow(/earlier cmux workspace/);
-    expect(cmuxState().workspaces).toHaveLength(1);
+    await sup.startRun("guido-1", 42);
+    await untilStarted(() => expect(launches()).toHaveLength(2));
+    expect(launches().map((m) => m.ws)).toEqual([ws, ws]);
+    expect(seatWs()).toBe(ws);
+    expect(cmuxState().workspaces).toHaveLength(GROUP_WORKSPACES);
     expect(cmuxState().sameName ?? []).toEqual([]);
-  }, 20_000);
+  }, 30_000);
 
   it.each([
     ["refuses the hub", { denied: true }],
@@ -693,16 +693,16 @@ function reviewOfPush() {
 }
 
 describe("a review seat in cmux", () => {
-  it("opens one PR workspace on its review worktree and makes no keeper", async () => {
+  it("starts in the seat's workspace on its review worktree and makes no keeper", async () => {
     const reviewId = reviewOfPush();
     fakeCmux();
     const { sup } = make({ cmuxState: stateFile(), scratchRetro: true });
     sup.start();
     const { runId } = await sup.startReview("retro", reviewId);
-    await until(() => expect(cmuxState().workspaces).toHaveLength(1));
-    const ws = cmuxState().workspaces[0];
-    expect(ws?.name).toBe("retro · PR 9");
-    expect(realpathSync(ws?.cwd as string)).toBe(
+    await untilStarted(() => expect(launches()).toHaveLength(1));
+    expect(launches()[0]?.ws).toBe(seatWs("retro"));
+    expect(cmuxState().workspaces.find((w) => w.id === seatWs("retro"))?.name).toBe("retro · o/mc");
+    expect(realpathSync(launchedIn(launches()[0]?.text as string))).toBe(
       realpathSync(store.seatSession("retro")?.worktree as string),
     );
     const folder = crewKeeperDir(dbPath, runId);
@@ -733,12 +733,14 @@ describe("no keeper for any Claude seat", () => {
     const writer = await sup.startRun("guido-1", 42);
     const planner = await sup.startRun("fao-1", 43);
     const watch = await sup.startWatch(flight.id);
-    await until(() => expect(cmuxState().workspaces).toHaveLength(3));
-    expect(cmuxState().workspaces.map((w) => w.name)).toEqual([
-      "guido-1 · mc#42",
-      "fao-1 · mc#43",
-      "flight-1 · FLIGHT",
+    await untilStarted(() => expect(launches()).toHaveLength(3));
+    expect(launches().map((m) => m.ws)).toEqual([
+      seatWs("guido-1"),
+      seatWs("fao-1"),
+      seatWs(flight.id),
     ]);
+    // the group's anchor and one workspace for each of the four seats
+    expect(cmuxState().workspaces).toHaveLength(GROUP_WORKSPACES + 1);
     for (const { runId } of [writer, planner, watch]) noKeeper(runId);
     expect(recorded()).toEqual([]);
   });

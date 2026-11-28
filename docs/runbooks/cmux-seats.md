@@ -1,7 +1,8 @@
 # Claude seats in cmux
 
-Every Claude seat's run is a cmux workspace on the run's worktree. You can see it, type into it and
-clear it; cmux rings when the seat finishes a turn or needs you. The hub still deals the tickets,
+Every Claude seat has one durable cmux workspace in the pinned Mission Control group. It is named
+`<seat> · <repo>` and stays after a run ends, showing the seat's idle state and last ticket. The
+group anchor is a browser surface for the hub. The hub still deals the tickets,
 reads the results and moves the PRs. Codex seats are unchanged: they keep their keeper.
 
 ## The one setting
@@ -30,7 +31,7 @@ will not stop ends the run instead, so two Claudes never work one worktree.
 
 ## What each run is
 
-- One workspace per run, named `<seat> · <ticket>` (`PR n` for a review, the role for FLIGHT), opened
+- One workspace per configured seat, named `<seat> · <repo>`, opened
   on the run's worktree.
 - The hub binds the run to the workspace `cmux new-workspace` says it made (`OK workspace:<n>`),
   resolved to its id with `list-workspaces --id-format both`; never to one found by name, so an old

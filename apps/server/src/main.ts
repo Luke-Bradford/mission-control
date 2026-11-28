@@ -719,6 +719,7 @@ export async function main(): Promise<void> {
   supervisor = createSupervisor({
     // every Claude seat runs as a cmux workspace the operator can see, type into and clear
     cmuxCommand: [CMUX_COMMAND],
+    hubUrl: `http://${HOST}:${port}`,
     auditPack: (seatId) =>
       buildAuditPack({ config, store, busy: supervisor.busy(), now: Date.now(), seatId }),
     flightEnvironment: async () => ({
@@ -1463,6 +1464,10 @@ export async function main(): Promise<void> {
   if (!preview) seedExternalReviewAsks(store, Date.now());
   scheduler.start();
   supervisor.start();
+  if (process.env.MC_NO_LOOP_WRITES !== "1")
+    await supervisor
+      .reconcileCmuxWorkspaces?.()
+      .catch((error) => log(`cmux seat workspace reconciliation failed: ${String(error)}`));
   // After the supervisor has taken the crew lock (it does so before returning), so the engine's
   // first look at the seats works; its resumed runs start in the background, so no idle event of
   // theirs is missed.

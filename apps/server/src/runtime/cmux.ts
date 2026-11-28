@@ -49,6 +49,16 @@ export interface CmuxWorkspace {
   cwd: string | null;
 }
 
+/** A pinned cmux workspace group and the workspaces it owns. */
+export interface CmuxWorkspaceGroup {
+  id: string;
+  externalId: string | null;
+  name: string;
+  /** The workspace cmux created as this group's anchor. */
+  anchorWorkspaceId: string | null;
+  workspaceIds: string[];
+}
+
 /** One `cmux agent inbox` message, for the workspace it was sent to. */
 export interface CmuxInboxMessage {
   workspaceId: string;
@@ -88,6 +98,17 @@ export interface Cmux {
   ping(): Promise<"up" | "denied" | "down">;
   /** Every workspace cmux has open, with its folder when cmux names one. */
   workspaces(): Promise<CmuxWorkspace[]>;
+  /** All workspace groups, read by their stable external ids where present. */
+  workspaceGroups(): Promise<CmuxWorkspaceGroup[]>;
+  /** Makes (or returns) a group for an external id, then gives it its sidebar treatment. */
+  ensureWorkspaceGroup(input: {
+    name: string;
+    externalId: string;
+    color: string;
+    icon: string;
+  }): Promise<CmuxWorkspaceGroup>;
+  /** Adds a workspace to a hub-owned group. */
+  addToWorkspaceGroup(group: string, workspace: string): Promise<void>;
   /** Brings the workspace to the front: selects it, then brings cmux forward. */
   focus(ws: string): Promise<void>;
   /** The workspace's sidebar status entries (`list-status`), key to text. */
@@ -233,6 +254,38 @@ export function parseWorkspaces(text: string): CmuxWorkspace[] {
     );
     if (typeof id === "string" && typeof name === "string")
       out.push({ id, name, cwd: typeof cwd === "string" && cwd !== "" ? cwd : null });
+  }
+  return out;
+}
+
+/** `workspace-group list --json`, tolerant of the names used by released cmux versions. */
+export function parseWorkspaceGroups(text: string): CmuxWorkspaceGroup[] {
+  const out: CmuxWorkspaceGroup[] = [];
+  for (const o of rowsOf(text, "groups")) {
+    const id = pick(o, "id", "uuid", "groupId", "group_id");
+    const name = pick(o, "name", "title");
+    const externalId = pick(o, "externalId", "external_id");
+    const anchor = pick(o, "anchorWorkspaceId", "anchor_workspace_id", "anchor");
+    const members = pick(o, "workspaceIds", "workspace_ids", "workspaces");
+    const workspaceIds = Array.isArray(members)
+      ? members
+          .map((member) =>
+            typeof member === "string"
+              ? member
+              : isObj(member)
+                ? pick(member, "id", "workspaceId", "workspace_id")
+                : null,
+          )
+          .filter((member): member is string => typeof member === "string")
+      : [];
+    if (typeof id === "string" && typeof name === "string")
+      out.push({
+        id,
+        externalId: typeof externalId === "string" ? externalId : null,
+        name,
+        anchorWorkspaceId: typeof anchor === "string" ? anchor : (workspaceIds.at(0) ?? null),
+        workspaceIds,
+      });
   }
   return out;
 }
@@ -419,6 +472,11 @@ export function createCmux(
       return true;
     });
   }
+  async function workspaceGroups() {
+    const r = await cmux(["workspace-group", "list", "--json"]);
+    if (r.code !== 0) throw failed("workspace-group list", r);
+    return parseWorkspaceGroups(r.stdout);
+  }
   const ping = async (): Promise<"up" | "denied" | "down"> => {
     const r = await cmux(["ping"]);
     if (r.code === 0) return "up";
@@ -428,6 +486,38 @@ export function createCmux(
   return {
     ping,
     workspaces,
+    workspaceGroups,
+    async ensureWorkspaceGroup(input) {
+      let groups = await workspaceGroups();
+      let group = groups.find((candidate) => candidate.externalId === input.externalId);
+      if (group === undefined) {
+        const created = await cmux([
+          "workspace-group",
+          "create",
+          "--name",
+          input.name,
+          "--external-id",
+          input.externalId,
+        ]);
+        if (created.code !== 0) throw failed("workspace-group create", created);
+        groups = await workspaceGroups();
+        group = groups.find((candidate) => candidate.externalId === input.externalId);
+        if (group === undefined) throw new CmuxError("cmux made no workspace group we could find");
+      }
+      for (const args of [
+        ["pin", group.id],
+        ["set-color", group.id, "--hex", input.color],
+        ["set-icon", group.id, "--symbol", input.icon],
+      ]) {
+        const changed = await cmux(["workspace-group", ...args]);
+        if (changed.code !== 0) throw failed(`workspace-group ${args[0]}`, changed);
+      }
+      return group;
+    },
+    async addToWorkspaceGroup(group, workspace) {
+      const r = await cmux(["workspace-group", "add", "--group", group, "--workspace", workspace]);
+      if (r.code !== 0) throw failed("workspace-group add", r);
+    },
     async focus(ws) {
       const r = await cmux(["select-workspace", "--workspace", ws]);
       if (r.code !== 0) throw failed("select-workspace", r);

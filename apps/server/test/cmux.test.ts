@@ -8,6 +8,7 @@ import {
   parseInbox,
   parseStatuses,
   parseWindows,
+  parseWorkspaceGroups,
   parseWorkspaces,
 } from "../src/runtime/cmux.ts";
 import { commandOf, fakeCmux } from "./fake-cmux-harness.ts";
@@ -126,6 +127,56 @@ describe("cmux parsers", () => {
     ).toEqual(["w1", "w2"]);
     expect(parseWindows(JSON.stringify([{ uuid: "w3" }]))).toEqual(["w3"]);
     expect(parseWindows("not json")).toEqual([]);
+  });
+
+  it("reads groups and their stable workspace membership", () => {
+    expect(
+      parseWorkspaceGroups(
+        JSON.stringify({
+          groups: [
+            {
+              id: "mission-control",
+              external_id: "mission-control",
+              name: "Mission Control",
+              workspace_ids: ["anchor", "guido"],
+            },
+          ],
+        }),
+      ),
+    ).toEqual([
+      {
+        id: "mission-control",
+        externalId: "mission-control",
+        name: "Mission Control",
+        anchorWorkspaceId: "anchor",
+        workspaceIds: ["anchor", "guido"],
+      },
+    ]);
+  });
+});
+
+describe("workspace groups", () => {
+  let dir = "";
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "mc-cmux-group-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("uses cmux 0.65.2's group styling command forms", async () => {
+    const fake = fakeCmux(dir, {});
+    await fake.cmux.ensureWorkspaceGroup({
+      name: "Mission Control",
+      externalId: "mission-control",
+      color: "#3b82f6",
+      icon: "satellite",
+    });
+    expect(fake.log()).toEqual(
+      expect.arrayContaining([
+        ["workspace-group", "pin", "mission-control"],
+        ["workspace-group", "set-color", "mission-control", "--hex", "#3b82f6"],
+        ["workspace-group", "set-icon", "mission-control", "--symbol", "satellite"],
+      ]),
+    );
   });
 });
 

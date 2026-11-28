@@ -60,6 +60,7 @@ const READ_ONLY = new Set([
   "list-status",
   "list-windows",
   "agent inbox",
+  "workspace-group list",
 ]);
 // written whole and renamed into place: a test reading the file never meets it half written
 const save = (s) => {
@@ -68,11 +69,12 @@ const save = (s) => {
   writeFileSync(tmp, JSON.stringify(s));
   renameSync(tmp, stateAt);
 };
-// two `new-workspace` calls at once each make their own workspace and ref, as in real cmux: one at
-// a time through a lock file (given up after 5 s, so a crashed call never stops the rest)
+// Every command that writes the state back runs one at a time through a lock file (given up after
+// 5 s, so a crashed call never stops the rest): two at once never lose each other's change, and two
+// `new-workspace` calls each make their own workspace and ref, as in real cmux.
 let at = 0;
 while (args[at]?.startsWith("--")) at += args[at] === "--json" ? 1 : 2;
-if (args[at] === "new-workspace") {
+if (!READ_ONLY.has(args[at]) && !READ_ONLY.has(`${args[at]} ${args[at + 1]}`)) {
   const lock = `${stateAt}.lock`;
   for (const t0 = Date.now(); Date.now() - t0 < 5000; ) {
     try {
@@ -88,6 +90,24 @@ const state = read();
 state.calls ??= [];
 state.calls.push(args);
 appendFileSync(`${stateAt}.log`, `${JSON.stringify(args)}\n`);
+
+/** A run either creates a workspace with its launcher, or sends that launcher into a durable shell. */
+const launchClaude = (workspace, command) => {
+  if (!state.autoClaude || !command.startsWith("'")) return;
+  const script = readFileSync(command.replace(/^'|'$/g, "").replaceAll("'\\''", "'"), "utf8");
+  const m = script.match(/'--(?:session-id|resume)' '([^']+)'/);
+  if (!m) return;
+  // one terminal runs one Claude: a new one replaces the record of the one before it there
+  state.sessions = (state.sessions ?? []).filter((r) => r.workspace_id !== workspace);
+  const dir = state.transcriptDir ?? "/tmp";
+  state.sessions.push({
+    session_id: m[1],
+    lifecycle: "idle",
+    pid: state.claudePid ?? process.ppid,
+    workspace_id: workspace,
+    transcript_path: join(dir, `${m[1]}.jsonl`),
+  });
+};
 
 // global options before the command
 let idFormat = "refs";
@@ -123,6 +143,57 @@ state.workspaces = (state.workspaces ?? []).filter(
 );
 
 switch (cmd) {
+  case "workspace-group": {
+    const [sub, ...more] = rest;
+    if (sub === "list") ok(JSON.stringify({ groups: state.groups ?? [] }));
+    if (sub === "create") {
+      state.groups ??= [];
+      const externalId = more[more.indexOf("--external-id") + 1];
+      const anchor = randomUUID();
+      state.workspaces ??= [];
+      state.workspaces.push({
+        id: anchor,
+        ref: `workspace:${state.nextRef ?? 1}`,
+        name: more[more.indexOf("--name") + 1],
+        cwd: process.cwd(),
+        command: "zsh",
+      });
+      state.nextRef = (state.nextRef ?? 1) + 1;
+      state.groups.push({
+        id: externalId,
+        external_id: externalId,
+        name: more[more.indexOf("--name") + 1],
+        anchor_workspace_id: anchor,
+        workspace_ids: [anchor],
+      });
+      ok("OK");
+    }
+    if (sub === "add") {
+      const group = more[more.indexOf("--group") + 1];
+      const workspace = more[more.indexOf("--workspace") + 1];
+      const row = (state.groups ?? []).find((candidate) => candidate.id === group);
+      if (!row) fail("unknown group");
+      row.workspace_ids ??= [];
+      if (!row.workspace_ids.includes(workspace)) row.workspace_ids.push(workspace);
+      ok("OK");
+    }
+    if (sub === "pin") {
+      if (more.length !== 1 || more[0]?.startsWith("--")) fail("pin expects a group id");
+      ok("OK");
+    }
+    if (sub === "set-color") {
+      if (more.length !== 3 || more[1] !== "--hex" || !/^#[0-9a-f]{6}$/i.test(more[2] ?? ""))
+        fail("set-color expects <group> --hex <hex>");
+      ok("OK");
+    }
+    if (sub === "set-icon") {
+      if (more.length !== 3 || more[1] !== "--symbol")
+        fail("set-icon expects <group> --symbol <symbol>");
+      ok("OK");
+    }
+    fail(`unknown workspace-group command ${sub}`);
+    break;
+  }
   case "ping":
     ok("PONG");
     break;
@@ -143,24 +214,9 @@ switch (cmd) {
     const twins = state.workspaces.filter((w) => w.name === ws.name).map((w) => w.id);
     state.sameName = [...(state.sameName ?? []), ...twins];
     if (!state.hideWorkspaces) state.workspaces.push(ws);
-    if (state.autoClaude) {
-      const script = readFileSync(
-        ws.command.replace(/^'|'$/g, "").replaceAll("'\\''", "'"),
-        "utf8",
-      );
-      const m = script.match(/'--(?:session-id|resume)' '([^']+)'/);
-      if (m) {
-        state.sessions ??= [];
-        const dir = state.transcriptDir ?? "/tmp";
-        state.sessions.push({
-          session_id: m[1],
-          lifecycle: "idle",
-          pid: state.claudePid ?? process.ppid,
-          workspace_id: ws.id,
-          transcript_path: join(dir, `${m[1]}.jsonl`),
-        });
-      }
-    }
+    // Seat workspaces start a shell and become Claude launchers only when a run begins. The
+    // per-run driver passes its generated launcher as a quoted path; do not try to read `zsh`.
+    launchClaude(ws.id, ws.command);
     if (process.env.CMUX_QUIET !== "1")
       process.stdout.write("Note: new-workspace is now an alias of `cmux workspace create`.\n");
     ok(`OK ${ref}`);
@@ -210,11 +266,13 @@ switch (cmd) {
     if (state.busy) fail("a question dialog is open; nothing sent");
     const text = rest.at(-1);
     state.sent ??= [];
+    const workspace = flag("--workspace");
     state.sent.push({
-      ws: flag("--workspace") ?? flag("--surface"),
+      ws: workspace ?? flag("--surface"),
       text,
       paste: rest.includes("--paste"),
     });
+    if (workspace !== undefined) launchClaude(workspace, text.slice(text.lastIndexOf(" && ") + 4));
     ok();
     break;
   }
@@ -321,6 +379,8 @@ switch (cmd) {
         if (w.id === id) w.goneAt ??= Date.now() + state.linger;
       }
     else state.workspaces = state.workspaces.filter((w) => w.id !== id);
+    for (const group of state.groups ?? [])
+      group.workspace_ids = (group.workspace_ids ?? []).filter((workspace) => workspace !== id);
     state.sessions = (state.sessions ?? []).filter((r) => r.workspace_id !== id);
     ok();
     break;

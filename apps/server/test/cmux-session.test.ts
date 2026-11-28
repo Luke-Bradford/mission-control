@@ -485,6 +485,54 @@ describe("startCmuxSession", () => {
     await h.session.close();
   });
 
+  it("waits for an in-flight paste before closing", async () => {
+    const cmux = fake({ findWaitMs: 2000 });
+    let release: () => void = () => {};
+    const sent = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    cmux.send = async () => {
+      await sent;
+      return "sent";
+    };
+    const h = start({ cmux });
+    await h.session.ready;
+    h.session.send("hello there");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    let closed = false;
+    const closing = h.session.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(closed).toBe(false);
+    release();
+    await closing;
+  });
+
+  it("waits for an in-flight paste before detaching", async () => {
+    const cmux = fake({ findWaitMs: 2000 });
+    let release: () => void = () => {};
+    const sent = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    cmux.send = async () => {
+      await sent;
+      return "sent";
+    };
+    const h = start({ cmux });
+    await h.session.ready;
+    h.session.send("hello there");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    let detached = false;
+    const detaching = Promise.resolve(h.session.detach()).then(() => {
+      detached = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(detached).toBe(false);
+    release();
+    await detaching;
+  });
+
   it("with a stale same-named workspace open, messages reach the new start's Claude", async () => {
     patch((s) => {
       s.claudePid = ALIVE;
@@ -1697,6 +1745,28 @@ describe("with no cmux record of the session", () => {
     await h.session.close();
     expect(gonePid(c.pid as number)).toBe(true);
     expect(existsSync(join(root, "run", CMUX_ENV_FILE))).toBe(false);
+  });
+
+  it("in the seat's own workspace, a close stops Claude and leaves the workspace open", async () => {
+    const seat = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    patch((s) => {
+      s.autoClaude = false;
+      s.screen = PROMPT_SCREEN;
+      s.workspaces = [{ id: seat, ref: "workspace:1", name: "writer-1 · o/repo", cwd: root }];
+    });
+    const h = start({ claudeConfigDir: join(root, "config"), seatWorkspace: seat });
+    // the launcher goes into the seat's shell: no new workspace
+    await wait(() => (state().sent ?? []).length > 0);
+    expect(state().sent[0].ws).toBe(seat);
+    expect(state().workspaces).toHaveLength(1);
+    const c = sleeper();
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${c.pid}\n`);
+    await h.session.ready;
+    await h.session.close();
+    expect(gonePid(c.pid as number)).toBe(true);
+    expect(state().closed ?? []).not.toContain(seat);
+    expect(state().workspaces.map((w: { id: string }) => w.id)).toContain(seat);
+    expect(h.saved.at(-1)).toBeNull();
   });
 
   it("ends when Claude's process ends", async () => {

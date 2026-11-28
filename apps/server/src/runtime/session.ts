@@ -121,7 +121,7 @@ export interface CrewSession {
    * Lets go of the keeper without ending the process: the socket is closed, pending controls are
    * rejected `session ended` and no event is emitted. The process keeps running.
    */
-  detach(): void;
+  detach(): void | Promise<void>;
   on(listener: (e: SessionEvent) => void): () => void;
   readonly pid: number | undefined;
   readonly alive: boolean;

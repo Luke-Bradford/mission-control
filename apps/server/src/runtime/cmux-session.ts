@@ -463,6 +463,8 @@ export interface CmuxSessionInput {
   claudeConfigDir?: string;
   /** The node that runs the hub's own tools: its folder goes first on PATH. */
   nodeDir?: string;
+  /** The seat's own workspace: Claude is launched in its existing terminal, and it stays after Claude exits. */
+  seatWorkspace?: string;
   /** Called once the workspace exists and again once Claude's pid is known; and when it is closed (null). */
   save?: (state: CmuxSaved | null) => void;
   log?: (m: string) => void;
@@ -546,6 +548,7 @@ function createCmuxDriver(
   // an attach has its own record to wait for: the first poll says `attached`
   const queue: string[] = [];
   let pumping = false;
+  let pumpingPromise: Promise<void> | null = null;
   const startedAt = Date.now();
   const configDir = i.claudeConfigDir ?? claudeConfigDir(i.env);
   /** Whether Claude's last top-level line leaves it a turn to finish (a prompt, a tool call or a result). */
@@ -612,11 +615,12 @@ function createCmuxDriver(
   }
 
   /**
-   * Closes the workspace and forgets it. One cmux will not close stays saved, so the run's end or
-   * restart closes it: a seat never leaves a bare shell behind under its name.
+   * Closes a per-run workspace and forgets it; a durable seat workspace stays open and idle. One cmux
+   * will not close stays saved, so the run's end or restart closes it: a seat never leaves a bare
+   * shell behind under its name. `always` closes a durable one too (a Claude the hub did not start runs in it).
    */
-  async function closeWorkspace(): Promise<void> {
-    if (workspace !== "") {
+  async function closeWorkspace(always = false): Promise<void> {
+    if (workspace !== "" && (always || i.seatWorkspace === undefined)) {
       try {
         await i.cmux.close(workspace);
       } catch (e) {
@@ -627,7 +631,7 @@ function createCmuxDriver(
     i.save?.(null);
   }
 
-  /** The Claude process is gone: its workspace is closed (if cmux still has it) and forgotten, then the exit. */
+  /** The Claude process is gone: a per-run workspace is closed (if cmux still has it) and forgotten, then the exit. */
   async function gone(reason: string): Promise<void> {
     await closeWorkspace();
     end({ reason });
@@ -930,7 +934,7 @@ function createCmuxDriver(
       if (seen !== undefined && seen.pid !== null && pid !== null && seen.pid !== pid) {
         // cmux restored the agent without the hub's settings: closed, and resumed with the hub's command
         log(`${i.name}: cmux restored Claude under a new process; closing it`);
-        await closeWorkspace();
+        await closeWorkspace(true);
         return end({ retake: true, reason: "cmux restored the agent without the hub's settings" });
       }
       if (pid !== null && !pidAlive(pid)) return await gone(CMUX_ENDED);
@@ -1023,7 +1027,7 @@ function createCmuxDriver(
     // one word per refusal: a dialog still showing at the next look adds none while one waits
     if (!queue.includes(CMUX_TOOL_REFUSED_TEXT)) {
       queue.push(CMUX_TOOL_REFUSED_TEXT);
-      void pump();
+      startPump();
     }
     return true;
   }
@@ -1038,7 +1042,7 @@ function createCmuxDriver(
       lifecycle = rec.lifecycle;
       i.save?.({ workspace, pid });
       resolveReady();
-      void pump();
+      startPump();
       return;
     }
     if (Date.now() - startedAt >= (i.startWaitMs ?? START_WAIT_MS)) {
@@ -1073,7 +1077,7 @@ function createCmuxDriver(
       log(`${i.name}: Claude is up (pid ${launched}); cmux has no record of it yet`);
       i.save?.({ workspace, pid });
       resolveReady();
-      void pump();
+      startPump();
       return;
     }
     if (menu === null || Date.now() - trustAt < TRUST_KEY_GAP_MS) return;
@@ -1101,7 +1105,7 @@ function createCmuxDriver(
    * is known gone; one that will not stop ends the run instead.
    */
   async function failStart(reason: string): Promise<void> {
-    if (workspace !== "") {
+    if (workspace !== "" && i.seatWorkspace === undefined) {
       await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
     }
     const stopped = await stopLaunched();
@@ -1173,6 +1177,16 @@ function createCmuxDriver(
     }
   }
 
+  /** cmux owns its send child until its paste has settled; close waits for it. */
+  function startPump(): void {
+    if (pumpingPromise !== null) return;
+    const task = pump();
+    pumpingPromise = task;
+    void task.finally(() => {
+      if (pumpingPromise === task) pumpingPromise = null;
+    });
+  }
+
   const session: CrewSession = {
     send(text) {
       if (!alive || closing) throw new SessionControlError("ended", "session ended");
@@ -1186,7 +1200,7 @@ function createCmuxDriver(
         typed = cmuxMessageText(path);
       }
       queue.push(typed);
-      void pump();
+      startPump();
     },
     control(subtype, opts) {
       if (!alive || closing)
@@ -1215,8 +1229,10 @@ function createCmuxDriver(
       if (!finished && !closing) {
         closing = true;
         await closeWorkspace();
-        // closed before Claude was up: its launcher may be mid-start, so it is stopped, then its files go
-        if (!readyYet) {
+        await pumpingPromise;
+        // closed before Claude was up: its launcher may be mid-start, so it is stopped, then its files go.
+        // In the seat's own workspace Claude is always stopped: the workspace stays for the next run.
+        if (!readyYet || i.seatWorkspace !== undefined) {
           await stopLaunched();
           removeLaunchFiles();
         }
@@ -1225,13 +1241,16 @@ function createCmuxDriver(
       return exited;
     },
     detach() {
-      if (detached) return;
+      if (detached) return pumpingPromise ?? Promise.resolve();
       detached = true;
       alive = false;
       if (timer !== undefined) clearTimeout(timer);
       listeners.clear();
       resolveReady();
       resolveExit(null);
+      // A paste owns its cmux child until cmux has accepted it. The next hub must not race it,
+      // and shutdown must not remove its test or run folder while that child still names it.
+      return pumpingPromise ?? Promise.resolve();
     },
     on(listener) {
       listeners.add(listener);
@@ -1295,12 +1314,16 @@ export function startCmuxSession(i: CmuxSessionInput): CrewSession {
         }),
         { mode: 0o700 },
       );
-      const workspace = await i.cmux.newWorkspace({
-        name: i.name,
-        cwd: i.cwd,
-        command: quote(script),
-      });
+      const workspace =
+        i.seatWorkspace ??
+        (await i.cmux.newWorkspace({
+          name: i.name,
+          cwd: i.cwd,
+          command: quote(script),
+        }));
       i.save?.({ workspace, pid: null });
+      if (i.seatWorkspace !== undefined)
+        await i.cmux.send(workspace, `cd ${quote(i.cwd)} && ${quote(script)}`);
       core.begin(workspace);
     } catch (e) {
       i.log?.(`${i.name}: could not open a cmux workspace: ${e instanceof Error ? e.message : e}`);
@@ -1404,8 +1427,9 @@ export function withKeeperFallback(
     },
     detach() {
       listeners.clear();
-      current.detach();
+      const detached = current.detach();
       resolveReady();
+      return detached;
     },
     on(listener) {
       listeners.add(listener);

@@ -26,6 +26,13 @@ export interface FakeState {
   inbox?: { workspace_id: string; text: string; state: string }[];
   messages?: { to: string; from: string; text: string }[];
   panes?: { ws: string; type: string; url: string }[];
+  groups?: {
+    id: string;
+    external_id?: string;
+    name: string;
+    anchor_workspace_id?: string;
+    workspace_ids?: string[];
+  }[];
   [k: string]: unknown;
 }
 
