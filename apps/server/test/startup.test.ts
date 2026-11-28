@@ -2,7 +2,13 @@ import "./temp-home.ts";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { type ConfigView, type Crew, OPERATOR_HEADER } from "@mc/core";
+import {
+  type ConfigView,
+  type Crew,
+  OPERATOR_BOOTSTRAP_CAPABILITY_HEADER,
+  OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_HEADER,
+} from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppDeps } from "../src/api.ts";
@@ -260,6 +266,42 @@ async function claudeCanStart() {
 
 describe("mixed hub startup", () => {
   const preparing = fakeModels();
+
+  it("prints a one-time operator bootstrap URL that signs the HUD in once", async () => {
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      boot.models = preparing.deps;
+      boot.expectSupervisorEnabled = false;
+      await (await import("../src/main.ts")).main();
+      const match = output.mock.calls
+        .map(([line]) => String(line))
+        .join("")
+        .match(/Open Mission Control: http:\/\/127\.0\.0\.1:7431\/\?bootstrap=([^\n]+)/);
+      expect(match?.[1]).toBeDefined();
+      const capability = decodeURIComponent(match?.[1] ?? "");
+      const bootstrap = (given?: string) =>
+        boot.app?.inject({
+          method: "GET",
+          url: OPERATOR_BOOTSTRAP_PATH,
+          headers: {
+            "sec-fetch-site": "same-origin",
+            ...(given === undefined ? {} : { [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: given }),
+          },
+        });
+
+      expect((await bootstrap())?.statusCode).toBe(403);
+      expect((await bootstrap("wrong"))?.statusCode).toBe(403);
+      const accepted = await bootstrap(capability);
+      expect(accepted?.statusCode).toBe(200);
+      expect(accepted?.json()).toEqual({ token: boot.deps?.operatorToken });
+      expect((await bootstrap(capability))?.statusCode).toBe(403);
+      expect(output.mock.calls.map(([line]) => String(line)).join("")).not.toContain(
+        boot.deps?.operatorToken ?? "",
+      );
+    } finally {
+      output.mockRestore();
+    }
+  });
 
   it("starts the focus-import retry timer, which retries a failed import until it clears, and stops it at shutdown (#2215)", async () => {
     const { INSTRUCTION_FOCUS_RETRY_MS } = await import("../src/instructions/notices.ts");
