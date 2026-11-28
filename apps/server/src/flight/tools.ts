@@ -1978,7 +1978,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: sentText(call) };
   }
 
-  /** The unended run of a developer seat in FLIGHT's session, by id; else the refusal to give. */
+  /** The unended run of a developer seat in any crew session, by id; else the refusal to give. */
   function devRun(runId: string): { run: Run; seat: string; call: string } | Result {
     const run = store.run(runId);
     const cfg = run === null ? undefined : seatCfg(run.agentId);
@@ -3982,6 +3982,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (review.state !== "queued") return fail("Review is no longer queued.");
         const target = seatCfg(a.seat);
         if (target === undefined) return fail(notInSessionText(a.seat));
+        // a review runs in its seat's own clone: never move it to another repo's reviewer (#2323)
+        if (repoOfSeat(target.id)?.id !== review.repoId)
+          return fail(`${seatCallSign(target.id)} reviews another repo, not ${review.repoId}.`);
         if (target.id === review.seatId)
           return fail(`${seatCallSign(target.id)} already has this review.`);
         if (seatDef(target).loop !== "review" || modeOfSeat(target) !== "scratch")

@@ -310,7 +310,7 @@ export const FLIGHT_BASIS_MAX = 500;
 export const MC_FLIGHT_ONLY = "Not done: this tool is for the FLIGHT seat.";
 export const MC_TICKET_READERS_ONLY = "Not read: this tool is for the FLIGHT and planner seats.";
 export const notInSessionText = (seat: string): string =>
-  `Not done: ${seat} is not a seat in your session.`;
+  `Not done: ${seat} is not a seat in any crew session.`;
 /** The shape of a brief. */
 export const BRIEF_OPTIONS_MIN = 2;
 export const BRIEF_OPTIONS_MAX = 4;
@@ -393,7 +393,7 @@ export const ledgerPointerText = (kind: FlightPointerKind, target: string): stri
   const form: Record<FlightPointerKind, string> = {
     pr: "<repo id>#<number>, e.g. mc#7",
     ticket: "<repo id>#<number>, e.g. mc#7",
-    seat: "a seat id in your session",
+    seat: "a seat id in any crew session",
     repo: "a configured repo id",
     person: "a GitHub login",
     metric: "a metric id from the registry",

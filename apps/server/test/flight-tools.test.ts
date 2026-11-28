@@ -760,7 +760,7 @@ describe("log_decision", () => {
   it("refuses a seat that is not in its session", async () => {
     const r = await tool.call(ctx(), args({ seat: "nobody-9" }));
     expect(r).toEqual({
-      text: "Not done: nobody-9 is not a seat in your session.",
+      text: "Not done: nobody-9 is not a seat in any crew session.",
       isError: true,
     });
     expect(store.flightDecisions(0, 10)).toEqual([]);
@@ -2547,7 +2547,7 @@ describe("start_seat", () => {
 
   it("refuses a seat outside its session", async () => {
     expect(await start({ seat: "nobody-9" })).toEqual(
-      refused("Not done: nobody-9 is not a seat in your session."),
+      refused("Not done: nobody-9 is not a seat in any crew session."),
     );
   });
 
@@ -3252,7 +3252,7 @@ describe("message_seat", () => {
       ),
     );
     expect((await call("message_seat", M({ seat: "x-1" }))).text).toBe(
-      "Not done: x-1 is not a seat in your session.",
+      "Not done: x-1 is not a seat in any crew session.",
     );
     expect(messageCalls).toEqual([]);
   });
@@ -12564,5 +12564,70 @@ describe("cmux sessions", () => {
     expect(store.hubEvents(0).map((e) => e.text)).toContain(
       `FLIGHT mode set to Watch by FLIGHT for ${asked}`,
     );
+  });
+});
+
+describe("FLIGHT acts in every crew session (#2323)", () => {
+  const otherSession = (over: Record<string, unknown> = {}) =>
+    cfg.crew?.sessions.push({
+      id: "s3",
+      repoId: "other",
+      checkout: "/tmp/none/clone3",
+      seats: [
+        seat("guido-3", "GUIDO", { area: ["src/**"], ...over }),
+        seat("retro-3", "RETRO", { mode: "scratch" }),
+      ],
+    });
+  beforeEach(() => {
+    engineOn = true;
+    otherSession();
+  });
+
+  it("resumes another session's seat with controller authority, as on FLIGHT's own repo", async () => {
+    // FLIGHT has controller authority on standard repos (see "uses controller authority on a
+    // standard repo too"); eBull and autonomy-engine are standard
+    live("guido-3", "r-g3", { repoId: "other", ticket: "other#9" });
+    store.setSeatSession({ ...row("guido-3", "r-g3"), state: "stopped", reason: "operator" });
+    await call("resume_seat", { seat: "guido-3", basis: "continue" });
+    expect(resumeCalls).toEqual(["r-g3"]);
+  });
+
+  it("holds an other-session run whose repo is not its seat's, and not one whose repo matches", async () => {
+    live("guido-3", "r-g3", { repoId: "mc", ticket: "mc#9" });
+    expect((await call("settle_park", { runId: "r-g3", action: "lift", basis: "x" })).text).toBe(
+      "Run is held.",
+    );
+    live("guido-3", "r-g4", { repoId: "other", ticket: "other#9" });
+    expect(
+      (await call("settle_park", { runId: "r-g4", action: "lift", basis: "x" })).text,
+    ).not.toBe("Run is held.");
+  });
+
+  it("never moves a review to another repo's review seat", async () => {
+    engineOn = true;
+    const id = store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 3,
+      attempt: 1,
+      round: 1,
+      at: NOW,
+    });
+    if (id === null) throw new Error("review was not queued");
+    const r = await call("move_review", { reviewId: id, seat: "retro-3", basis: "free seat" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toBe("RETRO-3 reviews another repo, not mc.");
+    expect(store.review(id)?.seatId).toBe("retro-1");
+  });
+
+  it("starts another session's seat on its own repo's ticket", async () => {
+    board(card(9, { size: "S", repoId: "other" } as Partial<BoardItem>));
+    fetchImpl = async (n) => ticket(n, { body: "## Done when\n\n- it works\n" });
+    const r = await call("start_seat", { seat: "guido-3", issue: 9, basis: "ready" });
+    expect(r.text).not.toMatch(/not a seat/);
+    expect(fetchRepos.every((repo) => repo === "o/other" || repo === "other")).toBe(true);
   });
 });
