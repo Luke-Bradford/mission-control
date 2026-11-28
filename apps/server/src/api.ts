@@ -2661,7 +2661,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ) === "flight-full";
           if (body.data.hook_event_name === "PermissionRequest") {
             // Claude is about to open its permission dialog, which nobody in cmux watches (#2304):
-            // an edit the seat's rules allow goes ahead, and anything else is refused at once.
+            // a tool call the seat's rules allow goes ahead, and anything else is refused at once.
             const input = body.data.tool_input ?? {};
             const worktree = store.seatSession(who.seatId)?.worktree ?? null;
             const mode = seatMode(who.seatId);
@@ -2681,7 +2681,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               worktree !== null && typeof input.file_path === "string" && input.file_path !== ""
                 ? realPathOrParent(resolve(body.data.cwd ?? worktree, input.file_path))
                 : null;
-            const allowed =
+            const editAllowed =
               verdict.kind === "allow" &&
               mode !== "read-only" &&
               PERMISSION_EDIT_TOOLS.includes(body.data.tool_name) &&
@@ -2694,9 +2694,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 config.repos.find((r) => r.id === seat.repoId)?.protectedFiles ?? [],
                 runPathGrants(store, who.runId),
               );
+            // In Claude's forced default mode Bash can reach PermissionRequest after PreToolUse
+            // has approved the exact command. The guard's command verdict already checks its
+            // command and worktree rules, so keep that ordinary work from stopping at a dialog.
+            const commandAllowed =
+              verdict.kind === "allow" &&
+              mode !== "read-only" &&
+              body.data.tool_name === "Bash" &&
+              worktree !== null &&
+              typeof input.command === "string" &&
+              input.command !== "";
             return reply
               .type("application/json")
-              .send(guardPermissionOutput(allowed ? null : GUARD_PERMISSION_REFUSED_TEXT));
+              .send(
+                guardPermissionOutput(
+                  editAllowed || commandAllowed ? null : GUARD_PERMISSION_REFUSED_TEXT,
+                ),
+              );
           }
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";

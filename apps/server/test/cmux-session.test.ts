@@ -790,6 +790,42 @@ describe("startCmuxSession", () => {
     await h.session.close();
   });
 
+  it("reports a dialog closing or changing while cmux stays needs-input", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("needsInput");
+    await wait(() => h.events.filter((e) => e.kind === "needs-input").length === 1);
+    patch((s) => {
+      s.screen = "Thinking…";
+    });
+    await wait(() => h.events.filter((e) => e.kind === "needs-input").length === 2);
+    expect(h.events.filter((e) => e.kind === "needs-input").at(-1)).not.toHaveProperty("dialog");
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which cache should I use?",
+        " ❯ 1. Redis",
+        "   2. Memcached",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    await wait(() => h.events.filter((e) => e.kind === "needs-input").length === 3);
+    expect(h.events.filter((e) => e.kind === "needs-input").at(-1)).toMatchObject({
+      dialog: { question: "Which cache should I use?", options: ["1. Redis", "2. Memcached"] },
+    });
+    await h.session.close();
+  });
+
   it("refuses the eBull create-file dialog even while cmux's record says running", async () => {
     patch((s) => {
       s.claudePid = ALIVE;

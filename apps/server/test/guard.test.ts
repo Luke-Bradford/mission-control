@@ -949,9 +949,17 @@ describe("POST /api/guard/check", () => {
         expect((await check(tokA, ask("Write", { file_path }))).body, file_path).toBe(REFUSE);
     });
 
-    it("refuses a read-only seat's edit, a command and a tool the seat lacks", async () => {
+    it("allows a guard-approved command, but refuses a command outside the seat's rules", async () => {
       expect((await check(tokR, ask("Write", { file_path: join(dir, "a.ts") }))).body).toBe(REFUSE);
-      expect((await check(tokA, ask("Bash", { command: "ls" }))).body).toBe(REFUSE);
+      expect((await check(tokA, ask("Bash", { command: "ls" }))).body).toBe(ALLOW);
+      expect(
+        (
+          await check(
+            tokA,
+            ask("Bash", { command: "git push origin feature/secret-branch --force" }),
+          )
+        ).body,
+      ).toBe(REFUSE);
       expect((await check(tokA, ask("mcp__mc__promote", {}))).body).toBe(REFUSE);
     });
 

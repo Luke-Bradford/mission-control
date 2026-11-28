@@ -183,6 +183,65 @@ describe("a Claude run in cmux", () => {
     expect(calls()).toHaveLength(1);
   });
 
+  it("does not call FLIGHT when a stale cmux needs-input record outlives its dialog", async () => {
+    await started();
+    lifecycle("running");
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    await until(() => expect(seatState("guido-1")).toBe("needs-input"));
+    lifecycle("needsInput");
+    patch((s) => {
+      s.screen = "Claude is thinking";
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    const calls = Object.values(
+      JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals ?? {},
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("restarts the dialog deadline when cmux changes dialogs without changing lifecycle", async () => {
+    await started();
+    lifecycle("running");
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    await until(() => expect(seatState("guido-1")).toBe("needs-input"));
+    lifecycle("needsInput");
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which cache should I use?",
+        " ❯ 1. Redis",
+        "   2. Memcached",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    const calls = () =>
+      Object.values(
+        JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals ?? {},
+      ) as { evidence: string }[];
+    await until(() => expect(calls()).toHaveLength(1));
+    expect(calls()[0]?.evidence).toContain("Which cache should I use?");
+    expect(calls()[0]?.evidence).toContain("1. Redis");
+    expect(calls()[0]?.evidence).not.toContain("Which database should I use?");
+  });
+
   it("an operator's /clear keeps the run", async () => {
     const { runId } = await started();
     const fresh = "33333333-3333-4333-8333-333333333333";

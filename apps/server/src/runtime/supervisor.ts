@@ -1152,6 +1152,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Per run: the call to FLIGHT about its open dialog, made if the dialog is still open when it fires. */
   const dialogTimers = new Map<string, NodeJS.Timeout>();
+  /** Per run: the dialog the latest cmux screen read still shows. */
+  const openDialogs = new Map<string, CmuxDialog>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
   /** Runs already taken back once: a second such exit ends them as a crash. In memory only, so a hub restart allows one more. */
@@ -1509,6 +1511,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * a call with its question and options, which the watch delivers after its debounce. FLIGHT's own
    * dialog waits on the operator, whose HUD shows the seat waiting.
    */
+  const sameDialog = (a: CmuxDialog | undefined, b: CmuxDialog) =>
+    a !== undefined &&
+    a.question === b.question &&
+    a.options.length === b.options.length &&
+    a.options.every((option, index) => option === b.options[index]);
+
+  function clearDialog(l: Live): void {
+    openDialogs.delete(l.run.id);
+    clearTimeout(dialogTimers.get(l.run.id));
+    dialogTimers.delete(l.run.id);
+  }
+
   function reportDialogLater(l: Live, dialog: CmuxDialog): void {
     const runId = l.run.id;
     const seatId = l.info.seat.id;
@@ -1517,7 +1531,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const timer = setTimeout(() => {
       dialogTimers.delete(runId);
       if (live.get(seatId)?.run.id !== runId) return;
-      if (store.seatSession(seatId)?.state !== "needs-input") return;
+      // The cmux record can remain needsInput after a dialog has closed or changed. Its screen
+      // updates this map independently, so tell FLIGHT only about the dialog still on screen.
+      if (!sameDialog(openDialogs.get(runId), dialog)) return;
       try {
         recordSeatCall(store, l.info.repo.id, {
           seat: seatId,
@@ -1547,7 +1563,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       case "needs-input":
         l.inTurn = true;
         setState(l, "needs-input", CMUX_NEEDS_INPUT_TEXT);
-        if (e.dialog !== undefined) reportDialogLater(l, e.dialog);
+        if (e.dialog === undefined) clearDialog(l);
+        else {
+          openDialogs.set(l.run.id, e.dialog);
+          reportDialogLater(l, e.dialog);
+        }
         break;
       case "turn-refused":
         if (!e.active) {
@@ -1556,6 +1576,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         break;
       case "turn-start":
+        clearDialog(l);
         if (l.resumedAt !== null && !runGone(l.run.id, l.info.seat.id))
           store.addLoopEvent(
             `${l.run.id}:resume-confirmed:${l.resumedAt}`,

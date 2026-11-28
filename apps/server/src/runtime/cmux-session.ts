@@ -511,6 +511,8 @@ function createCmuxDriver(
   let deniedAt = 0;
   /** The dialog the screen last showed open, for the `needs-input` event. */
   let dialog: CmuxDialog | null = null;
+  /** The dialog last sent to the hub: cmux can hold `needsInput` while this changes or closes. */
+  let reportedDialog: CmuxDialog | null = null;
   /** The screen this poll has read, if it read one: the refusal reads no second copy. */
   let polledScreen: string | null = null;
   let savedPath: string | null = null;
@@ -853,17 +855,36 @@ function createCmuxDriver(
     emit({ kind: "init", sessionId, model: null });
   }
 
+  const sameDialog = (a: CmuxDialog | null, b: CmuxDialog | null) =>
+    a === b ||
+    (a !== null &&
+      b !== null &&
+      a.question === b.question &&
+      a.options.length === b.options.length &&
+      a.options.every((option, index) => option === b.options[index]));
+
   function change(next: CmuxAgent["lifecycle"]): void {
     const prev = lifecycle;
     lifecycle = next;
-    if (prev === next) return;
+    if (prev === next) {
+      // cmux's lifecycle is stale while a dialog closes or is replaced: report the screen change
+      // so the supervisor can cancel or restart its delayed call to FLIGHT.
+      if (next === "needsInput" && !sameDialog(dialog, reportedDialog)) {
+        reportedDialog = dialog;
+        emit(dialog === null ? { kind: "needs-input" } : { kind: "needs-input", dialog });
+      }
+      return;
+    }
     if (next === "running") {
+      reportedDialog = null;
       emit({ kind: "turn-start" });
       sentAt = null;
       quiet = 0;
     } else if (next === "needsInput") {
+      reportedDialog = dialog;
       emit(dialog === null ? { kind: "needs-input" } : { kind: "needs-input", dialog });
     } else if (prev === "running" || prev === "needsInput") {
+      reportedDialog = null;
       finishTurn();
     }
   }
