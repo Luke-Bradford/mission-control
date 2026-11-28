@@ -177,6 +177,15 @@ describe("lockfileProblems", () => {
     ]);
   });
 
+  it("refuses a named package whose importer specifier is not its allowed version", () => {
+    const after = lock({
+      hyparquet: { specifier: "file:../unapproved", version: "1.33.2" },
+    });
+    expect(lockfileProblems(lock({}), after, [HYP])).toEqual([
+      "adds hyparquet at file:../unapproved, but FLIGHT allowed 1.33.2",
+    ]);
+  });
+
   it("refuses a changed or removed package record, and accepts new ones", () => {
     const deps = { hyparquet: { specifier: "1.33.2", version: "1.33.2" } };
     const packages = { "zod@4.1.0": { resolution: { integrity: "sha512-good" } } };
