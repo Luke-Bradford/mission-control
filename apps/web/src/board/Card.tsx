@@ -26,6 +26,7 @@ import {
   cardColumn,
   checksText,
   firstBlocker,
+  isNotStartedColumn,
   NO_PR_YET,
   NO_REVIEWER,
   NOT_QUEUED,
@@ -304,7 +305,7 @@ export const Card = memo(function Card({
     ),
   ].filter(Boolean);
   const title = mine ? "Needs you" : worked ? "Being worked on or looked at now" : undefined;
-  const pattern = <WorkPattern agent={agent} col={col} outcome={outcome} when={when} />;
+  const pattern = <WorkPattern item={item} agent={agent} col={col} outcome={outcome} when={when} />;
   return (
     // The card holds links (GitHub refs), so it is not a button: its title is the link a keyboard
     // or screen reader uses (Enter), and a click anywhere else on the card is a mouse shortcut to it.
@@ -373,11 +374,12 @@ export const Card = memo(function Card({
 
 /** A compact, live tuple: the Board's visible state, elapsed work and recorded cost. */
 function WorkPattern({
+  item,
   agent,
   col,
   outcome,
   when,
-}: Pick<CardProps, "agent" | "outcome" | "when"> & { col: BoardColumn }) {
+}: Pick<CardProps, "item" | "agent" | "outcome" | "when"> & { col: BoardColumn }) {
   const now = useNow();
   const state = col === "Done" ? outcome : agent ? seatStatus(agent).label : col;
   const duration =
@@ -385,12 +387,14 @@ function WorkPattern({
       ? when
       : agent
         ? elapsed(Math.max(0, now - (agent.run?.startedAt ?? agent.stateSince)))
-        : "not started";
-  const spend = agent ? cost(agent.run?.costUsd ?? null) : "no cost recorded";
-  const value = `${state}|${duration}|${spend}`;
+        : isNotStartedColumn(col)
+          ? "not started"
+          : `idle ${elapsed(Math.max(0, now - item.updatedAt))}`;
+  const spend = agent?.run?.costUsd;
+  const value = [state, duration, spend == null ? null : cost(spend)].filter(Boolean).join(" · ");
   return (
     <span className="xs muted" data-work-pattern={value}>
-      {state} · {duration} · {spend}
+      {value}
     </span>
   );
 }
