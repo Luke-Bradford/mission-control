@@ -175,11 +175,7 @@ describe("collectFlow issues", () => {
     const readyAt = lateWednesday - 34 * DAY;
     const mergedAt = readyAt + 4 * 60 * 60 * 1000;
     store.replaceBoard("shop-app", [board(1, { updatedAt: mergedAt })]);
-    store.replacePullRequests(
-      "shop-app",
-      [pr(1, { ticket: "shop-app#1", mergedAt })],
-      0,
-    );
+    store.replacePullRequests("shop-app", [pr(1, { ticket: "shop-app#1", mergedAt })], 0);
     const history = timeline(
       { createdAt: new Date(readyAt).toISOString(), status: "Ready", project: { number: 2 } },
       { createdAt: new Date(mergedAt).toISOString(), status: "Done", project: { number: 2 } },
