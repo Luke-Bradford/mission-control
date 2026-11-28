@@ -90,7 +90,14 @@ describe("a seat's run token on the operator's routes (#1214)", () => {
   const setup = () => {
     const tokens = new RunTokens();
     const seatToken = tokens.issue(SEAT, "run-f");
-    const app = buildApp({ config, store, bus: new ChangeBus(), operatorToken: TOKEN, tokens });
+    const app = buildApp({
+      config,
+      store,
+      bus: new ChangeBus(),
+      operatorToken: TOKEN,
+      consumeBootstrapCapability: () => true,
+      tokens,
+    });
     return { app, seatToken };
   };
   const bootstrap = { "sec-fetch-site": "same-origin" };

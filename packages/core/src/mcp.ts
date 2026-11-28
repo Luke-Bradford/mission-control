@@ -334,6 +334,8 @@ export const OPERATOR_HEADER = "x-mc-operator";
 export const CONTROLLER_HEADER = "x-mc-controller";
 /** Where the HUD reads the operator token at page load. */
 export const OPERATOR_BOOTSTRAP_PATH = "/api/operator/bootstrap";
+/** The one-time capability from the operator page URL that unlocks the bootstrap route. */
+export const OPERATOR_BOOTSTRAP_CAPABILITY_HEADER = "x-mc-bootstrap-capability";
 /** Set by the HUD screenshot browser on every request; the bootstrap route refuses it. */
 export const HUD_RENDERER_HEADER = "x-mc-hud-renderer";
 /** The 401 answer to a mutating /api request without the operator token. */

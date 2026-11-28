@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { peerIsSeat } from "../src/peer-process.ts";
 
-/** A fake `lsof`/`ps`: `tree` maps a pid to its parent and its environment line. */
+/** A fake process table for `lsof` and `ps`. */
 const fake =
   (tree: Record<number, { ppid: number; env: string }>, client = 4242) =>
   (cmd: string, args: string[]): string => {

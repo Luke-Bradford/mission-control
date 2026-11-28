@@ -1,4 +1,9 @@
-import { OPERATOR_BOOTSTRAP_PATH, OPERATOR_HEADER, OPERATOR_TOKEN_REQUIRED } from "@mc/core";
+import {
+  OPERATOR_BOOTSTRAP_CAPABILITY_HEADER,
+  OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_HEADER,
+  OPERATOR_TOKEN_REQUIRED,
+} from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
@@ -131,6 +136,81 @@ describe("api", () => {
     expect(new Headers(calls[2]?.[1].headers).has(OPERATOR_HEADER)).toBe(false);
   });
 
+  it("forwards the page bootstrap capability then removes it from the address", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/setup?keep=value&bootstrap=page-capability&bootstrap=old#top",
+    );
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const fetchMock = vi.fn(async () => json(200, { token: "boot-token" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadOperatorToken();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      OPERATOR_BOOTSTRAP_PATH,
+      expect.objectContaining({
+        headers: { [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: "page-capability" },
+      }),
+    );
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "/setup?keep=value#top");
+    expect(window.location.pathname + window.location.search + window.location.hash).toBe(
+      "/setup?keep=value#top",
+    );
+  });
+
+  it("retains the exchanged bootstrap token after a browser restart", async () => {
+    window.history.replaceState(null, "", "/?bootstrap=page-capability");
+    const fetchMock = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === OPERATOR_BOOTSTRAP_PATH)
+        return new Headers(init?.headers).get(OPERATOR_BOOTSTRAP_CAPABILITY_HEADER) ===
+          "page-capability"
+          ? json(200, { token: "tab-token" })
+          : json(403, { error: "The operator bootstrap request was refused." });
+      return new Headers(init?.headers).get(OPERATOR_HEADER) === "tab-token"
+        ? json(200, { ok: true })
+        : json(401, { error: OPERATOR_TOKEN_REQUIRED });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadOperatorToken();
+    expect(window.location.search).toBe("");
+    expect(sessionStorage.getItem("mission-control:operator-token")).toBeNull();
+    expect(localStorage.getItem("mission-control:operator-token")).toBe("tab-token");
+
+    vi.resetModules();
+    const reloaded = await import("../src/api.ts");
+    await reloaded.loadOperatorToken();
+    await expect(reloaded.apiPost(ACTIONS.ack, { keys: ["one"] })).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      ACTIONS.ack,
+      expect.objectContaining({
+        headers: expect.objectContaining({ [OPERATOR_HEADER]: "tab-token" }),
+      }),
+    );
+  });
+
+  it("exchanges a fresh page capability instead of retaining an old hub token", async () => {
+    localStorage.setItem("mission-control:operator-token", "old-hub-token");
+    window.history.replaceState(null, "", "/?bootstrap=fresh-capability");
+    const fetchMock = vi.fn(async () => json(200, { token: "fresh-hub-token" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadOperatorToken();
+
+    expect(window.location.search).toBe("");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      OPERATOR_BOOTSTRAP_PATH,
+      expect.objectContaining({
+        headers: { [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: "fresh-capability" },
+      }),
+    );
+    expect(localStorage.getItem("mission-control:operator-token")).toBe("fresh-hub-token");
+  });
+
   it("shares an in-flight bootstrap and holds every early POST until it completes", async () => {
     let resolveBootstrap!: (response: Response) => void;
     const bootstrap = new Promise<Response>((resolve) => {
@@ -258,6 +338,7 @@ describe("api", () => {
     vi.stubGlobal("fetch", fetchMock);
     await loadOperatorToken();
     forgetOperatorToken();
+    expect(localStorage.getItem("mission-control:operator-token")).toBeNull();
     await apiPost(ACTIONS.ack);
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
     expect(new Headers(calls[1]?.[1].headers).has(OPERATOR_HEADER)).toBe(false);

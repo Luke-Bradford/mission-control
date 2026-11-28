@@ -33,7 +33,8 @@ describe("work-Mac runbook", () => {
   it("runs the hub as live on the chosen port, on loopback", () => {
     expect(runbook).toContain('MC_LIVE_PORT="$MC_PORT"');
     expect(runbook).toContain("<key>MC_LIVE_PORT</key><string><port></string>");
-    expect(runbook).toContain("http://127.0.0.1:$MC_PORT/");
+    expect(runbook).toContain("Open Mission Control:");
+    expect(runbook).toContain("grep -F 'Open Mission Control:' \"$MC_LOG_DIR/server.log\"");
   });
 
   it("gives launchd a PATH built from the folders of the installed node and cmux", () => {

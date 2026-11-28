@@ -1,5 +1,10 @@
 /** fetch wrapper for the Mission Control server: same-origin, JSON both ways. */
-import { OPERATOR_BOOTSTRAP_PATH, OPERATOR_HEADER, OPERATOR_TOKEN_REQUIRED } from "@mc/core";
+import {
+  OPERATOR_BOOTSTRAP_CAPABILITY_HEADER,
+  OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_HEADER,
+  OPERATOR_TOKEN_REQUIRED,
+} from "@mc/core";
 import { demoSend, demoStream, isDemo } from "./demo/mode.ts";
 
 /**
@@ -18,15 +23,58 @@ export function openStream(path: string): StreamSource {
 
 let operatorToken: string | undefined;
 let operatorTokenLoad: Promise<void> | undefined;
+const OPERATOR_TOKEN_STORAGE_KEY = "mission-control:operator-token";
+
+function storedOperatorToken(): string | undefined {
+  try {
+    const token = globalThis.localStorage.getItem(OPERATOR_TOKEN_STORAGE_KEY);
+    return token === null || token === "" ? undefined : token;
+  } catch {
+    return undefined;
+  }
+}
+
+function rememberOperatorToken(token: string): void {
+  try {
+    globalThis.localStorage.setItem(OPERATOR_TOKEN_STORAGE_KEY, token);
+  } catch {
+    // Private browsing or browser policy may deny storage; the current page still works.
+  }
+}
+
+/** Takes the one-time page capability out of the URL before any other code can copy that URL. */
+function takeBootstrapCapability(): string | undefined {
+  const browser = globalThis as typeof globalThis & {
+    history: { replaceState(data: unknown, unused: string, url?: string | URL | null): void };
+    location: { href: string };
+  };
+  const url = new URL(browser.location.href);
+  const capability = url.searchParams.get("bootstrap");
+  if (capability === null) return undefined;
+  url.searchParams.delete("bootstrap");
+  browser.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  return capability;
+}
 
 /** Share the page-load bootstrap with early writes; an unavailable bootstrap is harmless. */
 export function loadOperatorToken(): Promise<void> {
   if (isDemo()) return Promise.resolve();
   if (operatorTokenLoad) return operatorTokenLoad;
-  if (operatorToken !== undefined) return Promise.resolve();
-  operatorTokenLoad = request<{ token?: unknown } | null>(OPERATOR_BOOTSTRAP_PATH, {})
+  const capability = takeBootstrapCapability();
+  if (capability === undefined) {
+    operatorToken ??= storedOperatorToken();
+    if (operatorToken !== undefined) return Promise.resolve();
+  }
+  operatorTokenLoad = request<{ token?: unknown } | null>(OPERATOR_BOOTSTRAP_PATH, {
+    ...(capability === undefined
+      ? {}
+      : { headers: { [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: capability } }),
+  })
     .then((body) => {
-      if (typeof body?.token === "string") operatorToken = body.token;
+      if (typeof body?.token === "string") {
+        operatorToken = body.token;
+        rememberOperatorToken(body.token);
+      }
     })
     .catch(() => {
       // A preview or an older hub may not provide the bootstrap route.
@@ -39,6 +87,11 @@ export function loadOperatorToken(): Promise<void> {
 
 export function forgetOperatorToken(): void {
   operatorToken = undefined;
+  try {
+    globalThis.localStorage.removeItem(OPERATOR_TOKEN_STORAGE_KEY);
+  } catch {
+    // Storage may be unavailable; in-memory access is still cleared.
+  }
 }
 
 export class ApiError extends Error {

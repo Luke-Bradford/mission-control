@@ -119,7 +119,12 @@ import {
   prTextProblem,
   readKnown,
 } from "./mcp/tools.ts";
-import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
+import {
+  newOperatorToken,
+  operatorTokenMatches,
+  writeControllerToken,
+  writeOperatorToken,
+} from "./operator.ts";
 import { peerIsSeat } from "./peer-process.ts";
 import { createPrEvidence, evidenceReviewDeps } from "./pr-evidence/capture.ts";
 import { evidenceDemoRender } from "./pr-evidence/demo-render.ts";
@@ -246,6 +251,7 @@ export async function main(): Promise<void> {
   mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
   chmodSync(dirname(dbPath), 0o700); // tighten a directory that already existed, too
   const operatorToken = newOperatorToken(); // per boot; FLIGHT alone also receives it in memory
+  let bootstrapCapability: string | undefined = newOperatorToken();
   writeOperatorToken(dirname(dbPath), operatorToken);
   const controllerToken = newOperatorToken(); // the controller's own key, per boot
   writeControllerToken(dirname(dbPath), controllerToken);
@@ -1329,6 +1335,12 @@ export async function main(): Promise<void> {
     operatorToken,
     controllerToken,
     seatPeer: peerIsSeat,
+    consumeBootstrapCapability: (capability) => {
+      if (bootstrapCapability === undefined) return false;
+      if (!operatorTokenMatches(bootstrapCapability, capability)) return false;
+      bootstrapCapability = undefined;
+      return true;
+    },
     gh,
     knownSecrets: mcDeps.knownSecrets,
     deliverComms,
@@ -1453,6 +1465,10 @@ export async function main(): Promise<void> {
     }
   }
   await app.listen({ host: HOST, port });
+  if (bootstrapCapability !== undefined)
+    process.stdout.write(
+      `Open Mission Control: http://${HOST}:${port}/?bootstrap=${encodeURIComponent(bootstrapCapability)}\n`,
+    );
   // External service tooling can identify this hub without inspecting a process command line.
   if (!preview) {
     const pidPath = join(dirname(dbPath), "server.pid");

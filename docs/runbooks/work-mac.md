@@ -90,18 +90,19 @@ poll:
 Do not add a `crew` section. GitHub is optional: without `gh`, repository and pull-request rows
 show none. To add repositories later, sign in with `gh auth login` first, then use Setup › Repos.
 
-In another terminal, check the hub, then open it:
+In another terminal, check the hub:
 
 ```sh
 curl -s "http://127.0.0.1:$MC_PORT/api/health"
 ```
 
-Open `http://127.0.0.1:$MC_PORT/`. With no repository the hub opens on the Sessions page, which
+After it starts, the foreground terminal prints `Open Mission Control: http://127.0.0.1:<port>/?bootstrap=…`.
+Open that complete URL, not the bare address. The one-time capability signs the page in, then the
+page removes it from the address. With no repository the hub opens on the Sessions page, which
 lists the live cmux workspaces. Pages that need a repository say so in one line.
 
-At every start the hub writes a new operator token to `$MC_DATA/operator-token`. The page in your
-browser fetches it itself; only scripts that call the API need to read the file. Stop the hub
-with Control-C.
+At every start the hub writes a new operator token to `$MC_DATA/operator-token`. The browser does
+not read that file; only scripts that call the API need it. Stop the hub with Control-C.
 
 ## 5. Run it under launchd
 
@@ -157,7 +158,11 @@ Check and load it:
 plutil -lint "$HOME/Library/LaunchAgents/$MC_LABEL.plist"
 launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$MC_LABEL.plist"
 curl -s "http://127.0.0.1:$MC_PORT/api/health"
+open "$(grep -F 'Open Mission Control:' "$MC_LOG_DIR/server.log" | tail -n 1 | sed 's/^Open Mission Control: //')"
 ```
+
+The last command opens the one-time operator URL written to the service's standard-output log.
+Run it after every launchd restart; each start writes a new URL. Do not open the bare hub address.
 
 To stop the service, run `launchctl bootout "gui/$(id -u)/$MC_LABEL"`.
 

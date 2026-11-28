@@ -7,7 +7,6 @@ const defaultRun: RunTool = (cmd, args) =>
   execFileSync(cmd, args, { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] });
 
 const MAX_DEPTH = 16;
-
 /** The pid at the client end of a loopback connection that came from `clientPort`. */
 function clientPid(clientPort: number, run: RunTool): number | null {
   const out = run("lsof", ["-nP", `-iTCP:${clientPort}`, "-sTCP:ESTABLISHED", "-Fpn"]);
