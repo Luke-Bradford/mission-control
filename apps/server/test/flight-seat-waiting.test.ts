@@ -11,7 +11,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { flightSignals } from "../src/flight/signals.ts";
-import { workspaceWaitingText } from "../src/hud/seat-waiting.ts";
+import { SIDEBAR_WAITING_MAX, workspaceWaitingText } from "../src/hud/seat-waiting.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-11-28T10:21:00Z");
@@ -113,6 +114,49 @@ describe("a seat idle at its prompt with its run unreported (#2318)", () => {
     expect(signal?.evidence).toContain("guido-1");
     expect(signal?.evidence).toContain("mc#7");
     expect(signal?.evidence).toContain(`waiting on the operator: ${LAST}`);
+  });
+
+  it("reads the target and the whole message after the first sentence, transcript to status", () => {
+    const said = "All safe work is complete. Waiting on FLIGHT to reset my branch.";
+    const line = JSON.stringify({
+      type: "assistant",
+      message: { id: "m1", content: [{ type: "text", text: said }] },
+      parent_tool_use_id: null,
+      timestamp: new Date(NOW - 40 * MIN).toISOString(),
+    });
+    store.setDigest(RUN, foldTranscript(null, [line], 1).digest);
+    seatRow("idle", FLIGHT_SEAT_WAITING_MS);
+    const crewWs = { owner: "crew" as const, name: "guido-1 · mc#7" };
+    expect(workspaceWaitingText(store, ["guido-1"], crewWs)).toBe(`waiting on FLIGHT: ${said}`);
+    expect(waits()[0]?.evidence).toContain(`waiting on FLIGHT: ${said}`);
+  });
+
+  it("cuts a long message in cmux's sidebar line; FLIGHT's evidence keeps it whole", () => {
+    const long = `Waiting on FLIGHT. ${"More detail here. ".repeat(30)}`.trim();
+    store.setDigest(RUN, { lastText: "Waiting on FLIGHT.", lastMessage: long } as RunDigest);
+    seatRow("idle", FLIGHT_SEAT_WAITING_MS);
+    const line = workspaceWaitingText(store, ["guido-1"], {
+      owner: "crew",
+      name: "guido-1 · mc#7",
+    }) as string;
+    expect(line.length).toBe(SIDEBAR_WAITING_MAX);
+    expect(line.endsWith("…")).toBe(true);
+    expect(waits()[0]?.evidence).toContain(`waiting on FLIGHT: ${long}`);
+  });
+
+  it("a seat whose question already reached FLIGHT raises no wake, though it shows waiting", () => {
+    seatRow("idle", 120 * MIN);
+    store.addQuestion({
+      agentId: "guido-1",
+      runId: RUN,
+      text: "May I reset my branch?",
+      at: NOW - 121 * MIN,
+    });
+    expect(waits()).toEqual([]);
+    const crewWs = { owner: "crew" as const, name: "guido-1 · mc#7" };
+    expect(workspaceWaitingText(store, ["guido-1"], crewWs)).toBe(
+      `waiting on the operator: ${LAST}`,
+    );
   });
 
   it("a seat really at work raises nothing, however long its run", () => {

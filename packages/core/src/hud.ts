@@ -32,6 +32,7 @@ import type {
   Escalation,
   PullRequestView,
   Run,
+  RunDigest,
   SeatSessionRow,
   SubagentInfo,
 } from "./types.ts";
@@ -396,6 +397,11 @@ export function waitingOn(lastText: string | null, ownRef: string | null): strin
   const ref = [...text.matchAll(ISSUE_REF)].map((m) => m[0]).find((r) => r !== ownRef && r !== own);
   return ref === undefined ? SEAT_WAITING_TEXT : `${SEAT_WAITING_ON} ${ref}`;
 }
+
+/** A digest's newest assistant message: whole where kept, else its first sentence (an older digest). */
+export const lastMessageOf = (
+  digest: Pick<RunDigest, "lastText" | "lastMessage"> | null | undefined,
+): string | null => digest?.lastMessage ?? digest?.lastText ?? null;
 
 /** A seat whose turn has ended with its run's work unreported, and what it waits on. */
 export interface SeatWaiting {

@@ -54,6 +54,7 @@ import {
   LOCK_WAITING_TEXT,
   type LoopWait,
   laneOwner,
+  lastMessageOf,
   lockBlockedText,
   loopText,
   modeOfSeat,
@@ -275,7 +276,7 @@ function loopViews(
           : seatWaiting(
               seatRow,
               held,
-              (digests?.get(held.id) ?? store.digest(held.id))?.lastText ?? null,
+              lastMessageOf(digests?.get(held.id) ?? store.digest(held.id)),
             );
       const reason =
         seatUnavailable(agent.seat) ??

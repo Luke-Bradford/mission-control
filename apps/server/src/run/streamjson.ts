@@ -10,6 +10,7 @@ import {
   NO_REPORT_TEXT_MAX,
   type Run,
   type RunDigest,
+  SEAT_LAST_MESSAGE_MAX,
   STDERR_TEXT_MAX,
   type SubagentInfo,
   TIMELINE_TICKS_MAX,
@@ -150,6 +151,8 @@ interface DigestState {
   cwd: string | null;
   /** leadSentence of the newest top-level assistant text block. */
   lastText: string | null;
+  /** The newest top-level assistant text block whole, cut at SEAT_LAST_MESSAGE_MAX. */
+  lastMessage: string | null;
   /** `all` tokens at the latest `result` line with a numeric cost; null before one. */
   costTokens: number | null;
   /** The newest top-level `user` frame's time since the last top-level assistant message. */
@@ -188,6 +191,7 @@ const emptyDigestState = (): DigestState => ({
   compactions: 0,
   cwd: null,
   lastText: null,
+  lastMessage: null,
   costTokens: null,
   asked: null,
   replies: new Map(),
@@ -471,7 +475,10 @@ function digestFrame(d: DigestState, ev: Json): void {
       if (top) d.toolCalls += 1;
     } else if (ev.type === "assistant" && block.type === "text" && top) {
       const text = typeof block.text === "string" ? leadSentence(cleanText(block.text)) : null;
-      if (text !== null) d.lastText = text;
+      if (text !== null) {
+        d.lastText = text;
+        d.lastMessage = cleanText(block.text as string, SEAT_LAST_MESSAGE_MAX);
+      }
     } else if (ev.type === "user" && block.type === "tool_result") {
       const id = str(block.tool_use_id);
       const use = id === null ? undefined : d.pending.get(id);
@@ -583,6 +590,7 @@ function buildDigest(d: DigestState, model: string | null): RunDigest {
     contextWindow: d.contextWindow ?? window ?? null,
     liveTool,
     lastText: d.lastText,
+    ...(d.lastMessage === null ? {} : { lastMessage: d.lastMessage }),
     tools,
     subagents: [...d.subagents.values()].map((x) => ({ ...x })),
     minuteTokens,
@@ -650,6 +658,7 @@ function foldCodex(
     if (completed && item.type === "agentMessage" && typeof item.text === "string") {
       facts.lastAssistantText = cleanText(item.text, NO_REPORT_TEXT_MAX);
       d.lastText = leadSentence(cleanText(item.text));
+      d.lastMessage = cleanText(item.text, SEAT_LAST_MESSAGE_MAX);
     }
     const tool = codexTool(item);
     if (tool) {

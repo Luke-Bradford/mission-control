@@ -548,10 +548,13 @@ export function flightSignals(i: {
       );
     }
   }
-  // a seat idle at its prompt with its run unreported: FLIGHT answers or unblocks it, told once
+  // a seat idle at its prompt with its run unreported: FLIGHT answers or unblocks it, told once.
+  // A run whose question is open has already reached FLIGHT: its question wakes it instead.
+  const asking = new Set(store.openQuestions().map((q) => q.runId));
   for (const seat of session.seats) {
     const waiting = storedSeatWaiting(store, seat.id);
     if (waiting === null || now - waiting.since < FLIGHT_SEAT_WAITING_MS) continue;
+    if (asking.has(waiting.runId)) continue;
     const run = store.run(waiting.runId);
     raise(
       "seat_waiting",
