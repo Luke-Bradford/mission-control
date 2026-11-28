@@ -263,6 +263,7 @@ export interface EngineDeps {
     | "resumeDeferredRuns"
     | "seat"
     | "seatFacts"
+    | "clearStaleTurn"
     | "endRunByEngine"
     | "startReview"
     | "busy"
