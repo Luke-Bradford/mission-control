@@ -1616,6 +1616,22 @@ describe("guard config", () => {
     ]);
   });
 
+  it("loads a backend health URL on $BACKEND_PORT, and still refuses one off loopback HTTP", () => {
+    const withUrl = (url: string) =>
+      text.replace(
+        FULL_SUITE_BLOCK,
+        `${FULL_SUITE_BLOCK}\n    app_commands:\n      - command: uv run uvicorn app.main:app --port $BACKEND_PORT\n        url: ${url}`,
+      );
+    expect(parse(withUrl("http://127.0.0.1:$BACKEND_PORT/health")).repos[2]?.appCommands).toEqual([
+      {
+        command: "uv run uvicorn app.main:app --port $BACKEND_PORT",
+        url: "http://127.0.0.1:$BACKEND_PORT/health",
+      },
+    ]);
+    expect(() => parse(withUrl("http://example.com:$BACKEND_PORT/health"))).toThrow();
+    expect(() => parse(withUrl("https://127.0.0.1:$BACKEND_PORT"))).toThrow();
+  });
+
   it.each(["rm -rf /", "pnpm -s tests", "pnpm test", "git push"])(
     "finds full_suite entry %j that crew seats may not run, against the writer commands",
     (cmd) => {

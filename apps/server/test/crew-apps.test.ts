@@ -465,6 +465,42 @@ describe("crew apps", () => {
       ]);
     });
   }
+  it("keeps checking panes and restarting stopped ones when a health write fails", async () => {
+    const ae = { id: "guido-ae", runId: "run-ae", repoId: "autonomy-engine", worktree: "/crew/ae" };
+    const pane = cmux();
+    pane.workspaces.mockResolvedValue([
+      { id: "ws", name: "guido-eb · #1", cwd: seat.worktree },
+      { id: "ae", name: "guido-ae · #2", cwd: ae.worktree },
+    ]);
+    // the minute check's health write fails for both seats; a start's own writes still work
+    pane.setStatus.mockImplementation(async (_ws: string, key: string, value: string) => {
+      if (key === "app-health" && value.includes("not answering"))
+        throw new Error("cmux set-status failed");
+    });
+    const log = vi.fn();
+    let at = 0;
+    const apps = createCrewApps({
+      cmux: pane,
+      repos: () => [
+        { id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] },
+        { id: "autonomy-engine", commands: CREW_APP_DEFAULTS["autonomy-engine"] ?? [] },
+      ],
+      seats: () => [seat, ae],
+      now: () => at,
+      probe: vi.fn().mockResolvedValue(false),
+      log,
+    });
+    await apps.start(seat.id);
+    await apps.start(ae.id);
+    expect(pane.newPane).toHaveBeenCalledTimes(4);
+    pane.readPane.mockRejectedValue(new Error("pane is gone"));
+    await apps.tick();
+    expect(pane.newPane).toHaveBeenCalledTimes(8);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("cmux set-status failed"));
+    at = APP_RESTART_MS - 1;
+    await apps.tick();
+    expect(pane.newPane).toHaveBeenCalledTimes(8);
+  });
   it("refuses eBull's launchd-owned jobs command", async () => {
     const apps = createCrewApps({
       cmux: cmux(),

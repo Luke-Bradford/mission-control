@@ -71,6 +71,13 @@ export const SESSION_APP_STATUS_KEY = "app";
  * cmux's sidebar; never shown as the session's own status.
  */
 export const SESSION_APP_HEALTH_STATUS_KEY = "app-health";
+/**
+ * A crew app command's text or URL with its port placeholders filled: `$BACKEND_PORT` (the seat's
+ * backend) and `$PORT` (the pane's own). The longer name first, so `$PORT` never eats its tail.
+ */
+export function renderAppPorts(text: string, port: number, backendPort: number): string {
+  return text.replaceAll("$BACKEND_PORT", String(backendPort)).replaceAll("$PORT", String(port));
+}
 /** The longest text one write may carry. */
 export const SESSION_TEXT_MAX = 4000;
 /** The longest last line, status and inbox text a row carries. */

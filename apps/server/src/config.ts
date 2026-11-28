@@ -40,6 +40,7 @@ import {
   ROLE_PROMPT,
   ROLE_PROMPT_DIR,
   type RoleDef,
+  renderAppPorts,
   resolveSeatDef,
   SANDBOX_DENY_READ_HOME,
   type SeatCommands,
@@ -628,7 +629,7 @@ const fileSchema = z
               command: nonEmpty,
               url: nonEmpty.refine((url) => {
                 try {
-                  const parsed = new URL(url.replaceAll("$PORT", "5173"));
+                  const parsed = new URL(renderAppPorts(url, 5173, 5182));
                   return parsed.protocol === "http:" && parsed.hostname === "127.0.0.1";
                 } catch {
                   return false;

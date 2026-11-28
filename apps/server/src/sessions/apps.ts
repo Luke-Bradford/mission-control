@@ -1,5 +1,5 @@
 /** Keeps a live seat's development app in panes of that seat's cmux workspace. */
-import { SESSION_APP_HEALTH_STATUS_KEY, SESSION_APP_STATUS_KEY } from "@mc/core";
+import { renderAppPorts, SESSION_APP_HEALTH_STATUS_KEY, SESSION_APP_STATUS_KEY } from "@mc/core";
 import type { Cmux } from "../runtime/cmux.ts";
 import { probeLocal } from "./sessions.ts";
 
@@ -92,13 +92,9 @@ export async function seatWorkspace(
     (await cmux.workspaces()).find((entry) => entry.name.startsWith(`${seatId} · `))?.id ?? null
   );
 }
-const urlAt = (url: string, port: number, backendPort: number) =>
-  url.replaceAll("$BACKEND_PORT", String(backendPort)).replaceAll("$PORT", String(port));
 const quote = (value: string) => `'${value.replaceAll("'", "'\\\"'\\\"'")}'`;
 export function appCommand(repo: string, command: string, port: number, backendPort: number) {
-  const rendered = command
-    .replaceAll("$BACKEND_PORT", String(backendPort))
-    .replaceAll("$PORT", String(port));
+  const rendered = renderAppPorts(command, port, backendPort);
   const proxy =
     repo.toLowerCase() === "ebull" && /cd frontend &&/.test(rendered)
       ? ` VITE_API_PROXY_TARGET=http://127.0.0.1:${backendPort}`
@@ -263,7 +259,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
           seat.worktree,
           appCommand(repo.id, entry.command, port, backendPort),
         );
-        apps.push({ pane, url: urlAt(entry.url, port, backendPort), answers: null });
+        apps.push({ pane, url: renderAppPorts(entry.url, port, backendPort), answers: null });
       }
       await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, apps[0]?.url ?? "");
       await deps.cmux.setStatus(workspace, SESSION_APP_HEALTH_STATUS_KEY, appStatus(apps));
@@ -337,11 +333,16 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
         app.apps.forEach((entry, index) => {
           entry.answers = answers[index] ?? false;
         });
-        await deps.cmux.setStatus(
-          app.workspace,
-          SESSION_APP_HEALTH_STATUS_KEY,
-          appStatus(app.apps),
-        );
+        // the sidebar's health line is a courtesy: a failed write never stops the liveness check
+        try {
+          await deps.cmux.setStatus(
+            app.workspace,
+            SESSION_APP_HEALTH_STATUS_KEY,
+            appStatus(app.apps),
+          );
+        } catch (error) {
+          deps.log?.(`Could not write ${seatId}'s app health status: ${String(error)}`);
+        }
         const alive = await Promise.all(
           app.apps.map((entry) =>
             deps.cmux
@@ -375,7 +376,11 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
             apps:
               app?.apps.map(({ url, answers }) => ({ url, answers })) ??
               repo.commands.map((entry, index) => ({
-                url: urlAt(entry.url, portOf(seat.id, index), portOf(seat.id, BACKEND_OFFSET)),
+                url: renderAppPorts(
+                  entry.url,
+                  portOf(seat.id, index),
+                  portOf(seat.id, BACKEND_OFFSET),
+                ),
                 answers: null,
               })),
           },
