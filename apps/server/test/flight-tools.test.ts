@@ -198,6 +198,12 @@ import { stageReviewEvidence } from "../src/pr-evidence/review.ts";
 import { type PrEvidenceStore, prEvidenceStore } from "../src/pr-evidence/store.ts";
 import { runDependencyAllowance } from "../src/repo/dependency-allowance.ts";
 import type { Cmux } from "../src/runtime/cmux.ts";
+import {
+  CMUX_DIALOG_CHANGED,
+  CMUX_DIALOG_NO_OPTION,
+  CMUX_DIALOG_NOT_WAITING,
+  CMUX_DIALOG_PERMISSION,
+} from "../src/runtime/cmux-session.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { createSessions } from "../src/sessions/sessions.ts";
 import { Store } from "../src/store.ts";
@@ -270,6 +276,8 @@ let flightDeps: () => FlightToolsDeps;
 let startCalls: unknown[][];
 let endCalls: string[];
 let interruptCalls: string[];
+let dialogAnswers: unknown[][];
+let answerDialogImpl: () => Promise<string>;
 let callOrder: string[];
 let onInterrupt: () => void;
 let messageCalls: unknown[][];
@@ -396,6 +404,8 @@ beforeEach(() => {
   startCalls = [];
   endCalls = [];
   interruptCalls = [];
+  dialogAnswers = [];
+  answerDialogImpl = async () => "2. SQLite";
   callOrder = [];
   onInterrupt = () => {};
   messageCalls = [];
@@ -556,6 +566,10 @@ beforeEach(() => {
         endCalls.push(seatId);
         callOrder.push("end");
         await endImpl(seatId);
+      },
+      answerDialog: async (...a) => {
+        dialogAnswers.push(a);
+        return await answerDialogImpl();
       },
       interrupt: async (seatId) => {
         interruptCalls.push(seatId);
@@ -907,6 +921,59 @@ describe("move_review", () => {
         basis: "mc#7 P0 needs the available reviewer",
       }),
     ).resolves.toEqual({ text: "RETRO-1 already has this review.", isError: true });
+  });
+});
+
+// #2304: FLIGHT is called about a dialog in a seat's cmux workspace and answers it
+describe("answer_dialog", () => {
+  const args = {
+    seat: "guido-1",
+    option: 2,
+    dialog: "0123456789abcdef",
+    basis: "the ticket names SQLite",
+  };
+
+  it("hands the answer to the supervisor and records it", async () => {
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "needs-input" });
+    const result = await call("answer_dialog", args);
+    expect(result).toEqual({ text: "Picked option 2 in GUIDO-1's dialog." });
+    expect(dialogAnswers).toEqual([["guido-1", { option: 2, dialog: "0123456789abcdef" }]]);
+    expect(store.flightDecisions(0, 10)).toEqual([
+      expect.objectContaining({
+        kind: "answer",
+        about: "2. SQLite",
+        seatId: "guido-1",
+        targetRunId: "r-guido",
+        basis: "the ticket names SQLite",
+      }),
+    ]);
+  });
+
+  it("refuses a seat with no run, and passes on the supervisor's refusal unrecorded", async () => {
+    const none = await call("answer_dialog", args);
+    expect(none.isError).toBe(true);
+    expect(none.text).toBe(CMUX_DIALOG_NOT_WAITING);
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "needs-input" });
+    for (const refusal of [CMUX_DIALOG_CHANGED, CMUX_DIALOG_PERMISSION, CMUX_DIALOG_NO_OPTION]) {
+      answerDialogImpl = async () => {
+        throw new Error(refusal);
+      };
+      const r = await call("answer_dialog", args);
+      expect(r).toEqual({ text: refusal, isError: true });
+    }
+    expect(store.flightDecisions(0, 10)).toEqual([]);
+  });
+
+  it("refuses an option out of range, or no dialog id, before asking", async () => {
+    live("guido-1", "r-guido");
+    expect((await call("answer_dialog", { ...args, option: 0 })).isError).toBe(true);
+    expect((await call("answer_dialog", { ...args, dialog: "" })).isError).toBe(true);
+    expect((await call("answer_dialog", { ...args, dialog: "2. SQLite" })).isError).toBe(true);
+    const { dialog: _, ...noId } = args;
+    expect((await call("answer_dialog", { ...noId, label: "2. SQLite" })).isError).toBe(true);
+    expect(dialogAnswers).toEqual([]);
   });
 });
 
@@ -1481,6 +1548,7 @@ describe("tool list", () => {
       "recall",
       "cmux_sessions",
       "cmux_send",
+      "answer_dialog",
       "cmux_open",
       "set_flight_mode",
       "hold_item",

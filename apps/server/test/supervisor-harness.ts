@@ -339,6 +339,8 @@ function make(
     cmuxState?: string;
     /** How long a cmux start may take to show Claude (default 5 s). */
     cmuxStartWaitMs?: number;
+    /** How long a cmux dialog stays open before FLIGHT is called (default 50 ms here). */
+    cmuxDialogReportMs?: number;
     /** The fake CLI script to run in place of fake-claude.mjs. */
     fake?: string;
     cliCheckTimeoutMs?: number;
@@ -430,6 +432,7 @@ function make(
       : {
           cmuxCommand: [process.execPath, FAKE_CMUX, "--state", over.cmuxState],
           cmuxPollMs: 20,
+          cmuxDialogReportMs: over.cmuxDialogReportMs ?? 50,
           cmuxStartWaitMs: over.cmuxStartWaitMs ?? 5000,
           // never the real cmux app: a stand-in that starts nothing, and a short wait for it
           cmuxOptions: { open: ["/usr/bin/true"], startWaitMs: 300 },

@@ -248,6 +248,7 @@ const stubSupervisor = (): Supervisor => {
     startReview: call("startReview", { runId: "r-2" }),
     message: call("message", undefined),
     interrupt: call("interrupt", undefined),
+    answerDialog: call("answerDialog", "1. Yes"),
     endRun: call("end", undefined),
     endRunByEngine: call("endByEngine", undefined),
     setAside: call("setAside", null),

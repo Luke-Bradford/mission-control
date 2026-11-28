@@ -421,6 +421,7 @@ describe("the allowlist in phase 2b", () => {
       cmuxSend: "mcp__mc__cmux_send",
       cmuxOpen: "mcp__mc__cmux_open",
       setFlightMode: "mcp__mc__set_flight_mode",
+      answerDialog: "mcp__mc__answer_dialog",
       allowDependency: "mcp__mc__allow_dependency",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit, MC_TOOLS.syncMain]);
@@ -800,6 +801,7 @@ describe("crew constants", () => {
           "cmux_send",
           "cmux_open",
           "set_flight_mode",
+          "answer_dialog",
           "allow_dependency",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
@@ -965,6 +967,7 @@ describe("mc tool grants", () => {
       "cmux_send",
       "cmux_open",
       "set_flight_mode",
+      "answer_dialog",
       "allow_dependency",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual([
@@ -1284,7 +1287,7 @@ describe("crew sandbox and scoped edits", () => {
     ]);
   });
 
-  it("registers the guard hook: every tool before it runs, Bash after it ends (Task 1's shape)", () => {
+  it("registers the guard hook: every tool before it runs, Bash after it ends, every permission dialog", () => {
     for (const mode of ["writer", "read-only"] as const) {
       const j = JSON.parse(crewSandboxSettings(base.sandbox, mode, base.hook));
       const entry = (matcher: string) => [
@@ -1294,6 +1297,8 @@ describe("crew sandbox and scoped edits", () => {
         PreToolUse: entry("*"),
         PostToolUse: entry("Bash"),
         PostToolUseFailure: entry("Bash"),
+        // #2304: the guard answers Claude's permission dialog, so none opens in cmux
+        PermissionRequest: entry("*"),
       });
       expect(Object.keys(j.hooks)).toEqual([...GUARD_HOOK_EVENTS]);
     }
