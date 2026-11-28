@@ -221,7 +221,7 @@ function HubOpenFiles({ machine }: { machine: MachineSample | null }) {
     openFiles !== null && limit !== null && limit > 0
       ? { openFiles, limit, use: (100 * openFiles) / limit }
       : null;
-  const overThreshold = reading !== null && reading.use > HUB_OPEN_FILE_RESTART_THRESHOLD;
+  const overThreshold = reading !== null && reading.use >= HUB_OPEN_FILE_RESTART_THRESHOLD;
   return (
     <div className="resrow" data-testid="hub-open-files">
       <span className="s fg2">Hub files</span>
@@ -241,7 +241,7 @@ function HubOpenFiles({ machine }: { machine: MachineSample | null }) {
       <span className="num s">
         {reading === null
           ? "open-file reading unknown"
-          : `${fixed(reading.openFiles, 0)} / ${fixed(reading.limit, 0)} open files · ${overThreshold ? `over the ${HUB_OPEN_FILE_RESTART_THRESHOLD}% restart threshold` : `within the ${HUB_OPEN_FILE_RESTART_THRESHOLD}% restart threshold`}`}
+          : `${fixed(reading.openFiles, 0)} / ${fixed(reading.limit, 0)} open files · ${overThreshold ? `at or above the ${HUB_OPEN_FILE_RESTART_THRESHOLD}% restart threshold` : `below the ${HUB_OPEN_FILE_RESTART_THRESHOLD}% restart threshold`}`}
       </span>
     </div>
   );

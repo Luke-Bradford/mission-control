@@ -91,7 +91,9 @@ describeRendered("Overview composition", () => {
         const p = panel.getBoundingClientRect();
         return { text: row.textContent, inside: r.left >= p.left && r.right <= p.right };
       }, undefined);
-      expect(reading.text).toContain("820 / 1,000 open files · over the 80% restart threshold");
+      expect(reading.text).toContain(
+        "820 / 1,000 open files · at or above the 80% restart threshold",
+      );
       expect(reading.inside).toBe(true);
     },
     60_000,

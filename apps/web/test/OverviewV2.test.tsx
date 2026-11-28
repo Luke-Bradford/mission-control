@@ -136,18 +136,34 @@ it("shows machine history as CPU and memory graphs", async () => {
 it("shows hub open files, its restart threshold, and unknown readings", async () => {
   stubFetch({
     "/api/machine": {
-      latest: { at: NOW, hubOpenFiles: 820, hubOpenFileLimit: 1000 },
+      latest: { at: NOW, hubOpenFiles: 700, hubOpenFileLimit: 1000 },
       warning: null,
     },
     "/api/overview": OVERVIEW,
     "/api/test-lock": { holder: null, waiting: [] },
   });
-  const { rerender } = render(<MachinePanel />);
+  const normal = render(<MachinePanel />);
 
   expect(
-    await screen.findByText("820 / 1,000 open files · over the 80% restart threshold"),
+    await screen.findByText("700 / 1,000 open files · below the 80% restart threshold"),
   ).toBeTruthy();
 
+  normal.unmount();
+  hub.clear();
+  stubFetch({
+    "/api/machine": {
+      latest: { at: NOW, hubOpenFiles: 800, hubOpenFileLimit: 1000 },
+      warning: null,
+    },
+    "/api/overview": OVERVIEW,
+    "/api/test-lock": { holder: null, waiting: [] },
+  });
+  const warning = render(<MachinePanel />);
+  expect(
+    await screen.findByText("800 / 1,000 open files · at or above the 80% restart threshold"),
+  ).toBeTruthy();
+
+  warning.unmount();
   hub.clear();
   stubFetch({
     "/api/machine": {
@@ -157,7 +173,7 @@ it("shows hub open files, its restart threshold, and unknown readings", async ()
     "/api/overview": OVERVIEW,
     "/api/test-lock": { holder: null, waiting: [] },
   });
-  rerender(<MachinePanel />);
+  render(<MachinePanel />);
   expect(await screen.findByText("open-file reading unknown")).toBeTruthy();
 });
 it("marks the projected quota at reset", async () => {
