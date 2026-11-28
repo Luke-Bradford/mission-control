@@ -120,6 +120,8 @@ export interface CardProps {
   you: CardYou | null;
   /** Its review found blocking problems: the rework line (`reworkLabel`); null when not. */
   rework?: string | null;
+  /** The state, duration and cost pattern from the seat currently on the card. */
+  workPattern?: string;
 }
 
 /**
@@ -154,6 +156,7 @@ export const Card = memo(function Card({
   statusOutOfDate,
   you,
   rework = null,
+  workPattern = "Unassigned|—|—",
 }: CardProps) {
   cardRenderProbe.onRender?.(ticketRef(item));
   const col = cardColumn(item);
@@ -311,6 +314,7 @@ export const Card = memo(function Card({
       className={`kcard${unacked ? " pulse-warn" : worked ? " pulse-ok" : ""}`}
       title={title}
       data-card={ticketRef(item)}
+      data-work-pattern={workPattern}
       onClick={click}
     >
       <div className="kref">

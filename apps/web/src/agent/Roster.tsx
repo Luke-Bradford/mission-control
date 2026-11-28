@@ -1,6 +1,6 @@
 import type { ConfigView, Crew, CrewRow, OverviewTimeline } from "@mc/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { callSign, seatRoleTitle, seatStatus } from "../crew.ts";
+import { callSign, seatRoleTitle, seatStatus, seatWorkPattern } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { percent } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
@@ -197,6 +197,7 @@ function SeatCard({
       type="button"
       className={`seat-card${free ? " free" : ""}`}
       data-seat={row.id}
+      data-work-pattern={seatWorkPattern(row, now)}
       aria-current={on}
       onClick={() => chooseSeat(row.id, shown)}
     >

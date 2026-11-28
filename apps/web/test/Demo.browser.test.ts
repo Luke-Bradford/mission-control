@@ -10,7 +10,6 @@ import {
   describeRendered,
   type RenderedPage,
 } from "./browserRunner.ts";
-import { NOW } from "./fixtures.ts";
 import { demoSeed, overviewDensityFixture } from "./overviewDensityFixtures.ts";
 
 const { renderAt } = browserSession();
@@ -67,6 +66,8 @@ const bodyHas = (page: RenderedPage, needle: string) =>
   page.evaluate((n) => document.body.textContent?.includes(n) ?? false, needle);
 const apiRequests = (page: RenderedPage) =>
   page.requests().filter((r) => r.path.startsWith("/api/"));
+const adjacentPatternsDiffer = (patterns: readonly string[]) =>
+  patterns.every((value, index) => !index || value !== patterns[index - 1]);
 
 interface PageCase {
   name: string;
@@ -150,18 +151,14 @@ describeRendered("Demo, rendered", () => {
   it(
     "shows a different adjacent work pattern on Overview, Agents, Board and FLIGHT",
     async () => {
-      const rows = demoSeed(17).rows;
-      const pattern = (row: (typeof rows)[number]) =>
-        `${row.hudState}:${row.run ? NOW - row.run.startedAt : 0}:${row.run?.costUsd ?? 0}`;
-      expect(
-        rows.map(pattern).every((value, index, all) => !index || value !== all[index - 1]),
-      ).toBe(true);
+      // Names and ticket titles differ here, but the duplicate visible work pattern must still fail.
+      expect(adjacentPatternsDiffer(["Running|12m|$1.20", "Running|12m|$1.20"])).toBe(false);
 
       const pages = [
-        ["Overview", "/", "#agentsList .trow:not(.head)"],
-        ["Agents", "/agent", ".seat-card"],
-        ["Board", "/board", ".kcard"],
-        ["FLIGHT", "/flight", ".fp-brow"],
+        ["Overview", "/", "#agentsList .trow[data-work-pattern]"],
+        ["Agents", "/agent", ".seat-card[data-work-pattern]"],
+        ["Board", "/board", ".kcard[data-work-pattern]"],
+        ["FLIGHT", "/flight", ".fp-brow[data-work-pattern]"],
       ] as const;
       for (const [name, at, selector] of pages) {
         const page = await openSeeded(at);
@@ -170,12 +167,15 @@ describeRendered("Demo, rendered", () => {
           async () => (await count(page, selector)) >= 2,
           `${name} work cards`,
         );
-        const cards = await page.evaluate(
+        const patterns = await page.evaluate(
           (css) =>
-            [...document.querySelectorAll(css)].map((card) => card.textContent?.trim() ?? ""),
+            [...document.querySelectorAll<HTMLElement>(css)].map(
+              (card) => card.dataset.workPattern ?? "",
+            ),
           selector,
         );
-        expect(cards.every((value, index) => !index || value !== cards[index - 1])).toBe(true);
+        expect(patterns.every(Boolean), `${name}: ${patterns.join(", ")}`).toBe(true);
+        expect(adjacentPatternsDiffer(patterns), `${name}: ${patterns.join(", ")}`).toBe(true);
         expect(apiRequests(page)).toEqual([]);
         await page.close();
       }

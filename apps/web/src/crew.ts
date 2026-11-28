@@ -31,7 +31,7 @@ import {
 } from "@mc/core";
 import { useCallback } from "react";
 import { RESOURCES, useResource } from "./data.ts";
-import { cost, cutText, hhmm, mss, percent, prLabel, wkdTime } from "./fmt.ts";
+import { cost, cutText, elapsed, hhmm, mss, percent, prLabel, wkdTime } from "./fmt.ts";
 import { mcpToolPart, toolLabel } from "./toolLabel.ts";
 
 /** The seat palette size: `--seat-1…--seat-7` (hud.css), wrapping by config index. */
@@ -40,6 +40,12 @@ const SEAT_PALETTE = 7;
 /** A seat's colour token by its config index: the one palette every page draws from. */
 export const seatColorVar = (index: number): string =>
   `--seat-${(Math.max(0, index) % SEAT_PALETTE) + 1}`;
+
+/** The state, run age and run cost a seat shows wherever it appears as work in the HUD. */
+export function seatWorkPattern(row: CrewRow, now: number): string {
+  const since = row.run?.startedAt ?? row.stateSince;
+  return `${seatStatus(row).label}|${since > 0 ? elapsed(Math.max(0, now - since)) : "—"}|${cost(row.run?.costUsd ?? null)}`;
+}
 
 /**
  * The attention items a seat's row shows: the seat's own, about the run it is working now. Run

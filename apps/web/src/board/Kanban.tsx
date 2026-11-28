@@ -8,6 +8,7 @@ import {
 } from "@mc/core";
 import { useId, useMemo, useState } from "react";
 import type { NeedsYou } from "../attention.ts";
+import { seatWorkPattern } from "../crew.ts";
 import { agoDays, plural } from "../fmt.ts";
 import { Card, type CardProps } from "./Card.tsx";
 import {
@@ -119,6 +120,9 @@ function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
             pr: pr?.number ?? null,
           })
         : null,
+    workPattern: agent
+      ? seatWorkPattern(agent, ctx.now)
+      : `${col}|${Math.floor(Math.max(0, ctx.now - item.updatedAt) / 60_000)}m|—`,
   };
 }
 

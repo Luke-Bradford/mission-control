@@ -151,7 +151,9 @@ export function boardItems(tickets: readonly DemoTicket[] = DEMO_TICKETS) {
       labels: [],
       priority: i % 3 === 0 ? "P0" : "P1",
       size: (["S", "M", "L"] as const)[i % 3] ?? "M",
-      updatedAt: NOW - (i + 1) * 7 * MIN,
+      // A ticket keeps its own age after the boards split by repository; otherwise each repo's
+      // first merged card reads as the same recent work.
+      updatedAt: NOW - (t.n * 7 + i) * MIN,
       createdAt: NOW - (i + 3) * 5 * HOUR,
       url: `https://github.com/octo-org/shop-app/issues/${t.n}`,
     }),

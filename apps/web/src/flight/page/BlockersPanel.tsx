@@ -64,6 +64,7 @@ export function BlockersList({ rows }: { rows: Blocker[] }) {
               className={isOpen ? "fp-brow open" : "fp-brow"}
               key={b.key}
               aria-expanded={isOpen}
+              data-work-pattern={`${b.tone}|${b.waitedMs === null ? "—" : dur(b.waitedMs)}|—`}
               onClick={() => toggle(b.key)}
             >
               <span className="fp-what">
