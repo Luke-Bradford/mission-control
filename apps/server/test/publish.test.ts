@@ -1596,6 +1596,89 @@ describe("ciExcerpt", () => {
       expect(out).toContain("[50 more failing lines in web-core not shown; inspect the CI log.]");
       expect(out.indexOf("× test/x")).toBeLessThan(out.indexOf("console first"));
     });
+
+    it("lists each failing Playwright test with up to 10 lines of its error", async () => {
+      const spec = (n: number, file: string, title: string) => [
+        L(`  ${n}) [chromium] › e2e/${file}:12:5 › ${title} ─────────────────`, "studio"),
+        L("    Error: expect(locator).toBeVisible() failed", "studio"),
+        ...Array.from({ length: 12 }, (_, i) => L(`    error detail ${n}.${i}`, "studio")),
+      ];
+      const out = await excerpt([
+        L("Running 40 tests using 2 workers", "studio"),
+        ...spec(1, "board.spec.ts", "shows the board"),
+        ...spec(2, "seats.spec.ts", "opens a seat"),
+        L("  2 failed", "studio"),
+        L("    [chromium] › e2e/board.spec.ts:12:5 › shows the board", "studio"),
+        L("  38 passed (1.2m)", "studio"),
+      ]);
+      expect(out).toContain("1) [chromium] › e2e/board.spec.ts:12:5 › shows the board");
+      expect(out).toContain("2) [chromium] › e2e/seats.spec.ts:12:5 › opens a seat");
+      expect(out).toContain("Error: expect(locator).toBeVisible() failed");
+      // the header and 10 lines of error under it, no more (the rest may show in the job's last lines)
+      const failures = out.slice(0, out.indexOf("[studio: last lines]"));
+      expect(failures).toContain("error detail 2.8");
+      expect(failures).not.toContain("error detail 2.9");
+      expect(failures).not.toContain("2 failed");
+    });
+
+    it("does not treat Playwright's final summary as a test error", async () => {
+      const out = await excerpt([
+        L("  1) [chromium] › e2e/board.spec.ts:12:5 › shows the board ─────────────────", "studio"),
+        L("    Error: expect(locator).toBeVisible() failed", "studio"),
+        L("      at e2e/board.spec.ts:14:27", "studio"),
+        L("  1 failed", "studio"),
+        L("    [chromium] › e2e/board.spec.ts:12:5 › shows the board", "studio"),
+        L("  39 passed (1.2m)", "studio"),
+      ]);
+      const failures = out.slice(0, out.indexOf("[studio: last lines]"));
+      expect(failures).toContain("Error: expect(locator).toBeVisible() failed");
+      expect(failures).toContain("at e2e/board.spec.ts:14:27");
+      expect(failures).not.toContain("1 failed");
+      expect(failures).not.toContain("\n[chromium] › e2e/board.spec.ts:12:5 › shows the board");
+      expect(failures).not.toContain("39 passed");
+    });
+
+    it("lists each failing vitest × test with the error lines under it", async () => {
+      const out = await excerpt([
+        L(" ❯ test/a.test.ts (3 tests | 2 failed) 12ms"),
+        L("   × a > adds 5ms"),
+        L("     → expected 1 to be 2 // Object.is equality"),
+        L("   ✓ a > keeps 1ms"),
+        L("   × a > subtracts 3ms"),
+        L("     → expected 3 to be 4 // Object.is equality"),
+        ...Array.from({ length: 20 }, (_, i) => L(`tail line ${i}`)),
+      ]);
+      expect(out).toContain("× a > adds 5ms\n→ expected 1 to be 2 // Object.is equality");
+      expect(out).toContain("× a > subtracts 3ms\n→ expected 3 to be 4 // Object.is equality");
+    });
+
+    it("keeps each vitest × test with its FAIL detail when the log prints both", async () => {
+      const out = await excerpt([
+        L(" ❯ test/a.test.ts (3 tests | 2 failed) 12ms"),
+        L("   × a > adds 5ms"),
+        L("     → expected 1 to be 2 // Object.is equality"),
+        L("   ✓ a > keeps 1ms"),
+        L("   × a > subtracts 3ms"),
+        L("     → expected 3 to be 4 // Object.is equality"),
+        L(" Failed Tests 2"),
+        L(" FAIL  test/a.test.ts > a > adds"),
+        L("AssertionError: expected 1 to be 2 // Object.is equality"),
+        L(" ❯ test/a.test.ts:4:15"),
+        L(" FAIL  test/a.test.ts > a > subtracts"),
+        L("AssertionError: expected 3 to be 4 // Object.is equality"),
+        L(" ❯ test/a.test.ts:8:15"),
+        L(" Test Files  1 failed (1)"),
+      ]);
+      // each test once: its × line and → error, then its FAIL block with the source line
+      expect(out).toContain(
+        "× a > adds 5ms\n→ expected 1 to be 2 // Object.is equality\nFAIL  test/a.test.ts > a > adds\nAssertionError: expected 1 to be 2 // Object.is equality\n❯ test/a.test.ts:4:15",
+      );
+      expect(out).toContain(
+        "× a > subtracts 3ms\n→ expected 3 to be 4 // Object.is equality\nFAIL  test/a.test.ts > a > subtracts",
+      );
+      expect(out.match(/× a > adds/g)).toHaveLength(1);
+      expect(out.match(/FAIL {2}test\/a\.test\.ts > a > adds/g)).toHaveLength(1);
+    });
   });
 
   it("asks for a 16 MiB log buffer", async () => {
