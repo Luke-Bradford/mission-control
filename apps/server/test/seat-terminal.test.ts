@@ -1,5 +1,13 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -57,21 +65,24 @@ const terminal = (cmux: ReturnType<typeof paneCmux>, extra = {}) =>
   createSeatTerminal({ cmux, dir: join(dir, "hub"), pollMs: 20, ...extra });
 
 describe("seat terminal", () => {
-  it("starts the final login shell without provider or hub tokens", () => {
-    const output = execFileSync("/bin/zsh", ["-fc", terminalPaneShell(undefined, "env")], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        GH_TOKEN: "github",
-        GITHUB_TOKEN: "github",
-        ANTHROPIC_API_KEY: "anthropic",
-        MC_OPERATOR_TOKEN: "operator",
-        MC_CONTROLLER_TOKEN: "controller",
-      },
-    });
-    expect(output).not.toMatch(/^(?:GH_TOKEN|GITHUB_TOKEN|ANTHROPIC_API_KEY|MC_[A-Z0-9_]+)=/m);
-    expect(output).toMatch(/^PATH=.+/m);
-  });
+  it.skipIf(!existsSync("/bin/zsh"))(
+    "starts the final login shell without provider or hub tokens",
+    () => {
+      const output = execFileSync("/bin/zsh", ["-fc", terminalPaneShell(undefined, "env")], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GH_TOKEN: "github",
+          GITHUB_TOKEN: "github",
+          ANTHROPIC_API_KEY: "anthropic",
+          MC_OPERATOR_TOKEN: "operator",
+          MC_CONTROLLER_TOKEN: "controller",
+        },
+      });
+      expect(output).not.toMatch(/^(?:GH_TOKEN|GITHUB_TOKEN|ANTHROPIC_API_KEY|MC_[A-Z0-9_]+)=/m);
+      expect(output).toMatch(/^PATH=.+/m);
+    },
+  );
 
   it.skipIf(process.platform !== "darwin" || seatbeltBlocked)(
     "enforces credentials and worktree access after shell expansion and through symlinks",
