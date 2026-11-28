@@ -4,10 +4,10 @@
  * tests). It runs as the operator, outside the seat sandbox. Each command's output and exit code
  * go to files the hub reads; the pane stays open for the operator to watch.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
   CHECK_BASH_TIMEOUT_MS,
@@ -65,6 +65,14 @@ const TERMINAL_CREDENTIAL_FOLDERS = [
 
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 
+/** A private temporary folder for pane scripts; it must never live beside hub credentials. */
+export const terminalScratchDir = (dbPath: string) =>
+  join(
+    tmpdir(),
+    "mission-control-seat-terminal",
+    createHash("sha256").update(resolve(dbPath)).digest("hex").slice(0, 16),
+  );
+
 const sandboxPath = (path: string) => {
   if (
     [...path].some(
@@ -110,6 +118,9 @@ export function terminalSandboxProfile(input: {
     "(deny process-info*)",
     '(deny mach-lookup (global-name "com.apple.securityd"))',
     '(deny mach-lookup (global-name "com.apple.securityd.xpc"))',
+    '(deny mach-lookup (global-name "com.apple.launchd"))',
+    '(deny mach-lookup (global-name "com.apple.launchd.*"))',
+    '(deny process-exec (literal "/bin/launchctl"))',
     "(deny file-write*)",
     `(allow file-write* (subpath ${sandboxPath(resolve(input.worktree))}))`,
     `(allow file-write* (subpath ${sandboxPath(resolve(input.scratch))}))`,
@@ -179,6 +190,8 @@ export function terminalCommandDecision(input: TerminalCommandInput): string | n
       return "Terminal command refused: process inspection can expose operator credentials.";
     if (executable === "security")
       return "Terminal command refused: credential-service access is not available in the terminal.";
+    if (executable === "launchctl")
+      return "Terminal command refused: session launchers are not available in the terminal.";
     if (["curl", "wget"].includes(program ?? "")) {
       const targets = args.filter((arg) =>
         /^(?:https?:\/\/|localhost(?::\d+)?(?:[/?:]|$)|127\.0\.0\.1(?::\d+)?(?:[/?:]|$)|\[::1\])/.test(
@@ -368,7 +381,8 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
       });
       let started = false;
       try {
-        await mkdir(deps.dir, { recursive: true });
+        await mkdir(deps.dir, { recursive: true, mode: 0o700 });
+        await chmod(deps.dir, 0o700);
         await writeFile(files.command, `cd ${shellQuote(worktree)} || exit 1\n${command}\n`);
         // bash, whatever the pane's shell: PIPESTATUS keeps the command's own exit code past tee
         await writeFile(

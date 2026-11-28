@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
@@ -20,6 +20,7 @@ import {
   terminalCommandDecision,
   terminalPaneShell,
   terminalSandboxProfile,
+  terminalScratchDir,
   terminalSuite,
 } from "../src/sessions/terminal.ts";
 import { Store } from "../src/store.ts";
@@ -126,6 +127,35 @@ describe("seat terminal", () => {
   );
 
   it.skipIf(process.platform !== "darwin" || seatbeltBlocked)(
+    "runs a terminal runner outside the default hub data directory",
+    () => {
+      const dataDir = join(homedir(), ".local", "share", "mission-control");
+      const scratch = terminalScratchDir(join(dataDir, "mc.sqlite"));
+      const runner = join(scratch, `seat-terminal-probe-${process.pid}.sh`);
+      mkdirSync(scratch, { recursive: true, mode: 0o700 });
+      writeFileSync(runner, "echo app-command\n", { mode: 0o700 });
+      const profile = terminalSandboxProfile({ worktree, scratch, denyRead: [] });
+      const run = (command: string) => {
+        try {
+          execFileSync("/usr/bin/sandbox-exec", ["-p", profile, "/bin/zsh", "-fc", command], {
+            cwd: worktree,
+            stdio: "ignore",
+          });
+          return 0;
+        } catch (error) {
+          return (error as { status?: number }).status;
+        }
+      };
+      try {
+        expect(run(`bash ${JSON.stringify(runner)}`)).toBe(0);
+        expect(run(`ls ${JSON.stringify(dataDir)}`)).not.toBe(0);
+      } finally {
+        rmSync(runner, { force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin" || seatbeltBlocked)(
     "keeps process credentials, the login keychain, the hub, and external hosts out of the pane",
     async () => {
       const scratch = join(dir, "hub");
@@ -190,6 +220,7 @@ describe("seat terminal", () => {
     "/bin/ps eww -ax",
     "security find-generic-password -s mission-control",
     "/usr/bin/security find-generic-password -s mission-control",
+    'launchctl submit -l mc.seat.escape -- zsh -fc \'cat "$HOME/.local/share/mission-control/operator-token" > "$PWD/stolen"\'',
     "echo secret > /tmp/operator-token",
   ])("refuses an operator credential or GitHub command: %s", (command) => {
     expect(
@@ -199,6 +230,16 @@ describe("seat terminal", () => {
         denyRead: [join(dir, "private")],
       }),
     ).toMatch(/refused/i);
+  });
+
+  it("keeps terminal runner files outside the hub data directory", () => {
+    const dataDir = join(dir, "data");
+    const dbPath = join(dataDir, "mc.sqlite");
+    const scratch = terminalScratchDir(dbPath);
+    const profile = terminalSandboxProfile({ worktree, scratch, denyRead: [dataDir] });
+    expect(scratch.startsWith(`${dataDir}/`)).toBe(false);
+    expect(profile).toContain(`(allow file-write* (subpath "${scratch}"))`);
+    expect(profile).toContain(`(deny file-read* (subpath "${dataDir}"))`);
   });
 
   it.each(["uv run pytest -m db", "make up", "pnpm exec vite"])(

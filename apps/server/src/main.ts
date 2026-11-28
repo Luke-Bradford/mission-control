@@ -172,6 +172,7 @@ import {
   type SeatTerminal,
   terminalCommandPolicy,
   terminalSandboxProfile,
+  terminalScratchDir,
   terminalSuite,
 } from "./sessions/terminal.ts";
 import { createSessionWatch } from "./sessions/watch.ts";
@@ -1101,9 +1102,10 @@ export async function main(): Promise<void> {
       set: (value) => store.setSetting(CREW_APP_STATE_SETTING, value),
     },
   });
+  const terminalDir = terminalScratchDir(dbPath);
   seatTerminal = createSeatTerminal({
     cmux,
-    dir: join(dirname(dbPath), "seat-terminal"),
+    dir: terminalDir,
     checks: checkRecorder,
     lock,
     suiteOf: ({ seatId, worktree, command }) => {
@@ -1121,7 +1123,7 @@ export async function main(): Promise<void> {
     sandboxProfile: (worktree) =>
       terminalSandboxProfile({
         worktree,
-        scratch: join(dirname(dbPath), "seat-terminal"),
+        scratch: terminalDir,
         denyRead: config.crew?.denyRead ?? [],
         denyLocalPorts: [port],
       }),
