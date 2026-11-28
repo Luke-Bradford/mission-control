@@ -2462,9 +2462,16 @@ describe("repository weekly telemetry", () => {
     );
   });
 
-  it("does not calculate Ready-to-merge from a Ready transition after the merge", () => {
+  it("uses the linked ticket's Ready transition and excludes one after merge", () => {
     const week = at("2026-10-12T00:00:00Z");
-    store.replacePullRequests("shop-app", [{ ...pr(4, week + 5 * HOUR), ticket: "shop-app#4" }], 0);
+    store.replacePullRequests(
+      "shop-app",
+      [
+        { ...pr(99, week + 5 * HOUR), ticket: "shop-app#4" },
+        { ...pr(100, week + 6 * HOUR), ticket: "shop-app#5" },
+      ],
+      0,
+    );
     store.replaceFlow(
       "shop-app",
       [
@@ -2472,17 +2479,27 @@ describe("repository weekly telemetry", () => {
           repoId: "shop-app",
           number: 4,
           size: "S",
-          startAt: week + 6 * HOUR,
+          startAt: week + HOUR,
+          doneAt: null,
+        },
+        {
+          repoId: "shop-app",
+          number: 5,
+          size: "S",
+          startAt: week + 7 * HOUR,
           doneAt: null,
         },
       ],
       [],
-      [{ repoId: "shop-app", number: 4, at: week + 6 * HOUR, column: "Ready" }],
+      [
+        { repoId: "shop-app", number: 4, at: week + HOUR, column: "Ready" },
+        { repoId: "shop-app", number: 5, at: week + 7 * HOUR, column: "Ready" },
+      ],
     );
 
     const row = tel("7d").repoWeeks?.find((value) => value.repoId === "shop-app");
     expect(row?.weeks).toContainEqual(
-      expect.objectContaining({ week: "2026-10-12", medianReadyToMergeHours: null }),
+      expect.objectContaining({ week: "2026-10-12", medianReadyToMergeHours: 4 }),
     );
   });
 

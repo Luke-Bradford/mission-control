@@ -59,58 +59,63 @@ export function RepoScoreboard({ repoWeeks }: { repoWeeks: Telemetry["repoWeeks"
       ) : repoWeeks.length === 0 ? (
         <p className="pb s muted">No repository telemetry is configured yet.</p>
       ) : (
-        <section className="pb repo-scoreboard-scroll" aria-label="Repository throughput weeks">
-          {repoWeeks.map((repo) => (
-            <section
-              className="repo-scoreboard-repo"
-              key={repo.repoId}
-              aria-label={`${repo.repoId} throughput`}
-            >
-              <header>
-                <b>{repo.repoId}</b>
-                <span>Loop baseline: {baselineLabel(repo.baseline)}</span>
-              </header>
-              {repo.weeks.length === 0 ? (
-                <p className="s muted">No weekly figures collected yet.</p>
-              ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Week</th>
-                      <th className="r">Merged</th>
-                      <th className="r">Tokens / PR</th>
-                      <th className="r">Review rounds / PR</th>
-                      <th className="r">Ready to merge</th>
-                      <th className="r">Ready, no seat</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {repo.weeks.map((week) => (
-                      <tr key={week.week}>
-                        <th scope="row">{weekLabel(week.week)}</th>
-                        <td className="r num">{week.mergedPrs}</td>
-                        <td className="r num">{tokensPerPr(week)}</td>
-                        <td className="r num">
-                          {week.reviewRoundsPerPr === null
-                            ? DASH
-                            : week.reviewRoundsPerPr.toFixed(1)}
-                        </td>
-                        <td className="r num">
-                          {week.medianReadyToMergeHours === null
-                            ? DASH
-                            : hours(week.medianReadyToMergeHours)}
-                        </td>
-                        <td className="r num">
-                          {week.noSeatWorkingHours === null ? DASH : hours(week.noSeatWorkingHours)}
-                        </td>
+        <>
+          <section className="pb repo-scoreboard-scroll" aria-label="Repository throughput weeks">
+            {repoWeeks.map((repo) => (
+              <details className="repo-scoreboard-repo" key={repo.repoId} open>
+                <summary aria-label={`${repo.repoId} throughput`}>
+                  <b>{repo.repoId}</b>
+                  <span>Loop baseline: {baselineLabel(repo.baseline)}</span>
+                </summary>
+                {repo.weeks.length === 0 ? (
+                  <p className="s muted">No weekly figures collected yet.</p>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Week</th>
+                        <th className="r">Merged</th>
+                        <th className="r">Tokens / PR</th>
+                        <th className="r">Review rounds / PR</th>
+                        <th className="r">Ready to merge</th>
+                        <th className="r">Ready, no seat</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </section>
-          ))}
-        </section>
+                    </thead>
+                    <tbody>
+                      {repo.weeks.map((week) => (
+                        <tr key={week.week}>
+                          <th scope="row">{weekLabel(week.week)}</th>
+                          <td className="r num">{week.mergedPrs}</td>
+                          <td className="r num">{tokensPerPr(week)}</td>
+                          <td className="r num">
+                            {week.reviewRoundsPerPr === null
+                              ? DASH
+                              : week.reviewRoundsPerPr.toFixed(1)}
+                          </td>
+                          <td className="r num">
+                            {week.medianReadyToMergeHours === null
+                              ? DASH
+                              : hours(week.medianReadyToMergeHours)}
+                          </td>
+                          <td className="r num">
+                            {week.noSeatWorkingHours === null
+                              ? DASH
+                              : hours(week.noSeatWorkingHours)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </details>
+            ))}
+          </section>
+          {repoWeeks.length > 1 && (
+            <p className="repo-scoreboard-cue">
+              {repoWeeks.length} repositories · scroll to compare all
+            </p>
+          )}
+        </>
       )}
     </Panel>
   );

@@ -28,7 +28,7 @@ import { WINDOWS } from "../collectors/usage-common.ts";
 import { agentIds, type CcConfig, configuredAgents, crewSeatDef } from "../config.ts";
 import { crew } from "../hud/hud.ts";
 import { clippedMs, dayFormatter, endOf, lastDays, lockLabel } from "../hud/views.ts";
-import { type PrCache, runPrs, runTicket } from "../run/view.ts";
+import { type PrCache, parseTicket, runPrs, runTicket } from "../run/view.ts";
 import { sessionSpendSplit } from "../spend/sessions.ts";
 import { runSpend } from "../spend/spend.ts";
 import type { Store } from "../store.ts";
@@ -1060,10 +1060,11 @@ export function telemetry(
         });
         const durations = merged.flatMap((pr) => {
           const mergedAt = pr.mergedAt;
-          if (mergedAt === null) return [];
+          const ticket = pr.ticket === null ? null : parseTicket(pr.ticket);
+          if (mergedAt === null || ticket?.repoId !== repo.id) return [];
           const readyAt = repoMoves.reduce<number | null>(
             (latest, move) =>
-              move.number === pr.number && move.column === "Ready" && move.at <= mergedAt
+              move.number === ticket.number && move.column === "Ready" && move.at <= mergedAt
                 ? Math.max(latest ?? move.at, move.at)
                 : latest,
             null,

@@ -222,6 +222,7 @@ describe("Telemetry, Throughput tab", () => {
     expect(scoreboard.textContent).toContain("6.5 h");
     expect(scoreboard.textContent).toContain("2 h");
     expect(scoreboard.textContent).toContain("88 PRs/wk · 1.5B tokens/wk");
+    expect(scoreboard.textContent).toContain("2 repositories · scroll to compare all");
     expect(scoreboard.textContent).toContain("No merged PRs");
     expect(scoreboard.textContent).toContain("Baseline not configured");
   });
