@@ -385,8 +385,8 @@ function WorkPattern({
       ? when
       : agent
         ? elapsed(Math.max(0, now - (agent.run?.startedAt ?? agent.stateSince)))
-        : "—";
-  const spend = agent ? cost(agent.run?.costUsd ?? null) : "—";
+        : "not started";
+  const spend = agent ? cost(agent.run?.costUsd ?? null) : "no cost recorded";
   const value = `${state}|${duration}|${spend}`;
   return (
     <span className="xs muted" data-work-pattern={value}>

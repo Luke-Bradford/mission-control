@@ -26,6 +26,6 @@ it("rejects adjacent Done cards whose raw times differ but displayed work patter
   const patterns = [...container.querySelectorAll<HTMLElement>(".kcard [data-work-pattern]")].map(
     (card) => card.dataset.workPattern ?? "",
   );
-  expect(patterns).toEqual(["Closed|today|—", "Closed|today|—"]);
+  expect(patterns).toEqual(["Closed|today|no cost recorded", "Closed|today|no cost recorded"]);
   expect(patternsDiffer(patterns)).toBe(false);
 });
