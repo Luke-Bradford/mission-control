@@ -1566,7 +1566,9 @@ describe("ciExcerpt", () => {
         L(
           `${colour("41")}${colour("1")} FAIL ${colour("22")}${colour("49")} test/a.test.ts${colour("2")} > ${colour("22")}a${colour("2")} > ${colour("22")}adds`,
         ),
-        L(`${colour("31")}${colour("1")}AssertionError${colour("22")}: expected 2 to be 3${colour("39")}`),
+        L(
+          `${colour("31")}${colour("1")}AssertionError${colour("22")}: expected 2 to be 3${colour("39")}`,
+        ),
         ...Array.from({ length: 40 }, (_, i) => L(`after ${i}`)),
       ]);
       expect(out).toContain("FAIL  test/a.test.ts > a > adds");
