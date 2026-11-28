@@ -25,10 +25,12 @@ import {
   GUARD_UNREACHABLE_TEXT,
   type GuardHookEvent,
   guardDenyOutput,
+  guardPermissionOutput,
   HOOK_DEADLINE_MS,
   HOOK_RETRY_EVERY_MS,
   HOOK_RETRY_MS,
   LOOPBACK_HOST,
+  PERMISSION_REQUEST_ID,
 } from "@mc/core";
 import { parseJson, rethrowJson } from "../json.ts";
 
@@ -68,14 +70,16 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
   if (!isObject(e)) throw new Unusable();
   const event = e.hook_event_name;
   const tool = e.tool_name;
-  const id = e.tool_use_id;
+  // a permission dialog's request names no tool call
+  const id =
+    event === "PermissionRequest" ? (e.tool_use_id ?? PERMISSION_REQUEST_ID) : e.tool_use_id;
   if (!(GUARD_HOOK_EVENTS as readonly unknown[]).includes(event)) throw new Unusable();
   if (typeof tool !== "string" || tool === "" || typeof id !== "string" || id === "") {
     throw new Unusable();
   }
   const out: Record<string, unknown> = { hook_event_name: event, tool_name: tool, tool_use_id: id };
   if (typeof e.cwd === "string") out.cwd = e.cwd;
-  if (event === "PreToolUse" || tool === "Bash") {
+  if (event === "PreToolUse" || event === "PermissionRequest" || tool === "Bash") {
     // a subagent's call carries its id: what it reads is in its context, not the seat's
     if (e.agent_id !== undefined) {
       if (typeof e.agent_id !== "string") throw new Unusable();
@@ -118,7 +122,10 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
     if (tool === "NotebookEdit" && typeof raw.notebook_path === "string")
       input.file_path = raw.notebook_path;
     out.tool_input = input;
-    if (event !== "PreToolUse" && typeof input.command === "string") {
+    if (
+      (event === "PostToolUse" || event === "PostToolUseFailure") &&
+      typeof input.command === "string"
+    ) {
       const exit =
         event === "PostToolUseFailure" && typeof e.error === "string"
           ? /^Exit code (\d+)\b/.exec(e.error)?.[1]
@@ -145,9 +152,9 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
 
 /**
  * The hub's answer, rebuilt as one of the fixed forms; null for anything else. The deny form
- * answers a PreToolUse.
+ * answers a PreToolUse; a PermissionRequest takes only its own allow or deny form.
  */
-function verdict(status: number, text: string): string | null {
+function verdict(status: number, text: string, event: GuardHookEvent): string | null {
   if (status !== 200) return null;
   let v: unknown;
   try {
@@ -157,6 +164,7 @@ function verdict(status: number, text: string): string | null {
   }
   if (!isObject(v)) return null;
   const keys = Object.keys(v);
+  if (event === "PermissionRequest") return permissionVerdict(v);
   if (keys.length === 0) return GUARD_ALLOW_OUTPUT;
   if (keys.length !== 1 || !isObject(v.hookSpecificOutput)) return null;
   const h = v.hookSpecificOutput;
@@ -172,6 +180,26 @@ function verdict(status: number, text: string): string | null {
     return null;
   }
   return guardDenyOutput(reason);
+}
+
+/** The hub's answer to a permission dialog, rebuilt: allow, or deny with a bounded reason; null otherwise. */
+function permissionVerdict(v: Record<string, unknown>): string | null {
+  const h = v.hookSpecificOutput;
+  if (Object.keys(v).length !== 1 || !isObject(h)) return null;
+  if (Object.keys(h).length !== 2 || h.hookEventName !== "PermissionRequest") return null;
+  const d = h.decision;
+  if (!isObject(d)) return null;
+  if (d.behavior === "allow" && Object.keys(d).length === 1) return guardPermissionOutput(null);
+  const message = d.message;
+  if (
+    d.behavior !== "deny" ||
+    Object.keys(d).length !== 2 ||
+    typeof message !== "string" ||
+    message === "" ||
+    message.length > MAX_REASON
+  )
+    return null;
+  return guardPermissionOutput(message);
 }
 
 async function decide(
@@ -209,7 +237,7 @@ async function decide(
       await new Promise((resolve) => setTimeout(resolve, HOOK_RETRY_EVERY_MS));
       continue;
     }
-    const out = verdict(res.status, res.body);
+    const out = verdict(res.status, res.body, event);
     return out === null ? failed : { out, exit: 0 };
   }
 }

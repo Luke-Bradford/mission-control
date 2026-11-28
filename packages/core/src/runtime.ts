@@ -106,6 +106,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.cmuxSend,
   MC_TOOL_NAMES.cmuxOpen,
   MC_TOOL_NAMES.setFlightMode,
+  MC_TOOL_NAMES.answerDialog,
   MC_TOOL_NAMES.allowDependency,
 ];
 
@@ -1083,13 +1084,15 @@ const POST_HOOK_MATCHER = "Bash";
 /**
  * The `hooks` block (spike 2026-10-21): the guard before every tool call
  * (PreToolUse, matcher `*`), after each Bash call ends (PostToolUse, PostToolUseFailure), when
- * a call that holds the test lock releases it.
+ * a call that holds the test lock releases it, and before any permission dialog opens
+ * (PermissionRequest, matcher `*`): the guard answers it, so no dialog waits on a person.
  */
 function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
   const run = { type: "command", command: hook.command, timeout: hook.timeoutS };
   const out = {} as Record<GuardHookEvent, unknown[]>;
   for (const e of GUARD_HOOK_EVENTS) {
-    out[e] = [{ matcher: e === "PreToolUse" ? "*" : POST_HOOK_MATCHER, hooks: [run] }];
+    const every = e === "PreToolUse" || e === "PermissionRequest";
+    out[e] = [{ matcher: every ? "*" : POST_HOOK_MATCHER, hooks: [run] }];
   }
   if (hook.trim !== undefined) {
     out.PostToolUse.push({
@@ -1447,7 +1450,11 @@ export type SessionEvent =
   | { kind: "init"; sessionId: string; model: string | null }
   | { kind: "turn-start" }
   /** The Claude in cmux waits on the operator: a question or a permission dialog is open. */
-  | { kind: "needs-input" }
+  | {
+      kind: "needs-input";
+      /** The open dialog as the screen shows it: its question and numbered options. */
+      dialog?: { question: string; options: string[] };
+    }
   /** A rejected request is not evidence that any executing turn has ended. */
   | { kind: "turn-refused"; active: boolean }
   | { kind: "result"; isError: boolean; stopReason: string | null }
