@@ -190,6 +190,8 @@ import {
   ledgerPointerText,
   ledgerPointerUnfedText,
   ledgerTitleText,
+  lessonDecidedText,
+  lessonMissingText,
   loopOf,
   loopPlanSizes,
   MC_FLIGHT_ONLY,
@@ -777,6 +779,11 @@ const UntrackArgs = z.strictObject({
 });
 const RememberArgs = FlightMemoryInput.extend({ basis: basisArg }).strict();
 const ForgetArgs = z.strictObject({ topic: FlightMemoryTopic, basis: basisArg });
+const DecideLessonArgs = z.strictObject({
+  id: z.number().int().positive(),
+  accept: z.boolean(),
+  basis: basisArg,
+});
 /** The screen lines `cmux_sessions` reads by default, and at most. */
 const CMUX_SCREEN_LINES = 60;
 const CMUX_SCREEN_LINES_MAX = 200;
@@ -3526,6 +3533,21 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: `Remembered ${note.topic}.` };
   }
 
+  /** Accepts or rejects a seat's proposed lesson about FLIGHT's repo; accepted ones go in every start brief. */
+  async function decideLesson(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, DecideLessonArgs, args);
+    if (!c.ok) return c.result;
+    const repo = store.run(ctx.runId)?.repoId;
+    if (!repo) return fail(MC_FLIGHT_ONLY);
+    const { id, accept, basis } = c.args;
+    if (!store.seatMemory.decideLesson(repo, id, accept, ctx.seatId, now()))
+      return fail(lessonMissingText(id));
+    bus.emit("flight");
+    const decision = lessonDecidedText(id, accept);
+    record(now(), { kind: "memory", about: `lesson ${id}`, decision, basis });
+    return { text: decision };
+  }
+
   async function forget(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, ForgetArgs, args);
     if (!c.ok) return c.result;
@@ -5165,6 +5187,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       call: remember,
     },
     {
+      name: MC_TOOL_NAMES.decideLesson,
+      description:
+        "Accept or reject a lesson a seat proposed about this repo (its id is in the seat's Comms line). An accepted lesson goes in every later start brief for the repo; accept only what holds for the repo, not one ticket. basis required.",
+      inputSchema: z.toJSONSchema(DecideLessonArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: decideLesson,
+    },
+    {
       name: MC_TOOL_NAMES.forget,
       description: FORGET_DESCRIPTION,
       inputSchema: z.toJSONSchema(ForgetArgs),
@@ -5251,6 +5282,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.remember,
     MC_TOOL_NAMES.forget,
     MC_TOOL_NAMES.recall,
+    MC_TOOL_NAMES.decideLesson,
     MC_TOOL_NAMES.cmuxSessions,
     MC_TOOL_NAMES.holdItem,
     MC_TOOL_NAMES.releaseHold,

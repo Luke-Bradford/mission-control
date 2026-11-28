@@ -96,6 +96,9 @@ import {
   inertAddedDependencies,
   isManifest,
   isProtectedPath,
+  lessonCommsText,
+  lessonProposedText,
+  lessonSecretText,
   liftPark,
   lockfileProblems,
   MC_AUDIT_ALREADY,
@@ -198,6 +201,7 @@ import {
   pushPrDoneText,
   pushReferenceText,
   pushSecretText,
+  REPO_LESSON_MAX,
   REVERT_STRAYS,
   REVIEW_CHECK_IDS,
   REVIEW_CHECK_RESULTS,
@@ -206,6 +210,9 @@ import {
   type RepoRules,
   type ReviewFinding,
   type ReviewRow,
+  RUN_NOTE_LINE_MAX,
+  RUN_NOTE_LINES_MAX,
+  RUN_NOTES_SAVED,
   type Run,
   readOnlyToolText,
   redactSecrets,
@@ -216,6 +223,7 @@ import {
   reviewedEventText,
   reviewFor,
   runawayRefusedText,
+  runNotesSecretText,
   SYNC_MAIN_GAP_MIN,
   scanSecrets,
   scanText,
@@ -405,6 +413,14 @@ const TerminalRunArgs = z.strictObject({
 });
 const PrBodyArgs = z.strictObject({ body: text(MC_PR_BODY_MAX) });
 const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
+const noteLines = z.array(z.string().trim().min(1).max(RUN_NOTE_LINE_MAX)).max(RUN_NOTE_LINES_MAX);
+const RunNotesArgs = z.strictObject({
+  done: noteLines.default([]),
+  next: z.string().trim().max(RUN_NOTE_LINE_MAX).default(""),
+  blockers: noteLines.default([]),
+  decisions: noteLines.default([]),
+});
+const ProposeLessonArgs = z.strictObject({ lesson: text(REPO_LESSON_MAX) });
 const CallArgs = z.strictObject({
   reason: text(MC_TEXT_MAX),
   ref: z.string().trim().min(1).max(120).optional(),
@@ -2746,6 +2762,71 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return { text: CALLED_FLIGHT };
   }
 
+  /** A secret in seat text the hub keeps: recorded as a guard hit, the text refused. */
+  async function secretIn(ctx: McToolContext, tool: string, text: string): Promise<string | null> {
+    const secret = scanText(tool, text, await readKnown(deps, tool))[0];
+    if (secret === undefined) return null;
+    store.addGuardHit({
+      agentId: ctx.seatId,
+      runId: ctx.runId,
+      rule: "secret",
+      text: mcToolHitText("secret", tool),
+      at: now(),
+    });
+    bus.emit("guard");
+    return secret.kind;
+  }
+
+  /** The seat's run notes, kept on its ticket so a fresh session or a later run starts from them. */
+  async function runNotes(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = RunNotesArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const live = liveRun(ctx);
+    if (live === null || live.run.ticket === null) return { text: MC_RUN_ENDED, isError: true };
+    const notes = parsed.data;
+    const all = [...notes.done, notes.next, ...notes.blockers, ...notes.decisions].join("\n");
+    const secret = await secretIn(ctx, MC_TOOL_NAMES.runNotes, all);
+    if (secret !== null) return { text: runNotesSecretText(secret), isError: true };
+    store.seatMemory.putRunNotes({
+      ...notes,
+      repoId: live.run.repoId,
+      ticket: live.run.ticket,
+      runId: ctx.runId,
+      seatId: ctx.seatId,
+      updatedAt: now(),
+    });
+    return { text: RUN_NOTES_SAVED };
+  }
+
+  /** A lesson about the seat's repo, kept as a proposal FLIGHT accepts or rejects. */
+  async function proposeLesson(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = ProposeLessonArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const live = liveRun(ctx);
+    if (live === null) return { text: MC_RUN_ENDED, isError: true };
+    const lesson = parsed.data.lesson;
+    const secret = await secretIn(ctx, MC_TOOL_NAMES.proposeLesson, lesson);
+    if (secret !== null) return { text: lessonSecretText(secret), isError: true };
+    const at = now();
+    const id = store.seatMemory.proposeLesson({
+      repoId: live.run.repoId,
+      text: lesson,
+      seatId: ctx.seatId,
+      runId: ctx.runId,
+      at,
+    });
+    store.addComms({
+      at,
+      from: ctx.seatId,
+      senderKind: "seat",
+      to: flightSeat(config)?.seat.id ?? COMMS_CAPCOM,
+      ticket: live.run.ticket ?? null,
+      text: lessonCommsText(id, lesson),
+    });
+    bus.emit("agents");
+    return { text: lessonProposedText(id) };
+  }
+
   /** The refusal the run's loop alone decides (no loop, held park, in CI), else null. */
   function loopRefusal(loop: Run["loop"]): Result | null {
     if (loop === null || loop === undefined) return { text: EVIDENCE_NO_LOOP, isError: true };
@@ -3675,6 +3756,60 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       modes: ["writer", "read-only", "scratch"],
       offeredTo: (seatId) => !isFlight(seatId) && !isAudit(seatId),
       call: callFlight,
+    },
+    {
+      name: MC_TOOL_NAMES.runNotes,
+      description:
+        "Save your run notes: what is done, what is next, blockers and decisions. Each save replaces the last. Mission Control keeps them on your ticket and adds its own events (pushes, CI results, holds); a fresh session of this ticket starts from them. Save after each commit and before you report. No secrets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          done: {
+            type: "array",
+            maxItems: RUN_NOTE_LINES_MAX,
+            items: { type: "string", minLength: 1, maxLength: RUN_NOTE_LINE_MAX },
+            description: "What is done and committed, one line each.",
+          },
+          next: { type: "string", maxLength: RUN_NOTE_LINE_MAX, description: "The next step." },
+          blockers: {
+            type: "array",
+            maxItems: RUN_NOTE_LINES_MAX,
+            items: { type: "string", minLength: 1, maxLength: RUN_NOTE_LINE_MAX },
+            description: "What stops you, one line each.",
+          },
+          decisions: {
+            type: "array",
+            maxItems: RUN_NOTE_LINES_MAX,
+            items: { type: "string", minLength: 1, maxLength: RUN_NOTE_LINE_MAX },
+            description: "Decisions made and why, one line each.",
+          },
+        },
+        additionalProperties: false,
+      },
+      modes: ["writer", "read-only"],
+      offeredTo: (seatId) => !isFlight(seatId) && !isAudit(seatId),
+      call: runNotes,
+    },
+    {
+      name: MC_TOOL_NAMES.proposeLesson,
+      description:
+        "Propose a lesson about this repo that the next seat would need: an environment fix or a gotcha, such as a tool's path or a flag that does not work. FLIGHT accepts or rejects it; once accepted, every seat on this repo reads it at start. No secrets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          lesson: {
+            type: "string",
+            minLength: 1,
+            maxLength: REPO_LESSON_MAX,
+            description: "The lesson, in one or two sentences.",
+          },
+        },
+        required: ["lesson"],
+        additionalProperties: false,
+      },
+      modes: ["writer", "read-only"],
+      offeredTo: (seatId) => !isFlight(seatId) && !isAudit(seatId),
+      call: proposeLesson,
     },
     {
       name: MC_TOOL_NAMES.reportEvidence,

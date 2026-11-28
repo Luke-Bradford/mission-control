@@ -54,6 +54,9 @@ import {
   FLIGHT_SIGNALS_SETTING,
   findingFileText,
   fixKey,
+  lessonCommsText,
+  lessonProposedText,
+  lessonSecretText,
   MC_AUDIT_ALREADY,
   MC_AUDIT_NOT_AUDIT,
   MC_BAD_ARGS,
@@ -108,12 +111,14 @@ import {
   pushChecksText,
   pushPrDoneText,
   type ReviewFinding,
+  RUN_NOTES_SAVED,
   type Run,
   type RunLoop,
   readOnlyToolText,
   removeLinkedText,
   removeMissingText,
   removeNotFileText,
+  runNotesSecretText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp, crewGuardDeps } from "../src/api.ts";
@@ -445,6 +450,8 @@ describe("the mc tools", () => {
       [MC_TOOL_NAMES.prBody, ["writer"]],
       ["ask_flight", ["writer", "read-only"]],
       ["call_flight", ["writer", "read-only", "scratch"]],
+      [MC_TOOL_NAMES.runNotes, ["writer", "read-only"]],
+      [MC_TOOL_NAMES.proposeLesson, ["writer", "read-only"]],
       ["report_evidence", ["writer", "read-only"]],
       [MC_TOOL_NAMES.previewBrowser, ["scratch"]],
       [MC_TOOL_NAMES.restoreFile, ["scratch"]],
@@ -466,6 +473,8 @@ describe("the mc tools", () => {
       MC_TOOLS.prBody,
       MC_TOOLS.askFlight,
       MC_TOOLS.callFlight,
+      MC_TOOLS.runNotes,
+      MC_TOOLS.proposeLesson,
       MC_TOOLS.reportEvidence,
       MC_TOOLS.previewBrowser,
       MC_TOOLS.restoreFile,
@@ -1625,6 +1634,8 @@ describe("through /mcp", () => {
         "pr_body",
         "ask_flight",
         "call_flight",
+        "run_notes",
+        "propose_lesson",
         "report_evidence",
       ]);
       expect(
@@ -1642,6 +1653,8 @@ describe("through /mcp", () => {
         "comms_react",
         "ask_flight",
         "call_flight",
+        "run_notes",
+        "propose_lesson",
         "report_evidence",
       ]);
       write("apps/a.ts", "a2\n");
@@ -7612,5 +7625,81 @@ describe("preview_browser", () => {
     ])
       expect((await call(args)).isError).toBe(true);
     expect(browse).not.toHaveBeenCalled();
+  });
+});
+
+describe("run_notes", () => {
+  const save = (args: unknown, ctx: McToolContext = CTX) => tool("run_notes").call(ctx, args);
+  const SECRET = `ghp_${"a1B2".repeat(9)}`;
+
+  it("keeps the seat's notes on its ticket, each save replacing the last", async () => {
+    expect(
+      await save({
+        done: ["store tables"],
+        next: "the tool",
+        blockers: [],
+        decisions: ["key by ticket"],
+      }),
+    ).toEqual({ text: RUN_NOTES_SAVED });
+    expect(await save({ done: ["store tables", "the tool"], next: "the brief" })).toEqual({
+      text: RUN_NOTES_SAVED,
+    });
+    expect(store.seatMemory.runNotes("mc", "mc#42")).toEqual({
+      repoId: "mc",
+      ticket: "mc#42",
+      runId: RUN,
+      seatId: "guido-1",
+      updatedAt: NOW,
+      done: ["store tables", "the tool"],
+      next: "the brief",
+      blockers: [],
+      decisions: [],
+    });
+  });
+
+  it("refuses notes that hold a secret, keeps nothing and records a guard hit", async () => {
+    const r = await save({ done: [`set token ${SECRET}`], next: "x" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toBe(runNotesSecretText("GitHub token"));
+    expect(store.seatMemory.runNotes("mc", "mc#42")).toBeNull();
+    expect(store.guardHits(0).map((h) => [h.agentId, h.rule])).toEqual([["guido-1", "secret"]]);
+  });
+
+  it("refuses a run that has ended", async () => {
+    store.upsertRun(run({ endedAt: NOW, status: "ok" }));
+    expect(await save({ next: "x" })).toEqual({ text: "This run has ended.", isError: true });
+  });
+});
+
+describe("propose_lesson", () => {
+  const propose = (args: unknown) => tool("propose_lesson").call(CTX, args);
+
+  it("keeps the proposal for FLIGHT and tells FLIGHT in Comms", async () => {
+    tools = make({ config: withFlight() });
+    const r = await propose({ lesson: "pnpm dev -- drops the port flags; set PORT instead." });
+    const id = 1;
+    expect(r).toEqual({ text: lessonProposedText(id) });
+    expect(store.seatMemory.lesson(id)).toMatchObject({
+      repoId: "mc",
+      seatId: "guido-1",
+      runId: RUN,
+      state: "proposed",
+      text: "pnpm dev -- drops the port flags; set PORT instead.",
+    });
+    expect(store.comms(0)).toEqual([
+      {
+        at: NOW,
+        from: "guido-1",
+        to: "flight-1",
+        ticket: "mc#42",
+        text: lessonCommsText(id, "pnpm dev -- drops the port flags; set PORT instead."),
+      },
+    ]);
+  });
+
+  it("refuses a lesson that holds a secret", async () => {
+    const r = await propose({ lesson: `use ghp_${"a1B2".repeat(9)}` });
+    expect(r).toEqual({ text: lessonSecretText("GitHub token"), isError: true });
+    expect(store.seatMemory.lesson(1)).toBeNull();
   });
 });

@@ -161,6 +161,7 @@ import {
 } from "./store/rows.ts";
 import { runQueries } from "./store/runs.ts";
 import { SCHEMA } from "./store/schema.ts";
+import { seatMemoryQueries } from "./store/seat-memory.ts";
 import { seatQueries } from "./store/seats.ts";
 import {
   type SessionSpendFile,
@@ -629,6 +630,11 @@ export class Store {
   /** The ticket plans and their sign-off (store/ticket-plans.ts). */
   get plans(): ReturnType<typeof ticketPlanQueries> {
     return ticketPlanQueries(this.db);
+  }
+
+  /** Run notes per ticket and lessons per repo (store/seat-memory.ts). */
+  get seatMemory(): ReturnType<typeof seatMemoryQueries> {
+    return seatMemoryQueries(this.db);
   }
 
   /** The spend report's and the retrospective's queries (spend/waste.ts). */

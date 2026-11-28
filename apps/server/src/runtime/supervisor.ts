@@ -70,8 +70,10 @@ import {
   doneWhenItems,
   eligibleToStart,
   errorText as errText,
+  type FreshWhy,
   flightShellBreakerWrite,
   flightShellWrite,
+  freshEventText,
   GUARD_CHECK_PATH,
   GUARD_HOOK_TIMEOUT_S,
   grantRefusedText,
@@ -121,6 +123,10 @@ import {
   retiringText,
   reviewDepth,
   reworkFirstText,
+  runNotesText,
+  SEAT_CONTEXT_ROTATE_TOKENS,
+  SEAT_FRESH_MAX,
+  SEAT_FRESH_WINDOW_MS,
   type SeatCommands,
   type SeatSessionRow,
   type SeatState,
@@ -133,6 +139,7 @@ import {
   seatBusyText,
   seatCallSign,
   seatDef,
+  seatFreshKey,
   seatInstructionBlock,
   signedOffQaPlan,
   type TicketView,
@@ -224,6 +231,7 @@ import {
   BRIEF_DECISIONS_MAX,
   CLAUDE_MD_HEADING,
   cutNoteText,
+  freshBrief,
   type RepoDocs,
   repoReferenceIndex,
   reviewBrief,
@@ -567,6 +575,8 @@ export interface SupervisorDeps {
   cliHold?: CliHold;
   /** The `claude` CLI's version, recorded on each run that starts. Default: `claude --version`, cached. */
   cliVersion?: () => Promise<string | null>;
+  /** A build seat's context past this at a turn's end gets a fresh session. Default SEAT_CONTEXT_ROTATE_TOKENS; tests lower it. */
+  seatContextRotateTokens?: number;
   /** Default RESUME_WINDOW_MS. */
   resumeWindowMs?: number;
   /** Default CLI_CHECK_TIMEOUT_MS; tests shorten it. */
@@ -1469,6 +1479,44 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       void retake(l);
       return;
     }
+    // A build seat's CLI that stopped mid-run on its own (a crash, not an end or a failed resume)
+    // carries on in a fresh session of the same run, from its run notes (#2319).
+    const resumeWindowMs = deps.resumeWindowMs ?? RESUME_WINDOW_MS;
+    if (
+      l.ending === null &&
+      l.endedBy === null &&
+      !(l.spawnedAt !== null && Date.now() - l.spawnedAt < resumeWindowMs) &&
+      freshEligible(l) &&
+      !runGone(l.run.id, seatId) &&
+      claimFresh(l.run.id, now())
+    ) {
+      fold(l);
+      transcripts.delete(l.run.transcriptPath);
+      const info = l.info;
+      const runId = l.run.id;
+      log(`${seatId}: ${freshEventText("crash")}`);
+      starting.add(seatId);
+      void (async () => {
+        try {
+          if (!(await endAndRemoveKeeper(seatId, runId))) {
+            const row = store.seatSession(seatId);
+            if (row !== null) failResume(row, "could not end the old session for a fresh one");
+            return;
+          }
+          const run = store.run(runId);
+          const ticket = run === null ? null : await freshTicket(info, run);
+          if (ticket !== null) return await relaunchFresh(info, runId, "crash", ticket);
+          // with no ticket to start from, the crashed session is resumed as at a hub restart
+          const row = store.seatSession(seatId);
+          if (row === null || runGone(runId, seatId)) return;
+          log(`${seatId}: its ticket could not be read; resuming the crashed session instead`);
+          await resumeOne(row);
+        } finally {
+          starting.delete(seatId);
+        }
+      })();
+      return;
+    }
     // The engine's end was recorded when it began (its time and status stand).
     const byEngine = l.endedBy === "engine";
     l.run = {
@@ -1695,6 +1743,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           // a run being ended is no one's to nudge; nor is one still replaying (`onAttached` says)
           if (l.ending === null && !l.attaching) {
             emit({ kind: "idle", seatId: l.info.seat.id, runId: l.run.id, resumed: false });
+            void freshAtTurnEnd(l).catch((err: unknown) =>
+              log(`${l.info.seat.id}: fresh session check failed: ${errText(err)}`),
+            );
           }
         }
         // after the result's effects, which a replay of it applies again without harm
@@ -2999,6 +3050,195 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (info) closeRunItems(info, run?.id ?? null);
     if (open) emit({ kind: "run-ended", seatId: row.seatId, runId: run.id, endedBy: "exit" });
     if (info && run !== null) void dropScratch(info, run.id, run.seq, row.worktree);
+  }
+
+  /**
+   * A build run that may continue in a fresh CLI session (#2319): a Claude writer's ticket run on
+   * its branch, in the engine's loop. Review, FLIGHT, audit, check, Codex and hand-started runs keep
+   * today's resume or end.
+   */
+  const freshEligible = (l: Live): boolean =>
+    l.run.loop != null &&
+    l.run.vendor !== "codex" &&
+    l.run.reviewId == null &&
+    l.run.branch !== null &&
+    l.run.ticket !== null &&
+    !checkRuns.has(l.run.id) &&
+    seatDef(l.info.seat).loop === "build" &&
+    modeOfSeat(l.info.seat) === "writer";
+
+  /** Records a fresh session's start; false (nothing recorded) once the run has had its hour's share. */
+  function claimFresh(runId: string, at: number): boolean {
+    const recent = parseJson<unknown>(store.getSetting(seatFreshKey(runId)), []);
+    const kept = (Array.isArray(recent) ? recent : []).filter(
+      (t): t is number => typeof t === "number" && at - t < SEAT_FRESH_WINDOW_MS,
+    );
+    if (kept.length >= SEAT_FRESH_MAX) return false;
+    store.setSetting(seatFreshKey(runId), JSON.stringify([...kept, at]));
+    return true;
+  }
+
+  /**
+   * The open findings of the PR's latest reported review, most severe first, ten at most: one line
+   * each with the file, line, summary and required fix. What a continuation or fresh session must fix.
+   */
+  function openFindingLines(repoId: string, prNumber: number | null | undefined): string[] {
+    const review = prNumber == null ? null : store.latestReportedReview(repoId, prNumber);
+    if (review === null) return [];
+    const severityRank: Record<string, number> = { Critical: 0, Important: 1 };
+    return store
+      .findingsOf(review.id)
+      .filter((finding) => finding.state === "open" && finding.resolution == null)
+      .sort(
+        (left, right) => (severityRank[left.severity] ?? 2) - (severityRank[right.severity] ?? 2),
+      )
+      .slice(0, 10)
+      .map(
+        (finding) =>
+          `Open ${finding.severity} finding at ${finding.file}:${finding.line}: ${cleanText(finding.summary, 1500)}. Required next action: ${cleanText(finding.fix, 1500)}`,
+      );
+  }
+
+  /** The ticket's run notes and the hub's events on it, as a brief shows them; null when there are none. */
+  const ticketNotes = (repoId: string, ticket: string): string | null =>
+    runNotesText(
+      store.seatMemory.runNotes(repoId, ticket),
+      store.seatMemory.ticketEvents(repoId, ticket),
+    );
+
+  /** Why the run's session should end at this turn's end, or null: its context, or a newer CLI. */
+  async function freshWhy(l: Live): Promise<FreshWhy | null> {
+    const context = store.digest(l.run.id)?.contextTokens ?? null;
+    if (context !== null && context > (deps.seatContextRotateTokens ?? SEAT_CONTEXT_ROTATE_TOKENS))
+      return "context";
+    if (!l.run.cliVersion) return null;
+    let current: string | null = null;
+    try {
+      current = await (deps.cliVersion ?? probeClaudeVersion)();
+    } catch {
+      return null;
+    }
+    return current !== null && current !== l.run.cliVersion ? "cli-version" : null;
+  }
+
+  /**
+   * At a turn's end: a build seat past the context line, or on an older CLI than the one installed,
+   * gets a fresh session once nothing else waits in its chain and it has not started a turn since.
+   */
+  async function freshAtTurnEnd(l: Live): Promise<void> {
+    if (!freshEligible(l)) return;
+    const why = await freshWhy(l);
+    if (why === null) return;
+    const seatId = l.info.seat.id;
+    // a fresh session starts from the ticket: unreadable now, the seat carries on and the next
+    // turn's end tries again
+    const ticket = await freshTicket(l.info, l.run);
+    if (ticket === null) {
+      log(`${seatId}: ${freshEventText(why)}, but its ticket could not be read; it carries on`);
+      return;
+    }
+    await enqueue(l, async () => {
+      if (live.get(seatId) !== l || l.inTurn || l.ending !== null || l.attaching) return;
+      if (!l.session.alive || stopping || runGone(l.run.id, seatId)) return;
+      if (!claimFresh(l.run.id, now())) {
+        log(
+          `${seatId}: ${freshEventText(why)}, but the run has had ${SEAT_FRESH_MAX} fresh sessions this hour; it carries on`,
+        );
+        return;
+      }
+      starting.add(seatId);
+      try {
+        await discard(l);
+        if (!(await endAndRemoveKeeper(seatId, l.run.id))) {
+          const row = store.seatSession(seatId);
+          if (row !== null) failResume(row, "could not end the old session for a fresh one");
+          return;
+        }
+        await relaunchFresh(l.info, l.run.id, why, ticket);
+      } finally {
+        starting.delete(seatId);
+      }
+    });
+  }
+
+  /** The run's ticket as GitHub has it now (its body holds the plan), or null when it cannot be read. */
+  async function freshTicket(info: SeatInfo, run: Run): Promise<TicketView | null> {
+    const issue = issueOf(run);
+    if (issue === null) return null;
+    try {
+      return await deps.fetchTicket(info.repo, issue);
+    } catch (e) {
+      log(`${info.seat.id}: could not read ${info.repo.github}#${issue}: ${errText(e)}`);
+      return null;
+    }
+  }
+
+  /**
+   * The run's next CLI session, fresh rather than resumed: same run, branch, worktree and prompt
+   * file, a new session id, and a first line built from the ticket (read by the caller), its run
+   * notes, its PR's open review findings and the repo's lessons. The old process is already gone.
+   * A failure ends the run as a failed resume does.
+   */
+  async function relaunchFresh(
+    info: SeatInfo,
+    runId: string,
+    why: FreshWhy,
+    ticket: TicketView,
+  ): Promise<void> {
+    const seatId = info.seat.id;
+    const row = store.seatSession(seatId);
+    const run = store.run(runId);
+    if (row === null || run === null || row.runId !== runId || runGone(runId, seatId)) return;
+    if (row.worktree === null || run.branch === null || run.ticket === null) {
+      failResume(row, "could not start a fresh session: no worktree or branch recorded");
+      return;
+    }
+    try {
+      const checkout = await existingCheckout(info.session.checkout, row.worktree, run.branch);
+      if (stopping || runGone(runId, seatId)) return;
+      const cliSessionId = randomUUID();
+      const next: Run = { ...run, sessionId: cliSessionId, ...(await startedOn(info)) };
+      const l = await checkedLaunch(info, next, cliSessionId, checkout, false, null, "", true);
+      // ended while it launched (the engine, the operator): the new process goes with it
+      if (runGone(runId, seatId)) {
+        await discard(l);
+        await endAndRemoveKeeper(seatId, runId);
+        return;
+      }
+      // recorded only now: a hub stop before this resumes the old session, which still exists
+      store.upsertRun(next);
+      setSeat(seatId, { cliSessionId, state: "starting", reason: null });
+      await l.session.ready;
+      if (!l.session.alive) throw new Error("the fresh CLI did not start");
+      const brief = freshBrief({
+        call: call(info),
+        here: seatDef(info.seat).here,
+        repo: info.repo.github,
+        issue: ticket.number,
+        title: ticket.title,
+        body: ticket.body,
+        bodyNote: cutNoteText(
+          ticket.body,
+          ticket.bodyTruncated,
+          ticket.bodyLength ?? ticket.body.length,
+        ),
+        branch: run.branch,
+        why,
+        findings: openFindingLines(run.repoId, run.loop?.prNumber),
+        decisions: store.answeredQuestionsOn(run.ticket, BRIEF_DECISIONS_MAX),
+        runNotes: ticketNotes(run.repoId, run.ticket),
+        lessons: store.seatMemory.acceptedLessons(run.repoId),
+      });
+      const inbox = withInbox(seatId, runId, brief);
+      await deliverFirstLine(l, inbox.text, () => markInboxRead(seatId, inbox));
+      store.addLoopEvent(`${runId}:fresh:${cliSessionId}`, runId, freshEventText(why), now());
+      log(`${seatId}: ${freshEventText(why)}`);
+    } catch (e) {
+      log(`${seatId}: could not start a fresh session: ${errText(e)}`);
+      // the hub is going down: the run stays active and the next hub resumes it
+      if (!stopping && !runGone(runId, seatId))
+        failResume(row, `could not start a fresh session: ${errText(e)}`);
+    }
   }
 
   const keepsWorktree = (run: Run): boolean => {
@@ -4316,22 +4556,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ? null
           : (() => {
               const evidence = store.evidenceNotes(priorRun.id).at(-1)?.note;
-              const review =
-                priorRun.loop?.prNumber === null || priorRun.loop?.prNumber === undefined
-                  ? null
-                  : store.latestReportedReview(info.repo.id, priorRun.loop.prNumber);
-              const severityRank: Record<string, number> = { Critical: 0, Important: 1 };
-              const findings =
-                review === null
-                  ? []
-                  : store
-                      .findingsOf(review.id)
-                      .filter((finding) => finding.state === "open" && finding.resolution == null)
-                      .sort(
-                        (left, right) =>
-                          (severityRank[left.severity] ?? 2) - (severityRank[right.severity] ?? 2),
-                      )
-                      .slice(0, 10);
+              const findings = openFindingLines(info.repo.id, priorRun.loop?.prNumber);
               const handoffReason =
                 priorRun.ticket === null
                   ? null
@@ -4358,10 +4583,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                 ...(evidence === undefined
                   ? []
                   : [`Earlier evidence: ${cleanText(evidence, 1500)}`]),
-                ...findings.map(
-                  (finding) =>
-                    `Open ${finding.severity} finding at ${finding.file}:${finding.line}: ${cleanText(finding.summary, 1500)}. Required next action: ${cleanText(finding.fix, 1500)}`,
-                ),
+                ...findings,
               ].join("\n\n");
             })();
       const run: Run = {
@@ -4560,6 +4782,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ),
           ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
           continuation,
+          ...(def.loop === "build" && !readOnly
+            ? {
+                lessons: store.seatMemory.acceptedLessons(info.repo.id),
+                // only notes an earlier run on the ticket saved: this run's own start events are no news
+                runNotes:
+                  run.ticket === null ||
+                  store.seatMemory.runNotes(info.repo.id, run.ticket) === null
+                    ? null
+                    : ticketNotes(info.repo.id, run.ticket),
+              }
+            : {}),
         });
         if (installNote) brief += `\n\n${installNote}`;
         if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
