@@ -5,7 +5,14 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { RELAY_ATTACH_STUCK_MS, clockHm, handoverKey, NEW_LOOP, type Run, type RunLoop } from "@mc/core";
+import {
+  clockHm,
+  handoverKey,
+  NEW_LOOP,
+  RELAY_ATTACH_STUCK_MS,
+  type Run,
+  type RunLoop,
+} from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { commsInboxContext } from "../src/comms/index.ts";
@@ -265,25 +272,27 @@ describe("seat states", () => {
       await first.sup.stopAll();
 
       const attach = sessionDriver.attachSession;
-      const stalled = vi.spyOn(sessionDriver, "attachSession").mockImplementation(async (...args) => {
-        const found = await attach(...args);
-        if (found.kind !== "attached") return found;
-        return {
-          ...found,
-          session: new Proxy(found.session, {
-            get(target, key) {
-              if (key === "on") {
-                return (listen: (event: { kind: string }) => void) =>
-                  target.on((event) => {
-                    if (event.kind !== "attached") listen(event);
-                  });
-              }
-              const value = Reflect.get(target, key);
-              return typeof value === "function" ? value.bind(target) : value;
-            },
-          }),
-        };
-      });
+      const stalled = vi
+        .spyOn(sessionDriver, "attachSession")
+        .mockImplementation(async (...args) => {
+          const found = await attach(...args);
+          if (found.kind !== "attached") return found;
+          return {
+            ...found,
+            session: new Proxy(found.session, {
+              get(target, key) {
+                if (key === "on") {
+                  return (listen: (event: { kind: string }) => void) =>
+                    target.on((event) => {
+                      if (event.kind !== "attached") listen(event);
+                    });
+                }
+                const value = Reflect.get(target, key);
+                return typeof value === "function" ? value.bind(target) : value;
+              },
+            }),
+          };
+        });
       const { sup } = make({ now: () => at });
       sup.start();
       await until(() => expect(sup.sessionAlive?.("guido-1")).toBe(true));
