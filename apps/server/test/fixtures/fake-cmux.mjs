@@ -67,11 +67,12 @@ const save = (s) => {
   writeFileSync(tmp, JSON.stringify(s));
   renameSync(tmp, stateAt);
 };
-// two `new-workspace` calls at once each make their own workspace and ref, as in real cmux: one at
-// a time through a lock file (given up after 5 s, so a crashed call never stops the rest)
+// Every command that writes the state back runs one at a time through a lock file (given up after
+// 5 s, so a crashed call never stops the rest): two at once never lose each other's change, and two
+// `new-workspace` calls each make their own workspace and ref, as in real cmux.
 let at = 0;
 while (args[at]?.startsWith("--")) at += args[at] === "--json" ? 1 : 2;
-if (args[at] === "new-workspace") {
+if (!READ_ONLY.has(args[at]) && !READ_ONLY.has(`${args[at]} ${args[at + 1]}`)) {
   const lock = `${stateAt}.lock`;
   for (const t0 = Date.now(); Date.now() - t0 < 5000; ) {
     try {
