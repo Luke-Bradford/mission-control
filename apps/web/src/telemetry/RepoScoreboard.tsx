@@ -10,6 +10,15 @@ function compactTokens(tokens: number): string {
   return String(Math.round(tokens));
 }
 
+function compactTokenRange(range: { min: number; max: number }): string {
+  if (range.min === range.max) return compactTokens(range.min);
+  if (range.max >= 1_000_000_000 && range.min >= 1_000_000_000)
+    return `${(range.min / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}–${(range.max / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
+  if (range.max >= 1_000_000 && range.min >= 1_000_000)
+    return `${(range.min / 1_000_000).toFixed(1).replace(/\.0$/, "")}–${(range.max / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  return `${compactTokens(range.min)}–${compactTokens(range.max)}`;
+}
+
 function hours(hours: number): string {
   return `${hours.toFixed(1).replace(/\.0$/, "")} h`;
 }
@@ -40,9 +49,14 @@ function tokensPerPr(week: RepoWeek): string {
 }
 
 function baselineLabel(baseline: NonNullable<Telemetry["repoWeeks"]>[number]["baseline"]): string {
+  const range = (
+    value: { min: number; max: number },
+    format: (number: number) => string,
+  ): string =>
+    value.min === value.max ? format(value.min) : `${format(value.min)}–${format(value.max)}`;
   return baseline === null
     ? "Baseline not configured"
-    : `${baseline.mergedPrsPerWeek} PRs/wk · ${compactTokens(baseline.tokensPerWeek)} tokens/wk`;
+    : `${range(baseline.mergedPrsPerWeek, String)} PRs/wk · ${compactTokenRange(baseline.tokensPerWeek)} tokens/wk`;
 }
 
 /** Four ISO weeks of delivery and capacity figures, compared with the configured loop baseline. */

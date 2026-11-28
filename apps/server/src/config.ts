@@ -265,7 +265,10 @@ export interface CcConfig {
     github: string;
     project: number;
     /** October loop baseline, deliberately configured rather than recomputed from current records. */
-    loopBaseline?: { mergedPrsPerWeek: number; tokensPerWeek: number };
+    loopBaseline?: {
+      mergedPrsPerWeek: { min: number; max: number };
+      tokensPerWeek: { min: number; max: number };
+    };
     statusMap: Record<string, TicketState>;
     /** Labels that mark an open issue as needing the operator; collector default is ['needs-design']. */
     needsYouLabels?: string[];
@@ -541,6 +544,14 @@ const seatCommand = z.string().superRefine((e, ctx) => {
   if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
 });
 const percent = z.number().min(0).max(100);
+const loopBaselineRange = z
+  .union([
+    z.number().nonnegative(),
+    z
+      .strictObject({ min: z.number().nonnegative(), max: z.number().nonnegative() })
+      .refine((range) => range.min <= range.max, "min must not exceed max"),
+  ])
+  .transform((value) => (typeof value === "number" ? { min: value, max: value } : value));
 const modelName = z.string().regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/");
 export const seatEffort = z.string().min(1);
 const RETIRED_MC_TOOLS: readonly unknown[] = ["code_health", "publish_preview"];
@@ -620,8 +631,8 @@ const fileSchema = z
         project: z.number().int().positive(),
         loop_baseline: z
           .strictObject({
-            merged_prs_per_week: z.number().nonnegative(),
-            tokens_per_week: z.number().nonnegative(),
+            merged_prs_per_week: loopBaselineRange,
+            tokens_per_week: loopBaselineRange,
           })
           .optional(),
         status_map: z.record(z.string(), ticketState),

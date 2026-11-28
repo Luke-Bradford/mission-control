@@ -2506,9 +2506,15 @@ describe("repository weekly telemetry", () => {
   it("separates Claude and Codex tokens per merged PR and keeps the configured loop baseline", () => {
     (
       config.repos[0] as (typeof config.repos)[number] & {
-        loopBaseline: { mergedPrsPerWeek: number; tokensPerWeek: number };
+        loopBaseline: {
+          mergedPrsPerWeek: { min: number; max: number };
+          tokensPerWeek: { min: number; max: number };
+        };
       }
-    ).loopBaseline = { mergedPrsPerWeek: 88, tokensPerWeek: 1_500_000_000 };
+    ).loopBaseline = {
+      mergedPrsPerWeek: { min: 88, max: 88 },
+      tokensPerWeek: { min: 1_500_000_000, max: 1_500_000_000 },
+    };
     const week = at("2026-10-12T00:00:00Z");
     store.replacePullRequests("shop-app", [pr(1, week + HOUR), pr(2, week + 2 * HOUR)], 0);
     store.upsertRun(
@@ -2538,7 +2544,10 @@ describe("repository weekly telemetry", () => {
     expect(rows).toContainEqual(
       expect.objectContaining({
         repoId: "shop-app",
-        baseline: { mergedPrsPerWeek: 88, tokensPerWeek: 1_500_000_000 },
+        baseline: {
+          mergedPrsPerWeek: { min: 88, max: 88 },
+          tokensPerWeek: { min: 1_500_000_000, max: 1_500_000_000 },
+        },
         weeks: expect.arrayContaining([
           expect.objectContaining({
             week: "2026-10-12",

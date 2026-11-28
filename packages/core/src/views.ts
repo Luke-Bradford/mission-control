@@ -328,7 +328,10 @@ export interface Telemetry {
   repoWeeks?: {
     repoId: RepoId;
     /** The observed loop's October weekly baseline, set in config; absent for a repo without one. */
-    baseline: { mergedPrsPerWeek: number; tokensPerWeek: number } | null;
+    baseline: {
+      mergedPrsPerWeek: { min: number; max: number };
+      tokensPerWeek: { min: number; max: number };
+    } | null;
     weeks: {
       /** ISO week's Monday, in the operator's local calendar. */
       week: string;

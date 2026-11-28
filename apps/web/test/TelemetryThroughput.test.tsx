@@ -186,7 +186,10 @@ describe("Telemetry, Throughput tab", () => {
         repoWeeks: [
           {
             repoId: "mission-control",
-            baseline: { mergedPrsPerWeek: 88, tokensPerWeek: 1_500_000_000 },
+            baseline: {
+              mergedPrsPerWeek: { min: 88, max: 88 },
+              tokensPerWeek: { min: 1_500_000_000, max: 1_500_000_000 },
+            },
             weeks: [
               {
                 week: "2026-11-02",
@@ -206,6 +209,22 @@ describe("Telemetry, Throughput tab", () => {
               },
             ],
           },
+          {
+            repoId: "autonomy-engine",
+            baseline: {
+              mergedPrsPerWeek: { min: 76, max: 100 },
+              tokensPerWeek: { min: 1_300_000_000, max: 1_700_000_000 },
+            },
+            weeks: [],
+          },
+          {
+            repoId: "eBull",
+            baseline: {
+              mergedPrsPerWeek: { min: 97, max: 161 },
+              tokensPerWeek: { min: 1_500_000_000, max: 2_000_000_000 },
+            },
+            weeks: [],
+          },
           { repoId: "unbaselined", baseline: null, weeks: [] },
         ],
       }),
@@ -222,7 +241,9 @@ describe("Telemetry, Throughput tab", () => {
     expect(scoreboard.textContent).toContain("6.5 h");
     expect(scoreboard.textContent).toContain("2 h");
     expect(scoreboard.textContent).toContain("88 PRs/wk · 1.5B tokens/wk");
-    expect(scoreboard.textContent).toContain("2 repositories · scroll to compare all");
+    expect(scoreboard.textContent).toContain("76–100 PRs/wk · 1.3–1.7B tokens/wk");
+    expect(scoreboard.textContent).toContain("97–161 PRs/wk · 1.5–2B tokens/wk");
+    expect(scoreboard.textContent).toContain("4 repositories · scroll to compare all");
     expect(scoreboard.textContent).toContain("No merged PRs");
     expect(scoreboard.textContent).toContain("Baseline not configured");
     const summary = scoreboard.querySelector(".repo-scoreboard-repo > summary") as HTMLElement;
@@ -241,7 +262,10 @@ describe("Telemetry, Throughput tab", () => {
       tel({
         repoWeeks: Array.from({ length: 12 }, (_, index) => ({
           repoId: `crew-repo-${index + 1}`,
-          baseline: { mergedPrsPerWeek: 88, tokensPerWeek: 1_500_000_000 },
+          baseline: {
+            mergedPrsPerWeek: { min: 88, max: 88 },
+            tokensPerWeek: { min: 1_500_000_000, max: 1_500_000_000 },
+          },
           weeks: [
             {
               week: "2026-11-02",
