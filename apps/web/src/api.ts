@@ -1,5 +1,10 @@
 /** fetch wrapper for the Mission Control server: same-origin, JSON both ways. */
-import { OPERATOR_BOOTSTRAP_PATH, OPERATOR_HEADER, OPERATOR_TOKEN_REQUIRED } from "@mc/core";
+import {
+  OPERATOR_BOOTSTRAP_CAPABILITY_HEADER,
+  OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_HEADER,
+  OPERATOR_TOKEN_REQUIRED,
+} from "@mc/core";
 import { demoSend, demoStream, isDemo } from "./demo/mode.ts";
 
 /**
@@ -19,12 +24,27 @@ export function openStream(path: string): StreamSource {
 let operatorToken: string | undefined;
 let operatorTokenLoad: Promise<void> | undefined;
 
+/** Takes the one-time page capability out of the URL before any other code can copy that URL. */
+function takeBootstrapCapability(): string | undefined {
+  const url = new URL(window.location.href);
+  const capability = url.searchParams.get("bootstrap");
+  if (capability === null) return undefined;
+  url.searchParams.delete("bootstrap");
+  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  return capability;
+}
+
 /** Share the page-load bootstrap with early writes; an unavailable bootstrap is harmless. */
 export function loadOperatorToken(): Promise<void> {
   if (isDemo()) return Promise.resolve();
   if (operatorTokenLoad) return operatorTokenLoad;
   if (operatorToken !== undefined) return Promise.resolve();
-  operatorTokenLoad = request<{ token?: unknown } | null>(OPERATOR_BOOTSTRAP_PATH, {})
+  const capability = takeBootstrapCapability();
+  operatorTokenLoad = request<{ token?: unknown } | null>(OPERATOR_BOOTSTRAP_PATH, {
+    ...(capability === undefined
+      ? {}
+      : { headers: { [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: capability } }),
+  })
     .then((body) => {
       if (typeof body?.token === "string") operatorToken = body.token;
     })
