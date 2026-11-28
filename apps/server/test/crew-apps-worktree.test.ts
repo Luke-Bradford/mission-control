@@ -32,7 +32,18 @@ beforeEach(() => {
   const repo = join(dir, "repo");
   mkdirSync(repo);
   git(repo, "init", "-q", "-b", "main");
-  git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "c");
+  git(
+    repo,
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=t",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "c",
+  );
   worktree = join(dir, "worktree");
   git(repo, "worktree", "add", "-q", "-b", "seat", worktree);
 });

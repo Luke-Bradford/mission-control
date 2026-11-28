@@ -188,7 +188,10 @@ describe("Sessions page", () => {
     render(<Sessions />);
     await settled(fetch, APPS_PATH);
     for (const { url, word } of endpoints) {
-      const link = screen.getByRole("link", { name: url.replace("http://", ""), description: word });
+      const link = screen.getByRole("link", {
+        name: url.replace("http://", ""),
+        description: word,
+      });
       link.focus();
       expect(document.activeElement).toBe(link);
       expect(link.getAttribute("href")).toBe(url);
