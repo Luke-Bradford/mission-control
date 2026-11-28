@@ -163,7 +163,7 @@ describe("collectFlow issues", () => {
     );
     expect(t.repoWeeks?.[0]?.weeks).toContainEqual(
       expect.objectContaining({
-        week: "2026-10-11",
+        week: "2026-10-15",
         medianReadyToMergeHours: 4,
         noSeatWorkingHours: 4,
       }),
