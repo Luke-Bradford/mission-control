@@ -392,6 +392,8 @@ const ERROR_LINE = /AssertionError|\b\w*Error:/;
 const CHECK_ERROR = /\berror TS\d+|^\d+:\d+\s+error\s/;
 /** A failed assertion's line vitest prints before its Failed Tests section. */
 const CROSS_LINE = /^[×✗✕]\s/;
+/** The time vitest prints after a `×` line's test name. */
+const DURATION_TAIL = /\s+\d+(?:\.\d+)?m?s$/;
 /** The error message vitest prints under a `×` line. */
 const ARROW_LINE = /^→\s/;
 /** A failing test as Playwright's list reporter numbers it: `1) [chromium] › e2e/a.spec.ts:12:5 › title`. */
@@ -427,6 +429,8 @@ type JobLines = {
   entries: string[][];
   /** `×` lines (each with the `→` lines under it) and Biome headers, in log order. */
   marks: string[][];
+  /** Each `×` unit by its test's name, `a > adds` of `× a > adds 5ms`. */
+  crosses: Map<string, string[]>;
   /** Bare errors and console output. */
   noise: string[];
   rest: string[];
@@ -453,7 +457,8 @@ const omittedText = (n: number, job: string): string =>
 
 /**
  * The part of a failed run's log a seat is shown, at most `max` bytes. Ranked across every job:
- * first each job's first failure (a FAIL name with the error lines under it, or a type error), then
+ * first each job's first failure (a FAIL name with the error lines under it, led by the same test's
+ * `×` line and its `→` lines when the log printed them, or a type error), then
  * the rest of the failures, jobs taking turns; then (only for a job without a FAIL line) its `×`
  * lines and Biome diagnostics; then bare errors and console output; then each job's last lines. A
  * job's lines keep their log order under its `[job]` label. Failing lines left out are counted in
@@ -497,6 +502,7 @@ export function ciLogBody(log: string, max: number): string {
     const g = jobs.get(job) ?? {
       entries: [],
       marks: [],
+      crosses: new Map(),
       noise: [],
       rest: [],
       fails: 0,
@@ -577,6 +583,8 @@ export function ciLogBody(log: string, max: number): string {
           if (CROSS_LINE.test(text)) {
             mark = unit;
             markLeft = TEST_ERROR_LINES;
+            const name = text.replace(CROSS_LINE, "").replace(DURATION_TAIL, "").trim();
+            if (!g.crosses.has(name)) g.crosses.set(name, unit);
           }
         }
       } else if (stream || ERROR_LINE.test(text)) addOnce(g.noise, line);
@@ -597,11 +605,25 @@ export function ciLogBody(log: string, max: number): string {
         }
         return out;
       };
+      // a FAIL block takes its test's `×` unit ahead of it, so the test is told once with both
+      const merged = g.entries.map((e) => {
+        const head = e[0] ?? "";
+        if (!FAIL_LINE.test(head)) return e;
+        const parts = head.replace(FAIL_LINE, "").trim().split(" > ");
+        for (let i = 0; i < parts.length; i++) {
+          const name = parts.slice(i).join(" > ");
+          const cross = g.crosses.get(name);
+          if (cross === undefined) continue;
+          g.crosses.delete(name);
+          return [...cross, ...e];
+        }
+        return e;
+      });
       const allMarks = g.fails > 0 ? [] : g.marks;
       const marks = capped(allMarks);
-      const entries = capped(g.entries);
+      const entries = capped(merged);
       const dropped =
-        g.entries.flat().length -
+        merged.flat().length -
         entries.flat().length +
         (allMarks.flat().length - marks.flat().length);
       const failing = g.entries.length + marks.length > 0;

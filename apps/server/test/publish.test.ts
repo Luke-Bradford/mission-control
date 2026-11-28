@@ -1634,6 +1634,34 @@ describe("ciExcerpt", () => {
       expect(out).toContain("× a > adds 5ms\n→ expected 1 to be 2 // Object.is equality");
       expect(out).toContain("× a > subtracts 3ms\n→ expected 3 to be 4 // Object.is equality");
     });
+
+    it("keeps each vitest × test with its FAIL detail when the log prints both", async () => {
+      const out = await excerpt([
+        L(" ❯ test/a.test.ts (3 tests | 2 failed) 12ms"),
+        L("   × a > adds 5ms"),
+        L("     → expected 1 to be 2 // Object.is equality"),
+        L("   ✓ a > keeps 1ms"),
+        L("   × a > subtracts 3ms"),
+        L("     → expected 3 to be 4 // Object.is equality"),
+        L(" Failed Tests 2"),
+        L(" FAIL  test/a.test.ts > a > adds"),
+        L("AssertionError: expected 1 to be 2 // Object.is equality"),
+        L(" ❯ test/a.test.ts:4:15"),
+        L(" FAIL  test/a.test.ts > a > subtracts"),
+        L("AssertionError: expected 3 to be 4 // Object.is equality"),
+        L(" ❯ test/a.test.ts:8:15"),
+        L(" Test Files  1 failed (1)"),
+      ]);
+      // each test once: its × line and → error, then its FAIL block with the source line
+      expect(out).toContain(
+        "× a > adds 5ms\n→ expected 1 to be 2 // Object.is equality\nFAIL  test/a.test.ts > a > adds\nAssertionError: expected 1 to be 2 // Object.is equality\n❯ test/a.test.ts:4:15",
+      );
+      expect(out).toContain(
+        "× a > subtracts 3ms\n→ expected 3 to be 4 // Object.is equality\nFAIL  test/a.test.ts > a > subtracts",
+      );
+      expect(out.match(/× a > adds/g)).toHaveLength(1);
+      expect(out.match(/FAIL {2}test\/a\.test\.ts > a > adds/g)).toHaveLength(1);
+    });
   });
 
   it("asks for a 16 MiB log buffer", async () => {
