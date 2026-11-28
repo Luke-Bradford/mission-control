@@ -4244,7 +4244,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             req.headers["sec-fetch-site"] !== "same-origin" ||
             req.headers[HUD_RENDERER_HEADER] !== undefined ||
             deps.seatPeer?.(req.socket.remotePort) === true ||
-            deps.bootstrapPeer?.(req.socket.remotePort) === false
+            deps.bootstrapPeer?.(req.socket.remotePort) !== true
           ) {
             return reply.code(403).send({ error: BOOTSTRAP_REFUSED });
           }

@@ -7,8 +7,18 @@ const defaultRun: RunTool = (cmd, args) =>
   execFileSync(cmd, args, { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] });
 
 const MAX_DEPTH = 16;
-const BROWSER_PROCESS =
-  /(?:^|\s)(?:Google Chrome(?: Helper(?: \([^)]*\))?)?|Chromium(?: Helper(?: \([^)]*\))?)?|Safari(?:Networking)?|Firefox|firefox|Arc|Brave Browser|Microsoft Edge)(?:\s|$)/;
+const BROWSER_IDENTIFIERS = [
+  "com.google.Chrome",
+  "com.google.Chrome.helper",
+  "org.chromium.Chromium",
+  "org.chromium.Chromium.helper",
+  "com.apple.Safari",
+  "com.apple.Safari.Networking",
+  "org.mozilla.firefox",
+  "company.thebrowser.Browser",
+  "com.brave.Browser",
+  "com.microsoft.edgemac",
+] as const;
 
 /** The pid at the client end of a loopback connection that came from `clientPort`. */
 function clientPid(clientPort: number, run: RunTool): number | null {
@@ -20,6 +30,36 @@ function clientPid(clientPort: number, run: RunTool): number | null {
     else if (line.startsWith("n") && new RegExp(`:${clientPort}->`).test(line)) return pid;
   }
   return null;
+}
+
+/** The executable mapped into a process, as reported by lsof rather than its arguments or environment. */
+function executablePath(pid: number, run: RunTool): string | null {
+  const out = run("lsof", ["-nP", "-a", "-p", String(pid), "-d", "txt", "-Fn"]);
+  let textFile = false;
+  for (const line of out.split("\n")) {
+    if (line.startsWith("f")) textFile = line === "ftxt";
+    else if (textFile && line.startsWith("n") && line.length > 1) return line.slice(1);
+  }
+  return null;
+}
+
+/** Whether macOS verifies `executable` as an Apple-trusted browser app or helper. */
+function isSignedBrowserExecutable(executable: string, run: RunTool): boolean {
+  return BROWSER_IDENTIFIERS.some((identifier) => {
+    try {
+      run("codesign", [
+        "--verify",
+        "--deep",
+        "--strict",
+        "-R",
+        `anchor apple generic and identifier "${identifier}"`,
+        executable,
+      ]);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -50,23 +90,18 @@ export function peerIsSeat(clientPort: number | undefined, run: RunTool = defaul
 }
 
 /**
- * Whether the local process behind a loopback connection is the operator's browser or one of its
- * helpers. Docker forwards container requests through its own proxy, which does not match here.
- * A caller that cannot be identified is not a browser: doubt refuses the operator token.
+ * Whether the local process behind a loopback connection is a browser or browser helper. Its
+ * executable must have a trusted macOS signature and browser identifier; arguments and environment
+ * text are caller-controlled. Docker forwards container requests through its own proxy, which does
+ * not match here. A caller that cannot be identified is not a browser: doubt refuses the token.
  */
 export function peerIsBrowser(clientPort: number | undefined, run: RunTool = defaultRun): boolean {
   if (clientPort === undefined) return false;
   try {
-    let pid = clientPid(clientPort, run);
+    const pid = clientPid(clientPort, run);
     if (pid === null) return false;
-    for (let depth = 0; depth < MAX_DEPTH && pid > 1; depth++) {
-      if (BROWSER_PROCESS.test(run("ps", ["-E", "-ww", "-o", "command=", "-p", String(pid)])))
-        return true;
-      const parent = Number.parseInt(run("ps", ["-o", "ppid=", "-p", String(pid)]).trim(), 10);
-      if (!Number.isFinite(parent)) return false;
-      pid = parent;
-    }
-    return false;
+    const executable = executablePath(pid, run);
+    return executable !== null && isSignedBrowserExecutable(executable, run);
   } catch {
     return false;
   }

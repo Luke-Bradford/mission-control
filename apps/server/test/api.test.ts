@@ -9864,6 +9864,7 @@ describe("operator token", () => {
       supervisor: stubSupervisor(),
       updater: stubUpdater(),
       operatorToken: "tok-1",
+      bootstrapPeer: () => true,
     });
     await guarded.ready();
   });
@@ -10392,6 +10393,7 @@ describe("operator token", () => {
       store,
       bus,
       operatorToken: "tok-1",
+      bootstrapPeer: () => true,
       seatPeer: (port) => {
         ports.push(port);
         return seat;
@@ -10423,6 +10425,20 @@ describe("operator token", () => {
       operatorToken: "tok-1",
       bootstrapPeer: () => false,
     });
+    const response = await app.inject({
+      method: "GET",
+      url: OPERATOR_BOOTSTRAP_PATH,
+      headers: { "sec-fetch-site": "same-origin" },
+      remoteAddress: "127.0.0.1",
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: BOOTSTRAP_REFUSED });
+    expect(response.body).not.toContain("tok-1");
+    await app.close();
+  });
+
+  it("refuses the token when no browser verifier is configured", async () => {
+    const app = buildApp({ config, store, bus, operatorToken: "tok-1" });
     const response = await app.inject({
       method: "GET",
       url: OPERATOR_BOOTSTRAP_PATH,
