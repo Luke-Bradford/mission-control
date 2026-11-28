@@ -165,6 +165,13 @@ describe("Needs you holds only FLIGHT's questions to the operator (#2285)", () =
     expect(all().map((i) => i.key)).toContain("esc:repo#2");
   });
 
+  it("settles an item on a closed ticket even when the ticket closed before it was raised", () => {
+    // the card's last update is before the escalation was opened
+    store.replaceBoard("repo", [{ ...card(9, true), updatedAt: NOW - 2 * DAY }]);
+    store.replaceEscalations("repo", [escalation(9, NOW - DAY)]);
+    expect(all().some((i) => i.key === "esc:repo#9")).toBe(false);
+  });
+
   it("keeps an item under a hold however old: a hold is a decision to wait", () => {
     store.replaceEscalations("repo", [escalation(8, NOW - 20 * DAY)]);
     holdItem(store, "esc:repo#8", "Wait for the vendor", { kind: "manual" }, "operator", NOW - DAY);

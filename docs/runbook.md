@@ -603,7 +603,7 @@ What each seat's process starts with:
   answer it for the operator. Only FLIGHT's complete brief makes it an operator question.
   Old hub-written Comms briefs remain in history but are ignored by the attention projection.
   When FLIGHT is down, waiting crew messages count under the one not-triaging item on FLIGHT's
-  queue. Any item 14 days old, or whose ticket has closed since it was raised, settles and leaves
+  queue. Any item 14 days old, or whose ticket is closed, settles and leaves
   (#2285).
   Protected operator approvals, account and budget holds, and the runaway alert keep their own rules.
 

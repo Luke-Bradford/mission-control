@@ -1837,8 +1837,7 @@ const LIVE_KINDS: readonly AttentionItem["kind"][] = ["stalled", "error", "lock"
 
 /**
  * Whether an item is past acting on (#2285): raised 14 days ago or more, or about a ticket the
- * board has seen closed since it was raised (one raised after the close, such as a worktree to
- * remove by hand, is still work). A hub alert or a live state is never stale.
+ * board has seen closed, whenever it closed. A hub alert or a live state is never stale.
  */
 function staleItem(
   item: OwnedItem,
@@ -1854,7 +1853,7 @@ function staleItem(
   if (since > 0 && now - since >= STALE_ITEM_MS) return true;
   const ref = item.ticket === null ? null : parseTicket(item.ticket);
   const card = ref === null ? null : store.boardItem(ref.repoId, ref.number);
-  return card?.closed === true && card.updatedAt >= item.at;
+  return card?.closed === true;
 }
 
 /**
