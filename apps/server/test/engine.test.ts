@@ -1740,7 +1740,7 @@ describe("CI and review", () => {
     clock += 1000;
     setPr(failing);
     await h.engine.reconcileRun(RUN);
-    expect(loopTexts()).toContain("CI failed on aaaaaaa (failing: check)");
+    expect(loopTexts()).toContain("CI failed on aaaaaaa (failing: check; every check decides)");
   });
 
   it("a first CI failure is re-run once, without a word to the seat", async () => {

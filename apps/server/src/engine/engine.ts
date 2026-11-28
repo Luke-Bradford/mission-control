@@ -172,6 +172,7 @@ import {
   ownsHubFiles,
   seatUnavailable,
 } from "../config.ts";
+import { ciDecidedByText, ciDeciders } from "../collectors/github.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
@@ -1127,7 +1128,8 @@ export function createEngine(deps: EngineDeps): Engine {
     const evidence = store.latestEvidence(run.id);
     const pr = findPr(run, loop);
     const repo = config.repos.find((r) => r.id === run.repoId);
-    const verdict = ciVerdict(pr?.checks ?? [], repo?.requiredChecks ?? []);
+    const deciders = repo === undefined ? null : ciDeciders(store, repo);
+    const verdict = ciVerdict(pr?.checks ?? [], deciders?.names ?? []);
     const item = store.boardItem(run.repoId, issue) ?? undefined;
     const pushed = store.runPush(run.id);
     const turnEnded = row?.lastTurnEndedAt ?? null;
@@ -1218,6 +1220,7 @@ export function createEngine(deps: EngineDeps): Engine {
                 failing: verdict.failing,
                 pending: verdict.pending,
                 missing: verdict.missing,
+                ...(deciders === null ? {} : { decidedBy: ciDecidedByText(deciders) }),
                 startedAt: Object.fromEntries(
                   (pr.checks ?? []).flatMap((c) =>
                     c.state === "pending" && c.startedAt !== undefined
@@ -3976,7 +3979,10 @@ export function createEngine(deps: EngineDeps): Engine {
         if (head === null) return not("the ruled commit is no longer its open PR's head");
         if (head !== sha) {
           const repo = config.repos.find((r) => r.id === run.repoId);
-          const verdict = ciVerdict(pr.checks ?? [], repo?.requiredChecks ?? []);
+          const verdict = ciVerdict(
+            pr.checks ?? [],
+            repo === undefined ? [] : ciDeciders(store, repo).names,
+          );
           const short = head.slice(0, 7);
           const checks = (pr.checks ?? []).filter(
             (check) => check.name !== REVIEW_STATUS_CONTEXT && !check.skipped,
@@ -4056,7 +4062,10 @@ export function createEngine(deps: EngineDeps): Engine {
           const checks = (pr.checks ?? []).filter(
             (check) => check.name !== REVIEW_STATUS_CONTEXT && !check.skipped,
           );
-          const verdict = ciVerdict(pr.checks ?? [], repo?.requiredChecks ?? []);
+          const verdict = ciVerdict(
+            pr.checks ?? [],
+            repo === undefined ? [] : ciDeciders(store, repo).names,
+          );
           const failingNow =
             pr.ci === "failing" ||
             verdict.ci === "failing" ||
