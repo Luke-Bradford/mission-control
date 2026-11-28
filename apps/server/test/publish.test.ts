@@ -1556,6 +1556,41 @@ describe("ciExcerpt", () => {
       expect(body(61)).not.toContain("❯ test/a.test.ts:12:5");
     });
 
+    it("names the failing test and its error when the log keeps vitest's colour codes", async () => {
+      // GitHub's failed-job log writes the escape byte as the two characters `^[`
+      const colour = (codes: string) => `^[[${codes}m`;
+      const out = await excerpt([
+        L(`${colour("31")}×${colour("39")} a > adds ${colour("2")}5ms${colour("22")}`),
+        L(`  ${colour("31")}→ expected 2 to be 3${colour("39")}`),
+        ...Array.from({ length: 5 }, (_, i) => L(`unrelated output ${i}`)),
+        L(
+          `${colour("41")}${colour("1")} FAIL ${colour("22")}${colour("49")} test/a.test.ts${colour("2")} > ${colour("22")}a${colour("2")} > ${colour("22")}adds`,
+        ),
+        L(
+          `${colour("31")}${colour("1")}AssertionError${colour("22")}: expected 2 to be 3${colour("39")}`,
+        ),
+        ...Array.from({ length: 40 }, (_, i) => L(`after ${i}`)),
+      ]);
+      expect(out).toContain("FAIL  test/a.test.ts > a > adds");
+      expect(out).toContain("× a > adds 5ms");
+      expect(out).toContain("AssertionError: expected 2 to be 3");
+      expect(out).not.toContain("^[");
+    });
+
+    it("finds a FAIL line behind real escape bytes, without cleanLog first", () => {
+      const esc = String.fromCharCode(27);
+      const out = ciLogBody(
+        [
+          L(`${esc}[41m${esc}[1m FAIL ${esc}[22m${esc}[49m test/a.test.ts > t`),
+          L(`${esc}[31mAssertionError: boom${esc}[39m`),
+          ...Array.from({ length: 40 }, (_, i) => L(`after ${i}`)),
+        ].join("\n"),
+        CI_EXCERPT_MAX,
+      );
+      expect(out).toContain("FAIL  test/a.test.ts > t");
+      expect(out).toContain("AssertionError: boom");
+    });
+
     it("prints a FAIL name once and does not attach a later error to it", async () => {
       const out = await excerpt([
         L(" FAIL  a.test.ts > t"),
