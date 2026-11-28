@@ -311,16 +311,6 @@
   grid-template-rows: repeat(2, minmax(0, 1fr));
 }
 
-/* Repository weeks answer whether each crew repo improves on its observed loop baseline. */
-.tabpanel .grid[data-view="charts"][data-n="5"] {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: auto repeat(2, minmax(0, 1fr));
-}
-
-.tabpanel .grid[data-view="charts"][data-n="5"] > .repo-scoreboard {
-  grid-column: 1 / -1;
-}
-
 .tabpanel .grid[data-view="table"][data-n="2"] {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(240px, 1fr);

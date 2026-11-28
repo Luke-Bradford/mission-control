@@ -209,6 +209,7 @@ describe("Telemetry, Throughput tab", () => {
           { repoId: "unbaselined", baseline: null, weeks: [] },
         ],
       }),
+      "?tab=throughput&view=table",
     );
     const scoreboard = panel("tRepoScoreboard");
     expect(scoreboard.textContent).toContain("Repository throughput");

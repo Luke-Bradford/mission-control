@@ -603,8 +603,7 @@ export function ThroughputCharts({
   dim: boolean;
 }) {
   return (
-    <div className={`grid${dim ? " dim" : ""}`} data-view="charts" data-n="5">
-      <RepoScoreboard repoWeeks={t?.repoWeeks} />
+    <div className={`grid${dim ? " dim" : ""}`} data-view="charts" data-n="4">
       <MergedPerDay t={t} wait={wait} />
       <CycleDots t={t} wait={wait} now={now} />
       <CycleBySize t={t} wait={wait} />
