@@ -290,11 +290,7 @@ describe("seat terminal", () => {
     });
     expect(cmux.closePane).toHaveBeenCalledWith("surface:1");
     expect(cmux.newPane).toHaveBeenCalledTimes(2);
-    expect(cmux.newPane).toHaveBeenLastCalledWith(
-      "ws-eb",
-      nextWorktree,
-      expect.any(String),
-    );
+    expect(cmux.newPane).toHaveBeenLastCalledWith("ws-eb", nextWorktree, expect.any(String));
     expect(cmux.typed.map((entry) => entry.surface)).toEqual(["surface:1", "surface:2"]);
   });
 
