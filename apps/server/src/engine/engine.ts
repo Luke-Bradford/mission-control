@@ -745,14 +745,14 @@ export function createEngine(deps: EngineDeps): Engine {
       (row.lastTurnStartedAt ?? 0) >= failedAt
     )
       return;
-    const put = await (supervisor.recoverRelay?.(run.agentId, run.id, failedAt) ?? null).catch(
-      (e: unknown) => {
-        log(
-          `${run.id}: could not recover the CI line: ${e instanceof Error ? e.message : String(e)}`,
-        );
-        return null;
-      },
-    );
+    let put: RelayRecovery | null = null;
+    try {
+      put = (await supervisor.recoverRelay?.(run.agentId, run.id, failedAt)) ?? null;
+    } catch (e) {
+      log(
+        `${run.id}: could not recover the CI line: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
     if (put !== null)
       store.addLoopEvent(
         `${run.id}:relay-${put}:${sha}`,
