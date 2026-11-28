@@ -1,4 +1,9 @@
-import { OPERATOR_BOOTSTRAP_PATH, OPERATOR_HEADER, OPERATOR_TOKEN_REQUIRED } from "@mc/core";
+import {
+  OPERATOR_BOOTSTRAP_CAPABILITY_HEADER,
+  OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_HEADER,
+  OPERATOR_TOKEN_REQUIRED,
+} from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
@@ -129,6 +134,26 @@ describe("api", () => {
     expect(new Headers(calls[0]?.[1].headers).has(OPERATOR_HEADER)).toBe(false);
     expect(new Headers(calls[1]?.[1].headers).get(OPERATOR_HEADER)).toBe("boot-token");
     expect(new Headers(calls[2]?.[1].headers).has(OPERATOR_HEADER)).toBe(false);
+  });
+
+  it("forwards the page bootstrap capability then removes it from the address", async () => {
+    window.history.replaceState(null, "", "/setup?keep=value&bootstrap=page-capability&bootstrap=old#top");
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const fetchMock = vi.fn(async () => json(200, { token: "boot-token" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadOperatorToken();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      OPERATOR_BOOTSTRAP_PATH,
+      expect.objectContaining({
+        headers: { [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: "page-capability" },
+      }),
+    );
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "/setup?keep=value#top");
+    expect(window.location.pathname + window.location.search + window.location.hash).toBe(
+      "/setup?keep=value#top",
+    );
   });
 
   it("shares an in-flight bootstrap and holds every early POST until it completes", async () => {
