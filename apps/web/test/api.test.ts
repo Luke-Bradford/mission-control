@@ -192,6 +192,25 @@ describe("api", () => {
     );
   });
 
+  it("exchanges a fresh page capability instead of retaining an old hub token", async () => {
+    localStorage.setItem("mission-control:operator-token", "old-hub-token");
+    window.history.replaceState(null, "", "/?bootstrap=fresh-capability");
+    const fetchMock = vi.fn(async () => json(200, { token: "fresh-hub-token" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadOperatorToken();
+
+    expect(window.location.search).toBe("");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      OPERATOR_BOOTSTRAP_PATH,
+      expect.objectContaining({
+        headers: { [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: "fresh-capability" },
+      }),
+    );
+    expect(localStorage.getItem("mission-control:operator-token")).toBe("fresh-hub-token");
+  });
+
   it("shares an in-flight bootstrap and holds every early POST until it completes", async () => {
     let resolveBootstrap!: (response: Response) => void;
     const bootstrap = new Promise<Response>((resolve) => {

@@ -60,9 +60,11 @@ function takeBootstrapCapability(): string | undefined {
 export function loadOperatorToken(): Promise<void> {
   if (isDemo()) return Promise.resolve();
   if (operatorTokenLoad) return operatorTokenLoad;
-  operatorToken ??= storedOperatorToken();
-  if (operatorToken !== undefined) return Promise.resolve();
   const capability = takeBootstrapCapability();
+  if (capability === undefined) {
+    operatorToken ??= storedOperatorToken();
+    if (operatorToken !== undefined) return Promise.resolve();
+  }
   operatorTokenLoad = request<{ token?: unknown } | null>(OPERATOR_BOOTSTRAP_PATH, {
     ...(capability === undefined
       ? {}
