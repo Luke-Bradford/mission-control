@@ -848,7 +848,9 @@ describe("commit", () => {
       );
       const r = await commit("feat: add hyparquet");
       expect(r.isError).toBe(true);
-      expect(r.text).toContain("pnpm-lock.yaml adds packages hyparquet@1.33.2 with an unsafe resolution");
+      expect(r.text).toContain(
+        "pnpm-lock.yaml adds packages hyparquet@1.33.2 with an unsafe resolution",
+      );
     });
 
     it("still refuses a file the allowance does not name, and another run's allowance", async () => {

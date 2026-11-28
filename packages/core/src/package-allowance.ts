@@ -61,7 +61,8 @@ function same(a: unknown, b: unknown): boolean {
   if (isObject(a) && isObject(b)) {
     const ka = Object.keys(a);
     return (
-      ka.length === Object.keys(b).length && ka.every((k) => Object.hasOwn(b, k) && same(a[k], b[k]))
+      ka.length === Object.keys(b).length &&
+      ka.every((k) => Object.hasOwn(b, k) && same(a[k], b[k]))
     );
   }
   return false;
