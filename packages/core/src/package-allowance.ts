@@ -182,11 +182,7 @@ export function lockfileProblems(
     if (v !== version && !v.startsWith(`${version}(`)) return v;
     if (isObject(value)) {
       const specifier = value.specifier;
-      if (
-        specifier !== version &&
-        specifier !== `^${version}` &&
-        specifier !== `~${version}`
-      ) {
+      if (specifier !== version && specifier !== `^${version}` && specifier !== `~${version}`) {
         return String(specifier);
       }
     }
