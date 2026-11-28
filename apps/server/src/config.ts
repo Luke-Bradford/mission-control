@@ -265,6 +265,11 @@ export interface CcConfig {
     id: RepoId;
     github: string;
     project: number;
+    /** October loop baseline, deliberately configured rather than recomputed from current records. */
+    loopBaseline?: {
+      mergedPrsPerWeek: { min: number; max: number };
+      tokensPerWeek: { min: number; max: number };
+    };
     statusMap: Record<string, TicketState>;
     /** Labels that mark an open issue as needing the operator; collector default is ['needs-design']. */
     needsYouLabels?: string[];
@@ -542,6 +547,14 @@ const seatCommand = z.string().superRefine((e, ctx) => {
   if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
 });
 const percent = z.number().min(0).max(100);
+const loopBaselineRange = z
+  .union([
+    z.number().nonnegative(),
+    z
+      .strictObject({ min: z.number().nonnegative(), max: z.number().nonnegative() })
+      .refine((range) => range.min <= range.max, "min must not exceed max"),
+  ])
+  .transform((value) => (typeof value === "number" ? { min: value, max: value } : value));
 const modelName = z.string().regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/");
 export const seatEffort = z.string().min(1);
 const RETIRED_MC_TOOLS: readonly unknown[] = ["code_health", "publish_preview"];
@@ -619,6 +632,12 @@ const fileSchema = z
         id: nonEmpty,
         github: nonEmpty,
         project: z.number().int().positive(),
+        loop_baseline: z
+          .strictObject({
+            merged_prs_per_week: loopBaselineRange,
+            tokens_per_week: loopBaselineRange,
+          })
+          .optional(),
         status_map: z.record(z.string(), ticketState),
         needs_you_labels: z.array(nonEmpty).optional(),
         full_suite: z.array(nonEmpty).default([]),
@@ -859,6 +878,14 @@ const fileSchema = z
         id: r.id,
         github: r.github,
         project: r.project,
+        ...(r.loop_baseline === undefined
+          ? {}
+          : {
+              loopBaseline: {
+                mergedPrsPerWeek: r.loop_baseline.merged_prs_per_week,
+                tokensPerWeek: r.loop_baseline.tokens_per_week,
+              },
+            }),
         statusMap: r.status_map,
         ...(r.needs_you_labels === undefined ? {} : { needsYouLabels: r.needs_you_labels }),
         fullSuite: r.full_suite,

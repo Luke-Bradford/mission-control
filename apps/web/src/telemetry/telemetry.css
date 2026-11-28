@@ -311,6 +311,93 @@
   grid-template-rows: repeat(2, minmax(0, 1fr));
 }
 
+.tabpanel .grid[data-view="table"][data-n="2"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: max-content minmax(240px, 1fr);
+}
+
+.tabpanel .grid[data-view="table"][data-n="2"] > .repo-scoreboard {
+  min-height: max-content;
+  overflow: visible;
+}
+
+.tabpanel .grid[data-view="table"][data-n="2"] > .repo-scoreboard > .repo-scoreboard-scroll {
+  flex: 0 0 auto;
+}
+
+.repo-scoreboard .repo-scoreboard-scroll {
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.repo-scoreboard .repo-scoreboard-scroll.has-overflow {
+  overflow-y: auto;
+  max-height: min(360px, 42vh);
+}
+
+.repo-scoreboard .repo-scoreboard-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.repo-scoreboard-cue {
+  flex: none;
+  margin: 0;
+  padding: var(--sp-1) var(--sp-4) var(--sp-2);
+  border-top: 1px solid var(--line);
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.repo-scoreboard table {
+  min-width: 1196px;
+  table-layout: fixed;
+}
+
+.repo-scoreboard-name-column {
+  width: 130px;
+}
+
+.repo-scoreboard-baseline-column {
+  width: 250px;
+}
+
+.repo-scoreboard th {
+  text-align: left;
+}
+
+.repo-scoreboard tbody th,
+.repo-scoreboard tbody td {
+  vertical-align: top;
+  padding-top: var(--sp-2);
+  padding-bottom: var(--sp-2);
+}
+
+.repo-scoreboard tbody th {
+  color: var(--fg-2);
+  font-weight: 400;
+}
+
+.repo-scoreboard tbody td {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.repo-scoreboard-repo-name {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.repo-scoreboard-empty,
+.repo-scoreboard-week > span {
+  color: var(--fg-2);
+}
+
+.repo-scoreboard-week > b {
+  color: var(--fg);
+}
+
 /* Throughput plots fill the panel body; the legend stays below the measured plot. */
 .tabpanel .grid[data-view="charts"][data-n="4"] > .panel > .pb {
   display: flex;
