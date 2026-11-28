@@ -464,7 +464,9 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
           expect(page.errors()).toEqual([]);
           expect(scoreboard.count).toBe(3);
           expect(scoreboard.cue).toContain(
-            width === 1280 ? "3 repositories · scroll to compare all" : "3 repositories · all visible",
+            width === 1280
+              ? "3 repositories · scroll to compare all"
+              : "3 repositories · all visible",
           );
           if (width === 1280) {
             expect(scoreboard.horizontalOverflow).toBe(true);

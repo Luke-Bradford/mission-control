@@ -81,7 +81,8 @@ function WeekCell({ week }: { week: RepoWeek }) {
 export function RepoScoreboard({ repoWeeks }: { repoWeeks: Telemetry["repoWeeks"] | undefined }) {
   const scroll = useRef<HTMLElement>(null);
   const [horizontalOverflow, setHorizontalOverflow] = useState(false);
-  const hasOverflow = (repoWeeks?.length ?? 0) > 4 || horizontalOverflow;
+  const repoCount = repoWeeks?.length ?? 0;
+  const hasOverflow = repoCount > 4 || horizontalOverflow;
 
   useLayoutEffect(() => {
     const region = scroll.current;
@@ -92,7 +93,7 @@ export function RepoScoreboard({ repoWeeks }: { repoWeeks: Telemetry["repoWeeks"
     const observer = new ResizeObserver(measure);
     observer.observe(region);
     return () => observer.disconnect();
-  }, [repoWeeks]);
+  }, [repoCount]);
 
   return (
     <Panel
