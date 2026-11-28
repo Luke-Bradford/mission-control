@@ -11,7 +11,7 @@ import {
   parseWorkspaceGroups,
   parseWorkspaces,
 } from "../src/runtime/cmux.ts";
-import { fakeCmux } from "./fake-cmux-harness.ts";
+import { commandOf, fakeCmux } from "./fake-cmux-harness.ts";
 
 describe("cmux parsers", () => {
   it("reads workspace lifecycle events and rejects unrelated lines", () => {
@@ -208,5 +208,50 @@ describe("closing a workspace", () => {
   it("fails while cmux still lists it after the wait", async () => {
     const f = open(60_000, 300);
     await expect(f.cmux.close("old")).rejects.toThrow(/still lists workspace old/);
+  });
+});
+
+describe("terminal panes", () => {
+  let dir = "";
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "mc-cmux-pane-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("opens, types into, reads and closes one surface with the flags cmux takes", async () => {
+    const f = fakeCmux(dir, { screens: { "surface:9": "one\ntwo\nthree" } });
+    const surface = await f.cmux.newPane("ws-1", "/crew/it's", "pnpm dev");
+    expect(surface).toBe("surface:9");
+    await f.cmux.sendPane(surface, "bash /tmp/run.sh");
+    await expect(f.cmux.readPane(surface, 2)).resolves.toBe("two\nthree");
+    await f.cmux.closePane(surface);
+    const calls = f.log().map((argv) => argv.slice(argv.indexOf(commandOf(argv))));
+    expect(calls).toContainEqual([
+      "new-pane",
+      "--type",
+      "terminal",
+      "--workspace",
+      "ws-1",
+      "--focus",
+      "false",
+      "--command",
+      "cd '/crew/it'\\''s' && pnpm dev",
+    ]);
+    expect(calls).toContainEqual([
+      "send",
+      "--paste",
+      "--surface",
+      "surface:9",
+      "--",
+      "bash /tmp/run.sh",
+    ]);
+    expect(calls).toContainEqual(["send-key", "--surface", "surface:9", "--", "enter"]);
+    expect(calls).toContainEqual(["read-screen", "--surface", "surface:9", "--lines", "2"]);
+    expect(calls).toContainEqual(["close-surface", "--surface", "surface:9", "--force"]);
+  });
+
+  it("fails when cmux names no surface for a new pane", async () => {
+    const f = fakeCmux(dir, { paneSays: "OK" });
+    await expect(f.cmux.newPane("ws-1", dir, "true")).rejects.toThrow(/named no surface/);
   });
 });

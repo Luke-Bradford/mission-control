@@ -161,11 +161,13 @@ import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor, type Supervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
+import { CREW_APP_DEFAULTS, CREW_APP_STATE_SETTING, createCrewApps } from "./sessions/apps.ts";
 import { createSessionChecks } from "./sessions/checks.ts";
 import { applyCmuxSessionEvent, startCmuxEvents } from "./sessions/events.ts";
 import { createBranchPrs } from "./sessions/pr.ts";
-import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
+import { createSessions, probeLocal, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
 import { createSessionSidebar } from "./sessions/sidebar.ts";
+import { createSeatTerminal, type SeatTerminal, terminalSuite } from "./sessions/terminal.ts";
 import { createSessionWatch } from "./sessions/watch.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
@@ -841,7 +843,14 @@ export async function main(): Promise<void> {
       );
     });
   };
+  let crewApps: ReturnType<typeof createCrewApps> | null = null;
+  let seatTerminal: SeatTerminal | null = null;
   const mcDeps: McToolsDeps = {
+    crewApps: () => crewApps,
+    terminalRun: async (input) => {
+      if (seatTerminal === null) throw new Error("The seat terminal is unavailable.");
+      return seatTerminal.run(input);
+    },
     qaReports,
     rules: engineRules,
     qaReportBaseUrl: `http://${HOST}:${port}`,
@@ -1067,6 +1076,39 @@ export async function main(): Promise<void> {
   // Every cmux workspace on this Mac (the Sessions page, and FLIGHT's cmux_sessions and cmux_send).
   // A preview hub reads them but never tells a session its app stopped.
   const cmux = createCmux([CMUX_COMMAND], (m) => log(m));
+  crewApps = createCrewApps({
+    cmux,
+    repos: () =>
+      config.repos.flatMap((repo) => {
+        const commands = repo.appCommands ?? CREW_APP_DEFAULTS[repo.id.toLowerCase()];
+        return commands?.length ? [{ id: repo.id, commands }] : [];
+      }),
+    seats: () =>
+      store
+        .liveSeatRuns()
+        .flatMap(({ seatId, worktree, run }) =>
+          worktree === null ? [] : [{ id: seatId, runId: run.id, repoId: run.repoId, worktree }],
+        ),
+    probe: probeLocal,
+    log: (m) => log(m),
+    state: {
+      get: () => store.getSetting(CREW_APP_STATE_SETTING),
+      set: (value) => store.setSetting(CREW_APP_STATE_SETTING, value),
+    },
+  });
+  seatTerminal = createSeatTerminal({
+    cmux,
+    dir: join(dirname(dbPath), "seat-terminal"),
+    checks: checkRecorder,
+    lock,
+    suiteOf: ({ seatId, worktree, command }) => {
+      const repoId = store.liveSeatRuns().find((live) => live.seatId === seatId)?.run.repoId;
+      return repoId === undefined
+        ? null
+        : terminalSuite(config, repoId, worktree, command, (c) => checkRecorder.lockedBy(c));
+    },
+    log: (m) => log(m),
+  });
   const seatIds = () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];
   const branchPrs = createBranchPrs({ store, repos: () => config.repos, gh });
   const notifications = new LocalNotifications(store, config, bus, Date.now);
@@ -1263,6 +1305,7 @@ export async function main(): Promise<void> {
   let leftoverFootprint: Awaited<ReturnType<typeof crewLeftoverFootprint>> | null = null;
   let crewTranscriptFootprint: ReturnType<typeof transcriptFootprint> = null;
   const app = buildApp({
+    crewApps,
     sessions,
     onSessionSidebarChange: (on) => {
       if (on) sessionSidebar.reset();
@@ -1349,6 +1392,17 @@ export async function main(): Promise<void> {
   // a preview hub never runs a repo's commands by itself
   if (process.env.MC_NO_LOOP_WRITES !== "1") sessionChecks.start();
   app.addHook("onClose", async () => sessionChecks.stop());
+  if (process.env.MC_NO_LOOP_WRITES !== "1") {
+    void crewApps.tick().catch((error) => log(String(error)));
+    trackTimer(
+      setInterval(() => {
+        void crewApps?.tick().catch((error) => log(`Crew app tick failed: ${String(error)}`));
+        void seatTerminal
+          ?.tick(store.liveSeatRuns().map(({ seatId }) => seatId))
+          .catch((error) => log(`Seat terminal tick failed: ${String(error)}`));
+      }, 60_000),
+    ).unref();
+  }
   app.addHook("onClose", async () => {
     for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
     sessionSidebar.stop();

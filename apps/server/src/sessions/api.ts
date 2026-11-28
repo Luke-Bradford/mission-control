@@ -13,10 +13,11 @@ import {
 } from "@mc/core";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { AppDeps } from "../api.ts";
+import { type AppDeps, LOOP_WRITES_DISABLED } from "../api.ts";
 import { checkCommand } from "../engine/rule-config.ts";
 import { operatorTokenMatches } from "../operator.ts";
 import { CmuxError } from "../runtime/cmux.ts";
+import { CrewAppError } from "./apps.ts";
 import { type SessionChecks, SessionChecksError } from "./checks.ts";
 import { OpenSessionArgs, SessionOpenError } from "./open.ts";
 import { SessionError, type SessionsService } from "./sessions.ts";
@@ -24,6 +25,7 @@ import { SessionError, type SessionsService } from "./sessions.ts";
 const SendInput = z.strictObject({ text: z.string().min(1).max(SESSION_TEXT_MAX) });
 const SidebarInput = z.strictObject({ on: z.boolean() });
 const noBody = z.strictObject({}).optional();
+const AppAction = z.enum(["start", "stop"]);
 const RepoChecksInput = z.strictObject({
   repo: z.string().min(1).max(4096),
   on: z.boolean().optional(),
@@ -65,6 +67,7 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
     )
       return reply.code(error.status).send({ error: error.message });
     if (error instanceof CmuxError) return reply.code(503).send({ error: error.message });
+    if (error instanceof CrewAppError) return reply.code(409).send({ error: error.message });
     throw error;
   };
 
@@ -87,6 +90,29 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
 
   // Reader: docs/runbooks/cmux-sessions.md#the-sessions-page (every cmux workspace on this Mac)
   api.get("/sessions", { preHandler: auth }, async () => sessions().view());
+  // Reader: apps/web/src/pages/Sessions.tsx (the app workspace Start and Stop controls)
+  api.get("/sessions/apps", { preHandler: auth }, async () => deps.crewApps?.view() ?? []);
+  // Reader: apps/web/src/pages/Sessions.tsx (the app workspace Start and Stop controls)
+  api.post<{ Params: { seat: string; action: string } }>(
+    "/sessions/apps/:seat/:action",
+    { preHandler: auth },
+    async (req, reply) => {
+      if (!noBody.safeParse(req.body).success)
+        return reply.code(400).send({ error: "Send an empty object." });
+      const action = AppAction.safeParse(req.params.action);
+      if (!action.success) return reply.code(404).send({ error: "No app action has that name." });
+      if (!deps.crewApps) return reply.code(503).send({ error: SESSIONS_OFF_TEXT });
+      if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+      const found = deps.crewApps.view().some((app) => app.id === req.params.seat);
+      if (!found) return reply.code(404).send({ error: "No crew app runs for that seat." });
+      try {
+        await deps.crewApps[action.data](req.params.seat);
+        return { ok: true };
+      } catch (error) {
+        return failure(error, reply);
+      }
+    },
+  );
   // Reader: docs/runbooks/cmux-sessions.md#opening-a-session (the New session form's choices)
   api.get("/sessions/roles", { preHandler: auth }, async () => sessions().roles());
   // Reader: docs/runbooks/cmux-sessions.md#opening-a-session (the New session button)

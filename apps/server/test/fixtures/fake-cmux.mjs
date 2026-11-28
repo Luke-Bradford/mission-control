@@ -17,7 +17,9 @@
 //   inbox       [{workspace_id, text, state}]   what `agent inbox` prints, in real cmux's shape
 //                                               (`recipient_workspace_id`, `body`, `state`, `read_at`)
 //   messages    [{to, from, text}]              every `agent message`
-//   panes       [{ws, type, url}]               every `new-pane`
+//   panes       [{ws, type, url}]               every `new-pane`; it prints `paneSays`, else `OK surface:9`
+//   closedSurfaces [surface]                    every `close-surface`
+//   `send`, `send-key` and `read-screen` take `--surface` where they take `--workspace`
 // `new-workspace` prints, as real cmux 0.65.2 does, an alias notice (unless CMUX_QUIET=1) and then
 // `OK workspace:<n>` for the workspace it made: a fresh <n> each time.
 // Every call, read-only ones included, is also appended to `<file>.log`, one JSON argv a line.
@@ -264,18 +266,27 @@ switch (cmd) {
     if (state.busy) fail("a question dialog is open; nothing sent");
     const text = rest.at(-1);
     state.sent ??= [];
-    state.sent.push({ ws: flag("--workspace"), text, paste: rest.includes("--paste") });
-    launchClaude(flag("--workspace"), text.slice(text.lastIndexOf(" && ") + 4));
+    const workspace = flag("--workspace");
+    state.sent.push({
+      ws: workspace ?? flag("--surface"),
+      text,
+      paste: rest.includes("--paste"),
+    });
+    if (workspace !== undefined) launchClaude(workspace, text.slice(text.lastIndexOf(" && ") + 4));
     ok();
     break;
   }
   case "send-key":
     state.keys ??= [];
-    state.keys.push({ ws: flag("--workspace"), key: rest.at(-1), force: rest.includes("--force") });
+    state.keys.push({
+      ws: flag("--workspace") ?? flag("--surface"),
+      key: rest.at(-1),
+      force: rest.includes("--force"),
+    });
     ok();
     break;
   case "read-screen": {
-    const screen = state.screens?.[flag("--workspace")] ?? state.screen ?? "";
+    const screen = state.screens?.[flag("--workspace") ?? flag("--surface")] ?? state.screen ?? "";
     const lines = flag("--lines");
     ok(lines === undefined ? screen : screen.split("\n").slice(-Number(lines)).join("\n"));
     break;
@@ -348,7 +359,12 @@ switch (cmd) {
   case "new-pane":
     state.panes ??= [];
     state.panes.push({ ws: flag("--workspace"), type: flag("--type"), url: flag("--url") });
-    ok("OK surface:9");
+    ok(state.paneSays ?? "OK surface:9");
+    break;
+  case "close-surface":
+    state.closedSurfaces ??= [];
+    state.closedSurfaces.push(flag("--surface"));
+    ok();
     break;
   case "close-workspace": {
     const id = flag("--workspace");

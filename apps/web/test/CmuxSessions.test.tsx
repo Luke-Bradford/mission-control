@@ -13,13 +13,16 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../src/hud.css";
 import { hub } from "../src/data.ts";
+import { answer } from "../src/demo/source.ts";
 import { Sessions } from "../src/pages/Sessions.tsx";
+import { Toast } from "../src/shell/Toast.tsx";
 import { settled, stubFetch } from "./fetchStub.ts";
 
 const NOW = Date.UTC(2026, 10, 25, 14, 32);
 const MIN = 60_000;
 const PATH = "/api/sessions";
 const SIDEBAR_PATH = "/api/sessions/sidebar";
+const APPS_PATH = "/api/sessions/apps";
 
 const SHOP = "/Users/op/Dev/shop-app";
 const MC = "/Users/op/Dev/mission-control";
@@ -111,6 +114,159 @@ afterEach(() => {
 const bodyRows = () => screen.getAllByRole("row").slice(1);
 
 describe("Sessions page", () => {
+  it("shows the demo's crew apps: two endpoints, a long name, every health state, running and stopped", async () => {
+    const demo = await answer(APPS_PATH).json();
+    const fetch = stubFetch({ [PATH]: VIEW, [SIDEBAR_PATH]: { on: true }, [APPS_PATH]: demo });
+    render(<Sessions />);
+    await settled(fetch, APPS_PATH);
+    expect(screen.getByText("guido-eb · ebull")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "127.0.0.1:5174" })).toBeTruthy();
+    expect(screen.getByText(/autonomy-engine-studio/)).toBeTruthy();
+    expect(screen.getAllByText("Answers").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not answering").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not checked").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Stop guido-eb · ebull app" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^Stop .+ app$/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /^Start .+ app$/ }).length).toBe(1);
+  });
+
+  it("shows each crew app address, health word and start or stop action", async () => {
+    const start = vi.fn().mockResolvedValue({ status: 200, body: { ok: true } });
+    const fetch = stubFetch({
+      [PATH]: VIEW,
+      [SIDEBAR_PATH]: { on: true },
+      [APPS_PATH]: [
+        {
+          id: "autonomy-engine",
+          name: "guido-ae · autonomy-engine",
+          running: true,
+          apps: [{ url: "http://127.0.0.1:5173", answers: true }],
+        },
+        {
+          id: "ebull",
+          name: "guido-eb · ebull",
+          running: false,
+          apps: [
+            { url: "http://127.0.0.1:5174", answers: false },
+            { url: "http://127.0.0.1:5175", answers: null },
+          ],
+        },
+      ],
+      [`POST ${APPS_PATH}/ebull/start`]: start,
+    });
+    render(<Sessions />);
+    await settled(fetch, APPS_PATH);
+
+    expect(screen.getByRole("link", { name: "127.0.0.1:5173" }).getAttribute("href")).toBe(
+      "http://127.0.0.1:5173",
+    );
+    expect(screen.getAllByText("Answers").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not answering").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not checked").length).toBeGreaterThan(0);
+    expect(screen.getByText("Stopped")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Stop guido-ae · autonomy-engine app" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Start guido-eb · ebull app" }));
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+  });
+
+  it("gives every crew app endpoint a focusable link that carries its health word", async () => {
+    const endpoints = [
+      { url: "http://127.0.0.1:5173", answers: true, word: "Answers" },
+      { url: "http://127.0.0.1:5174", answers: false, word: "Not answering" },
+      { url: "http://127.0.0.1:5175", answers: null, word: "Not checked" },
+    ];
+    const fetch = stubFetch({
+      [PATH]: VIEW,
+      [SIDEBAR_PATH]: { on: true },
+      [APPS_PATH]: [
+        {
+          id: "guido-eb",
+          name: "guido-eb · ebull",
+          running: true,
+          apps: endpoints.map(({ url, answers }) => ({ url, answers })),
+        },
+      ],
+    });
+    render(<Sessions />);
+    await settled(fetch, APPS_PATH);
+    for (const { url, word } of endpoints) {
+      const link = screen.getByRole("link", {
+        name: url.replace("http://", ""),
+        description: word,
+      });
+      link.focus();
+      expect(document.activeElement).toBe(link);
+      expect(link.getAttribute("href")).toBe(url);
+    }
+  });
+
+  it("refreshes crew app health after one minute without navigation", async () => {
+    vi.useRealTimers();
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    let requests = 0;
+    const fetch = stubFetch({
+      [PATH]: VIEW,
+      [SIDEBAR_PATH]: { on: true },
+      [APPS_PATH]: () => ({
+        status: 200,
+        body: [
+          {
+            id: "guido-ae",
+            name: "guido-ae · autonomy-engine",
+            running: true,
+            apps: [{ url: "http://127.0.0.1:5173", answers: requests++ > 0 }],
+          },
+        ],
+      }),
+    });
+    render(<Sessions />);
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(fetch).toHaveBeenCalledWith(APPS_PATH, expect.anything());
+    const row = screen
+      .getAllByText("guido-ae · autonomy-engine")
+      .at(-1)
+      ?.closest(".sess-crew-app") as HTMLElement;
+    expect(within(row).getByText("Not answering")).toBeTruthy();
+
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(fetch.mock.calls.filter(([path]) => path === APPS_PATH)).toHaveLength(2);
+    expect(within(row).getByText("Answers")).toBeTruthy();
+  });
+
+  it("reports crew app read and action failures", async () => {
+    const stop = vi.fn().mockResolvedValue({ status: 500, body: { error: "Could not stop app" } });
+    const fetch = stubFetch({
+      [PATH]: VIEW,
+      [SIDEBAR_PATH]: { on: true },
+      [APPS_PATH]: [{ id: "studio", name: "guido-st · studio", running: true, apps: [] }],
+      [`POST ${APPS_PATH}/studio/stop`]: stop,
+    });
+    render(
+      <>
+        <Sessions />
+        <Toast />
+      </>,
+    );
+    await settled(fetch, APPS_PATH);
+    fireEvent.click(screen.getByRole("button", { name: "Stop guido-st · studio app" }));
+    expect(await screen.findByText("Could not stop app")).toBeTruthy();
+
+    hub.clear();
+    const failedFetch = stubFetch({
+      [PATH]: VIEW,
+      [SIDEBAR_PATH]: { on: true },
+      [APPS_PATH]: () => ({ status: 500, body: { error: "Apps unavailable" } }),
+    });
+    render(<Sessions />);
+    await settled(failedFetch, APPS_PATH);
+    expect(
+      (await screen.findAllByText("Could not read crew apps: Apps unavailable")).length,
+    ).toBeGreaterThan(0);
+  });
+
   it("lists every workspace, waiting first, with state words, age, last line and app", async () => {
     const fetch = stubFetch({ [PATH]: VIEW, [SIDEBAR_PATH]: { on: true } });
     render(<Sessions />);
