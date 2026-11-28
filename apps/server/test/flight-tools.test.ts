@@ -2205,19 +2205,26 @@ describe("answer_question", () => {
     );
   });
 
-  it("refuses a question from a seat outside FLIGHT's session", async () => {
+  it("answers a question from a seat in another of the hub's crew sessions (#2323)", async () => {
+    // one FLIGHT runs every repo's crew: eBull's and autonomy-engine's seats ask it too
     cfg.crew?.sessions.push({
-      id: "s2",
-      repoId: "mc",
-      checkout: "/tmp/none/clone2",
-      seats: [seat("guido-2", "GUIDO")],
+      id: "s3",
+      repoId: "other",
+      checkout: "/tmp/none/clone3",
+      seats: [seat("guido-3", "GUIDO", { area: ["src/**"] })],
     });
-    const id = ask("guido-2", "r-guido2");
+    const id = ask("guido-3", "r-guido3");
+    expect((await call("answer_question", A(id))).isError).toBeUndefined();
+    expect(messageCalls.at(-1)?.[0]).toBe("guido-3");
+    expect(store.question(id)?.answeredAt).toBe(NOW);
+  });
+
+  it("refuses a question from a seat in no crew session", async () => {
+    const id = ask("nobody-9", "r-nobody");
     expect(await call("answer_question", A(id))).toEqual(
       refused(`Not answered: there is no open question ${id}.`),
     );
     expect(messageCalls).toEqual([]);
-    expect(store.question(id)?.answeredAt).toBeNull();
   });
 
   it("keeps a passed question open through later FLIGHT messages and answers", async () => {
@@ -3782,6 +3789,19 @@ describe("allow_dependency", () => {
       targetRunId: "r-g",
       decision: "Allowed GUIDO-1 to add hyparquet 1.33.2 (MIT) in package.json, pnpm-lock.yaml",
     });
+  });
+
+  it("allows packages for a build run in another of the hub's crew sessions (#2323)", async () => {
+    cfg.crew?.sessions.push({
+      id: "s3",
+      repoId: "other",
+      checkout: "/tmp/none/clone3",
+      seats: [seat("guido-3", "GUIDO", { area: ["src/**"] })],
+    });
+    live("guido-3", "r-g3", { repoId: "other", ticket: "other#9" });
+    const r = await call("allow_dependency", A({ runId: "r-g3" }));
+    expect(r.isError).toBeUndefined();
+    expect(runDependencyAllowance(store, "r-g3").packages).toEqual([HYP]);
   });
 
   it("does not leave an allowance when recording its decision fails", async () => {

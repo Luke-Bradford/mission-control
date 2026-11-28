@@ -1158,8 +1158,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const repoId = flightSeat(config)?.session.repoId;
     return config.repos.find((r) => r.id === repoId);
   };
-  const seatCfg = (seatId: string) =>
-    flightSeat(config)?.session.seats.find((s) => s.id === seatId);
+  /**
+   * The crew session a seat belongs to: any of the hub's sessions, not only FLIGHT's own. One
+   * FLIGHT runs every repo's crew (#2323); each repo's own limits still apply through its config.
+   */
+  const sessionOfSeat = (seatId: string) =>
+    config.crew?.sessions.find((s) => s.seats.some((x) => x.id === seatId));
+  const seatCfg = (seatId: string) => sessionOfSeat(seatId)?.seats.find((s) => s.id === seatId);
+  /** The repo of a seat's own crew session. */
+  const repoOfSeat = (seatId: string) => {
+    const repoId = sessionOfSeat(seatId)?.repoId;
+    return config.repos.find((r) => r.id === repoId);
+  };
   /**
    * Grant the actual live run an exception, retaining the operator's original pause and scope.
    */
@@ -1273,7 +1283,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (!c.ok) return c.result;
     const { seat, about, decision, basis } = c.args;
     if (seat !== undefined) {
-      const mine = flightSeat(config)?.session.seats.some((s) => s.id === seat) === true;
+      const mine = seatCfg(seat) !== undefined;
       if (!mine) return { text: notInSessionText(seat), isError: true };
     }
     const { kind = "note", orderId } = c.args;
@@ -1639,7 +1649,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         ? { profile: c.args.profile, reason: c.args.profile_reason, by: "FLIGHT" }
         : undefined;
     const cfg = seatCfg(seat);
-    const repo = repoOf();
+    const repo = repoOfSeat(seat);
     if (cfg === undefined || repo === undefined) return fail(notInSessionText(seat));
     const call = seatCallSign(seat);
     const ref = `${repo.id}#${issue}`;
@@ -3789,7 +3799,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   function held(run: Run, action: "work" | "merge" = "work"): boolean {
-    return heldRun(store, config, now(), run, repoOf()?.id, { action });
+    // held when the run's repo is not its seat's own repo (any crew session's, #2323)
+    return heldRun(store, config, now(), run, repoOfSeat(run.agentId)?.id, { action });
   }
   function prRun(pr: number): Run | null {
     const repo = repoOf();
