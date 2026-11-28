@@ -379,6 +379,52 @@ export function crewHudState(
   }
 }
 
+/** A seat's line once its turn ends with its work unreported: `waiting on <what>` (#2318). */
+export const SEAT_WAITING_TEXT = "waiting";
+const SEAT_WAITING_ON = "waiting on";
+const ISSUE_REF = /(?:\b[\w.-]+)?#\d+\b/g;
+
+/**
+ * What a seat's last message waits on: FLIGHT, the operator (or CAPCOM), else the first ticket it
+ * names other than its own; plain `waiting` when it names none.
+ */
+export function waitingOn(lastText: string | null, ownRef: string | null): string {
+  const text = lastText ?? "";
+  if (/\bFLIGHT\b/.test(text)) return `${SEAT_WAITING_ON} FLIGHT`;
+  if (/\b(operator|CAPCOM)\b/i.test(text)) return `${SEAT_WAITING_ON} the operator`;
+  const own = ownRef?.slice(ownRef.indexOf("#")) ?? null;
+  const ref = [...text.matchAll(ISSUE_REF)].map((m) => m[0]).find((r) => r !== ownRef && r !== own);
+  return ref === undefined ? SEAT_WAITING_TEXT : `${SEAT_WAITING_ON} ${ref}`;
+}
+
+/** A seat whose turn has ended with its run's work unreported, and what it waits on. */
+export interface SeatWaiting {
+  runId: string;
+  /** When its last turn ended: its last activity. */
+  since: number;
+  /** `waiting on <what>`, then its last message. */
+  text: string;
+  lastText: string | null;
+}
+
+/**
+ * Whether the seat sits idle at its prompt on a run that still owes its report: its turn ended in
+ * this run, with no report, push or question to move the run on. Null when it is at work, past its
+ * report, or has its own reason (an error, a resume).
+ */
+export function seatWaiting(
+  row: SeatSessionRow | null,
+  run: Pick<Run, "id" | "startedAt" | "endedAt" | "ticket" | "loop"> | null,
+  lastText: string | null,
+): SeatWaiting | null {
+  if (row === null || run === null || row.runId !== run.id || run.endedAt !== null) return null;
+  if (row.state !== "idle" || row.reason !== null || run.loop?.phase !== "working") return null;
+  const since = row.lastTurnEndedAt ?? null;
+  if (since === null || since < run.startedAt) return null;
+  const on = waitingOn(lastText, run.ticket);
+  return { runId: run.id, since, text: lastText ? `${on}: ${lastText}` : on, lastText };
+}
+
 /** Shown on a card whose GitHub state and project Status disagree. */
 export const STATUS_OUT_OF_DATE = "Status out of date";
 

@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SIDEBAR_KEYS } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import type { Cmux } from "../src/runtime/cmux.ts";
@@ -151,6 +152,42 @@ describe("cmux sidebar", () => {
     cmux.setStatus.mockClear();
     await sidebar.tick();
     expect(cmux.setStatus).not.toHaveBeenCalled();
+  });
+
+  it("sets a crew seat's waiting line, and clears it once the seat is at work (#2318)", async () => {
+    const crewRow = row({ id: "seat-ws", name: "guido-1 · mc#7", owner: "crew", pr: null });
+    let waiting: string | null = "waiting on FLIGHT: Asked FLIGHT to reset my branch.";
+    const cmux = {
+      statuses: vi.fn(async () => ({})),
+      setStatus: vi.fn(async () => {}),
+      clearStatus: vi.fn(async () => {}),
+      linkPr: vi.fn(async () => {}),
+      clearPr: vi.fn(async () => {}),
+      notify: vi.fn(async () => {}),
+    };
+    const seatWaiting = vi.fn((r: { owner: string }) => (r.owner === "crew" ? waiting : null));
+    const sidebar = createSessionSidebar({
+      sessions: {
+        view: async () => ({ ok: true as const, at: 0, sessions: [crewRow, row()], repos: [] }),
+      },
+      cmux,
+      store: { getSetting: () => null },
+      seatWaiting,
+    });
+    await sidebar.tick();
+    expect(cmux.setStatus).toHaveBeenCalledWith(
+      "seat-ws",
+      SIDEBAR_KEYS.seat,
+      "waiting on FLIGHT: Asked FLIGHT to reset my branch.",
+    );
+    expect(cmux.setStatus).not.toHaveBeenCalledWith(
+      "workspace",
+      SIDEBAR_KEYS.seat,
+      expect.anything(),
+    );
+    waiting = null;
+    await sidebar.tick();
+    expect(cmux.clearStatus).toHaveBeenCalledWith("seat-ws", SIDEBAR_KEYS.seat);
   });
 
   it("makes no writes when the operator turns them off", async () => {

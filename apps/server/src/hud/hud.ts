@@ -81,6 +81,7 @@ import {
   type SeatSessionRow,
   STALL_TEXT,
   seatCallSign,
+  seatWaiting,
   stallStart,
   startOfLocalDay,
   type TestLockState,
@@ -267,9 +268,18 @@ function loopViews(
     if (agent.kind === "crew") {
       const waiting = seatRow?.runId != null && inLine.has(seatRow.runId);
       const hud = crewHudState(seatRow, lastOutput, now, waiting, lockHeldSince(lock, seatRow));
+      // idle at its prompt with its run unreported: what it waits on, not the loop's "Working on"
+      const waitingOn =
+        held === undefined
+          ? null
+          : seatWaiting(
+              seatRow,
+              held,
+              (digests?.get(held.id) ?? store.digest(held.id))?.lastText ?? null,
+            );
       const reason =
         seatUnavailable(agent.seat) ??
-        (hud === "waiting" ? LOCK_WAITING_TEXT : (seatRow?.reason ?? null));
+        (hud === "waiting" ? LOCK_WAITING_TEXT : (seatRow?.reason ?? waitingOn?.text ?? null));
       const view: AgentView = {
         id: agent.id,
         repoId: agent.repoId,

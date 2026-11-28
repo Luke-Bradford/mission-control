@@ -1118,6 +1118,8 @@ export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
 /** A run's PR red after its one re-run, with nothing from its seat for this long, is a wake reason. */
 export const FLIGHT_RED_PR_IDLE_MS = 30 * 60_000;
+/** A seat idle at its prompt with its run unreported, silent this long, is a wake reason (#2318). */
+export const FLIGHT_SEAT_WAITING_MS = 30 * 60_000;
 /** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
 export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
 /** An item not seen stale for this long, and then stale again, is told as a new reason. */
@@ -1153,6 +1155,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "question_changed",
   "wake_stuck",
   "red_pr_idle",
+  "seat_waiting",
 ] as const;
 /** Kinds the hub once raised and no longer does: a stored one is dropped when the signals are read. */
 export const FLIGHT_RETIRED_SIGNAL_KINDS: readonly string[] = [

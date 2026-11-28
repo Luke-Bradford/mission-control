@@ -161,8 +161,9 @@ refresh Sessions without waiting for the next poll. It reads a workspace branch 
 `.git/HEAD`, then shows an open pull request, CI and review state when it can identify one.
 
 The Sessions switch `Write to cmux` controls all hub-owned sidebar fields and notifications. When
-on, the hub writes only `mc-ci`, `mc-review`, `mc-cost` and `mc-check`, and links the workspace's
-pull request with `cmux pr`. It never changes another status key. Turning the switch off prevents
+on, the hub writes only `mc-ci`, `mc-review`, `mc-cost`, `mc-check` and, on a crew seat idle at
+its prompt with its run unreported, `mc-seat` (`waiting on <what>: <its last message>`), and links
+the workspace's pull request with `cmux pr`. It never changes another status key. Turning the switch off prevents
 all sidebar writes and cmux notifications; reading and tracking continue.
 
 ## Apps that stop

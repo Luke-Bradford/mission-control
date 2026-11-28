@@ -1433,6 +1433,7 @@ never counts.
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |
 | `wake_stuck` | a set-aside run's wake met the same hub error (a 502, such as its dependencies not reinstalling) on two passes in a row; the hub keeps trying every pass. The evidence names the run and the error. Once per run |
 | `red_pr_idle` | a live run's PR is still red on its pushed sha 30 minutes after CI failed again on the hub's re-run, and its seat has started no turn, made no commit and sent no report since. The evidence names the run, the PR, the sha and whether the failure reached the seat. Once per run and sha |
+| `seat_waiting` | a seat has sat idle at its prompt 30 minutes with its build run still in `working` and unreported (no report, push or error reason). The evidence names the seat, run and ticket, and what it waits on (`waiting on FLIGHT`, `the operator` or a ticket) with its last message. Once per run and turn end |
 | `old_park` | a run has been parked for 15 minutes |
 | `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
 | `item_stale` | a Needs-you item for FLIGHT has gone 10 minutes untriaged (a PR ready to merge is `merge_stalled`) |

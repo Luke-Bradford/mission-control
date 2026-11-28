@@ -1178,6 +1178,24 @@ describe("crew seats in the rows", () => {
     },
   );
 
+  it("a seat idle at its prompt with its run unreported says what it waits on, never working (#2318)", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun({ ticket: "shop-app#91" }));
+    store.setRunLoop("c1", { ...NEW_LOOP, phase: "working" }, NOW - HOUR);
+    store.setDigest("c1", digest({ lastText: "Asked FLIGHT to reset my branch." }));
+    store.setSeatSession(seat({ state: "idle", updatedAt: NOW - 40 * MIN }));
+    store.setSeatTurnEnded("GUIDO-1", NOW - 40 * MIN);
+    const row = rowOf(c, "GUIDO-1");
+    expect(row?.hudState).toBe("idle");
+    expect(row?.note).toBe("waiting on FLIGHT: Asked FLIGHT to reset my branch.");
+
+    // really at work: still running, no waiting line
+    store.setSeatSession(seat({ state: "running", updatedAt: NOW - MIN }));
+    const working = rowOf(c, "GUIDO-1");
+    expect(working?.hudState).toBe("running");
+    expect(working?.note).toBeNull();
+  });
+
   it("shows a transferred run's binding without changing another seat or observed loop", () => {
     const c = withCrew();
     store.upsertRun(crewRun());
