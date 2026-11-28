@@ -16,9 +16,11 @@ import {
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type AppDeps, buildApp } from "../src/api.ts";
+import { type AppDeps, buildApp, LOOP_WRITES_DISABLED } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
+import { CmuxError } from "../src/runtime/cmux.ts";
+import { CrewAppError } from "../src/sessions/apps.ts";
 import { createSessionChecks, type SessionChecks } from "../src/sessions/checks.ts";
 import { createSessions } from "../src/sessions/sessions.ts";
 import { Store } from "../src/store.ts";
@@ -405,5 +407,107 @@ describe("the session checks routes", () => {
     start({ sessionChecks: undefined });
     expect((await operator().post(`/api/sessions/${PRICING}/checks`)).statusCode).toBe(503);
     expect((await operator().post("/api/sessions/checks", { repo: main })).statusCode).toBe(503);
+  });
+});
+
+describe("the crew app routes", () => {
+  const VIEW = [
+    {
+      id: "guido-eb",
+      name: "guido-eb · ebull",
+      repo: "ebull",
+      seat: "guido-eb",
+      running: true,
+      apps: [
+        { url: "http://127.0.0.1:5173", answers: true },
+        { url: "http://127.0.0.1:5174", answers: false },
+      ],
+    },
+  ];
+  const apps = () => ({
+    start: vi.fn(async () => {}),
+    stop: vi.fn(async () => {}),
+    restart: vi.fn(async () => {}),
+    status: vi.fn(async () => ""),
+    tick: vi.fn(async () => {}),
+    view: vi.fn(() => VIEW),
+  });
+  const restart = async (crewApps: ReturnType<typeof apps> | undefined) => {
+    await app.close();
+    start({ crewApps });
+  };
+
+  it("lists each seat's app, its addresses and whether they answer, for the operator only", async () => {
+    await restart(apps());
+    const r = await operator().get("/api/sessions/apps");
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual(VIEW);
+    expect((await as({}).get("/api/sessions/apps")).statusCode).toBe(401);
+    const seat = as({ [OPERATOR_HEADER]: KEY, authorization: "Bearer seat-token" });
+    expect((await seat.get("/api/sessions/apps")).statusCode).toBe(403);
+  });
+
+  it("starts and stops one seat's app", async () => {
+    const crewApps = apps();
+    await restart(crewApps);
+    const started = await operator().post("/api/sessions/apps/guido-eb/start");
+    expect(started.statusCode).toBe(200);
+    expect(started.json()).toEqual({ ok: true });
+    expect(crewApps.start).toHaveBeenCalledWith("guido-eb");
+    const stopped = await operator().post("/api/sessions/apps/guido-eb/stop");
+    expect(stopped.statusCode).toBe(200);
+    expect(crewApps.stop).toHaveBeenCalledWith("guido-eb");
+  });
+
+  it("refuses preview start and stop without touching cmux apps", async () => {
+    const crewApps = apps();
+    await app.close();
+    start({ crewApps, noLoopWrites: true });
+    for (const action of ["start", "stop"] as const) {
+      const response = await operator().post(`/api/sessions/apps/guido-eb/${action}`);
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ error: LOOP_WRITES_DISABLED });
+    }
+    expect(crewApps.start).not.toHaveBeenCalled();
+    expect(crewApps.stop).not.toHaveBeenCalled();
+  });
+
+  it("refuses a seat's token, a body, an unknown action and an unknown seat", async () => {
+    const crewApps = apps();
+    await restart(crewApps);
+    const seat = as({ [OPERATOR_HEADER]: KEY, authorization: "Bearer seat-token" });
+    expect((await seat.post("/api/sessions/apps/guido-eb/start")).statusCode).toBe(403);
+    expect((await as({}).post("/api/sessions/apps/guido-eb/start")).statusCode).toBe(401);
+    const body = await operator().post("/api/sessions/apps/guido-eb/start", { now: true });
+    expect(body.statusCode).toBe(400);
+    expect(body.json()).toEqual({ error: "Send an empty object." });
+    const action = await operator().post("/api/sessions/apps/guido-eb/restart");
+    expect(action.statusCode).toBe(404);
+    expect(action.json()).toEqual({ error: "No app action has that name." });
+    const unknown = await operator().post("/api/sessions/apps/guido-zz/start");
+    expect(unknown.statusCode).toBe(404);
+    expect(unknown.json()).toEqual({ error: "No crew app runs for that seat." });
+    expect(crewApps.start).not.toHaveBeenCalled();
+  });
+
+  it("answers 503 without the crew app service, and an empty list", async () => {
+    await restart(undefined);
+    expect((await operator().get("/api/sessions/apps")).json()).toEqual([]);
+    const r = await operator().post("/api/sessions/apps/guido-eb/start");
+    expect(r.statusCode).toBe(503);
+    expect(r.json()).toEqual({ error: SESSIONS_OFF_TEXT });
+  });
+
+  it("says why a start was refused, and answers 503 when cmux fails", async () => {
+    const crewApps = apps();
+    crewApps.start.mockRejectedValueOnce(new CrewAppError("No live cmux workspace for this seat."));
+    crewApps.stop.mockRejectedValueOnce(new CmuxError("cmux close-surface failed"));
+    await restart(crewApps);
+    const refused = await operator().post("/api/sessions/apps/guido-eb/start");
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toEqual({ error: "No live cmux workspace for this seat." });
+    const failed = await operator().post("/api/sessions/apps/guido-eb/stop");
+    expect(failed.statusCode).toBe(503);
+    expect(failed.json()).toEqual({ error: "cmux close-surface failed" });
   });
 });

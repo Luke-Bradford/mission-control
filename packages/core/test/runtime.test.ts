@@ -300,6 +300,10 @@ describe("the allowlist in phase 2b", () => {
       MC_TOOLS.syncMain,
       MC_TOOLS.askFlight,
       MC_TOOLS.reportEvidence,
+      MC_TOOLS.appStart,
+      MC_TOOLS.appRestart,
+      MC_TOOLS.appStatus,
+      MC_TOOLS.terminalRun,
     ]) {
       expect(WRITER_TOOLS).toContain(t);
     }
@@ -380,6 +384,10 @@ describe("the allowlist in phase 2b", () => {
       readTicket: "mcp__mc__read_ticket",
       answerQuestion: "mcp__mc__answer_question",
       startSeat: "mcp__mc__start_seat",
+      appStart: "mcp__mc__app_start",
+      appRestart: "mcp__mc__app_restart",
+      appStatus: "mcp__mc__app_status",
+      terminalRun: "mcp__mc__terminal_run",
       messageSeat: "mcp__mc__message_seat",
       instructSeat: "mcp__mc__instruct_seat",
       revokeInstruction: "mcp__mc__revoke_instruction",

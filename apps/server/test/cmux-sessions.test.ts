@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SESSION_APP_HEALTH_STATUS_KEY, SESSION_APP_STATUS_KEY } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { CMUX_REFUSED_TEXT } from "../src/runtime/cmux.ts";
@@ -308,6 +309,27 @@ describe("sessions view", () => {
       url: "http://localhost:5173",
       answers: false,
     });
+  });
+
+  it("keeps a crew app's health status for cmux's sidebar but out of the session status", async () => {
+    const { sessions } = setup(
+      {
+        ...threeSessions(),
+        statuses: {
+          [PRICING]: {
+            [SESSION_APP_STATUS_KEY]: "http://127.0.0.1:5173",
+            [SESSION_APP_HEALTH_STATUS_KEY]:
+              "http://127.0.0.1:5173 answers · http://127.0.0.1:5174 not answering",
+          },
+        },
+      },
+      { probe: async () => true },
+    );
+    const view = await sessions.view();
+    if (!view.ok) throw new Error(view.error);
+    const pricing = view.sessions.find((row) => row.id === PRICING);
+    expect(pricing?.app).toEqual({ url: "http://127.0.0.1:5173", answers: true });
+    expect(pricing?.status).toBeNull();
   });
 
   it("does not show hub-owned mc statuses as session status", async () => {

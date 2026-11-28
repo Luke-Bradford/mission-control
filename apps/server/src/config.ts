@@ -40,6 +40,7 @@ import {
   ROLE_PROMPT,
   ROLE_PROMPT_DIR,
   type RoleDef,
+  renderAppPorts,
   resolveSeatDef,
   SANDBOX_DENY_READ_HOME,
   type SeatCommands,
@@ -271,6 +272,8 @@ export interface CcConfig {
     fullSuite?: string[];
     /** The command that runs the repo's app from a checkout; the QA readiness card shows it under the branch commands. */
     runCommand?: string;
+    /** Development processes the hub keeps in a dedicated cmux app workspace. */
+    appCommands?: { command: string; url: string }[];
     /** The checks that decide CI on a PR head, by name. [] = every check but mc/review. Loaded: always set. */
     requiredChecks?: string[];
     /** A repository-owned bot whose verdict replaces the crew review. */
@@ -620,6 +623,21 @@ const fileSchema = z
         needs_you_labels: z.array(nonEmpty).optional(),
         full_suite: z.array(nonEmpty).default([]),
         run_command: nonEmpty.optional(),
+        app_commands: z
+          .array(
+            z.strictObject({
+              command: nonEmpty,
+              url: nonEmpty.refine((url) => {
+                try {
+                  const parsed = new URL(renderAppPorts(url, 5173, 5182));
+                  return parsed.protocol === "http:" && parsed.hostname === "127.0.0.1";
+                } catch {
+                  return false;
+                }
+              }, "must be a 127.0.0.1 HTTP URL"),
+            }),
+          )
+          .default([]),
         required_checks: z
           .array(
             nonEmpty.refine(
@@ -845,6 +863,7 @@ const fileSchema = z
         ...(r.needs_you_labels === undefined ? {} : { needsYouLabels: r.needs_you_labels }),
         fullSuite: r.full_suite,
         ...(r.run_command === undefined ? {} : { runCommand: r.run_command }),
+        ...(r.app_commands.length === 0 ? {} : { appCommands: r.app_commands }),
         requiredChecks: r.required_checks,
         ...(r.review === undefined
           ? {}

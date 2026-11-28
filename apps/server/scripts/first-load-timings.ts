@@ -36,6 +36,7 @@ const SKIP = new Set([
   "/api/stream",
   "/api/update/log",
   "/api/sessions",
+  "/api/sessions/apps",
   "/api/sessions/sidebar",
   "/api/sessions/roles",
 ]);

@@ -311,6 +311,21 @@ button.sess-inbox[aria-expanded="true"] {
   min-width: 0;
 }
 
+.sess-crew-apps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.sess-crew-app {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--fg-2);
+}
+
 .sess-applink {
   max-width: 100%;
   overflow: hidden;

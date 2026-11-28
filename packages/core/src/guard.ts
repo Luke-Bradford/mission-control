@@ -2515,6 +2515,18 @@ const SECRET_PATTERNS: readonly { kind: SecretFinding["kind"]; re: RegExp }[] = 
 
 const MIN_KNOWN_SECRET = 16;
 
+/** A `NAME=value` whose name says secret, or a `--token`/`--password` flag's value. */
+const SECRET_ASSIGNMENT =
+  /(\b[A-Za-z0-9_]*(?:token|secret|passw(?:or)?d|api_?key|private_?key)[A-Za-z0-9_]*=|--(?:token|password|secret|api-key)[= ])(?:"[^"]*"|'[^']*'|\S+)/gi;
+
+/** `text` (a command shown in Comms) with every secret pattern, known secret and secret-named value replaced. */
+export function redactSecrets(text: string, known: readonly string[]): string {
+  let out = text;
+  for (const k of known) if (k.length >= MIN_KNOWN_SECRET) out = out.split(k).join("[redacted]");
+  for (const p of SECRET_PATTERNS) out = out.replace(new RegExp(p.re.source, "g"), "[redacted]");
+  return out.replace(SECRET_ASSIGNMENT, "$1[redacted]");
+}
+
 /** The kinds of secret one line holds (each at most once). Never returns the match. */
 function kindsIn(line: string, known: readonly string[]): SecretFinding["kind"][] {
   const kinds = new Set<SecretFinding["kind"]>();
