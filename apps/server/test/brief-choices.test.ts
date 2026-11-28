@@ -351,7 +351,13 @@ it("does not let an old successful claim hide a changed same-key source", async 
   const key = source(),
     deps = choices();
   expect((await chooseBrief(deps, key, request(key), { operator: true })).state).toBe("applied");
-  expect(attentionItems(config, store, now).find((entry) => entry.key === key)?.acked).toBe(true);
+  // applied and read, it has settled and left the list (#2285); the sweeps still read it
+  expect(attentionItems(config, store, now).some((entry) => entry.key === key)).toBe(false);
+  expect(
+    attentionItems(config, store, now, undefined, undefined, null, true).find(
+      (entry) => entry.key === key,
+    )?.acked,
+  ).toBe(true);
   store.instructions.create(
     null,
     { kind: "text", text: "New operator direction" },

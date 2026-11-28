@@ -2,13 +2,16 @@ import {
   type BoardItem,
   CI_PILL,
   type CrewRow,
+  hudColumnOf,
   type PillTone,
   type PullRequestView,
   prPill,
   STATUS_OUT_OF_DATE,
 } from "@mc/core";
 import { type MouseEvent, memo } from "react";
+import { useNow } from "../clock.ts";
 import { seatStatus } from "../crew.ts";
+import { cost, elapsed } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill, PillButton } from "../hud/Pill.tsx";
@@ -24,6 +27,7 @@ import {
   cardColumn,
   checksText,
   firstBlocker,
+  isNotStartedColumn,
   NO_PR_YET,
   NO_REVIEWER,
   NOT_QUEUED,
@@ -302,6 +306,7 @@ export const Card = memo(function Card({
     ),
   ].filter(Boolean);
   const title = mine ? "Needs you" : worked ? "Being worked on or looked at now" : undefined;
+  const pattern = <WorkPattern item={item} agent={agent} col={col} outcome={outcome} when={when} />;
   return (
     // The card holds links (GitHub refs), so it is not a button: its title is the link a keyboard
     // or screen reader uses (Enter), and a click anywhere else on the card is a mouse shortcut to it.
@@ -363,6 +368,37 @@ export const Card = memo(function Card({
         </div>
       )}
       {overlay.length > 0 && <div className="overlay">{overlay}</div>}
+      <div className="kwork-pattern">{pattern}</div>
     </div>
   );
 }, sameProps);
+
+/** A compact, live tuple: the Board's visible state, elapsed work and recorded cost. */
+function WorkPattern({
+  item,
+  agent,
+  col,
+  outcome,
+  when,
+}: Pick<CardProps, "item" | "agent" | "outcome" | "when"> & { col: BoardColumn }) {
+  const now = useNow();
+  const state = col === "Done" ? outcome : agent ? seatStatus(agent).label : col;
+  const lifecycle = hudColumnOf(item);
+  const duration =
+    col === "Done"
+      ? when
+      : agent
+        ? elapsed(Math.max(0, now - (agent.run?.startedAt ?? agent.stateSince)))
+        : col === WAITING_COLUMN
+          ? `waiting ${elapsed(Math.max(0, now - (item.waiting?.at ?? item.updatedAt)))}`
+          : isNotStartedColumn(lifecycle)
+            ? "not started"
+            : `idle ${elapsed(Math.max(0, now - item.updatedAt))}`;
+  const spend = agent?.run?.costUsd;
+  const value = [state, duration, spend == null ? null : cost(spend)].filter(Boolean).join(" · ");
+  return (
+    <span className="xs muted" data-work-pattern={value}>
+      {value}
+    </span>
+  );
+}

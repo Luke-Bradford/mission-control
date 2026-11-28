@@ -2,6 +2,22 @@
 
 Agreed with the operator on 2026-10-25. This is the "why" and "where to": FLIGHT and every seat should read it before deciding how to act. Specs say what to build. This says how to choose.
 
+## Now: run eBull and autonomy-engine (from 27 November 2026)
+
+The operator, 26 November: "I'm hoping mission control will come to a close, just bug fix anything else now, small features possibly over time. I want it to manage the two repos that were happily running in a loop and working within the weekly token allowance just fine... What gets work through, reliably, visibly."
+
+The operator, 27 November: "Why are we running so slowly? Whats stalled, why isn't flight smart enough to get this on track?"
+
+This holds until the operator changes it. Close the ticket and FLIGHT.md's floor still come first. Then come a red main or a broken gate in any repo, and FLIGHT.md's steps 2 to 4 for these repos. Next comes an idle eBull or autonomy-engine build seat (`guido-eb`, `guido-ae`). It comes before anything on Mission Control.
+
+1. **Keep the repo build seats working.** Handing a seat its repo's open PR with a failed review comes first. Otherwise, if FLIGHT.md lets it start a ticket, start one in that wake. For these repos, the order in the hub config's `guidance.direction` takes the place of a working list. Promote only the next ticket in that order, or start the seat on it with `mc start_seat`. Use the repo's pickable column (eBull: Todo; autonomy-engine: Ready) and its area labels. A seat with nothing it may start stays idle.
+2. **Answer a repo seat's question in the wake that brings it.** A seat waiting on FLIGHT is as urgent as an idle one.
+3. **On Mission Control, work that unblocks a repo seat goes first.** Today that includes the seat terminal pane (#2275), eBull's database access (#2286) and the dependency route (#2298). The per-repo scoreboard (#2279) comes next, because item 5 needs it. Other Mission Control work is bug fixes, and small features the operator asks for.
+4. **FLIGHT never runs `git commit` in a seat's worktree.** When the hub refuses repo work it should allow, fold the gap into its open ticket. Set that ticket to P0, and file a new one only if none fits. Refusals FLIGHT.md lists as not bugs are not gaps. Those are holds, stops, pauses, budget stops, approvals and protected Needs-you items.
+5. **Once a day, compare each repo with its old loop.** Start once #2279 lands, and use its figures. Compare merged PRs a week and tokens per merged PR. If a repo is worse, find the cost and fix it. Say so in the next reply to the operator.
+
+The loops' baseline was measured by the controller from the hub's loop records and GitHub, ISO weeks 39 to 42. autonomy-engine merged 76 to 100 PRs a week, and eBull 97 to 161. Together they used about 3.3B tokens a week, as the controller counted them. That is about 16M per merged PR for the two repos combined.
+
 ## Close the ticket
 
 The operator, 19 November: "We have to be thinking about fighting to close issues, to get to the resolution, not finding more work, finding new potential things which may or may not be an issue, just get the ticket done, whats the quickest route that delivers the absolute core of what the user wanted and nothing more unless the user asks for it."

@@ -67,6 +67,7 @@ import {
 } from "../src/scheduler.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
 import {
+  DISK_LOW_NOTE_KEY,
   FILE_SERVICE_RESTART_SETTING,
   FILE_SERVICE_RUNAWAY_KEY,
   MACHINE_CAPACITY_KEY,
@@ -1890,6 +1891,39 @@ describe("scheduler", () => {
       expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
     });
 
+    it("raises one disk notice below ten percent and clears it on recovery", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      let t = minute + 1000;
+      let free = 9;
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              diskFreeBytes: free * 1024 ** 3,
+              diskTotalBytes: 100 * 1024 ** 3,
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      t += 60_000;
+      await s.tick("machine");
+      const notices = store.notes().filter((n) => n.key === DISK_LOW_NOTE_KEY);
+      expect(notices).toHaveLength(1);
+      expect(notices[0]?.text).toContain("Disk free is 9.0%, below 10%.");
+      free = 11;
+      t += 60_000;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === DISK_LOW_NOTE_KEY)).toBeUndefined();
+    });
+
     describe("a runaway file-change service", () => {
       const mb = 1024 ** 2;
       const make = (
@@ -2308,7 +2342,10 @@ describe("scheduler", () => {
       const first = store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY);
       if (first === undefined) throw new Error("machine-capacity note was not raised");
       const firstWake = state();
-      expect(firstWake.wake?.fresh).toEqual([`note:${MACHINE_CAPACITY_KEY}`]);
+      expect(firstWake.wake?.fresh).toEqual([
+        `note:${DISK_LOW_NOTE_KEY}`,
+        `note:${MACHINE_CAPACITY_KEY}`,
+      ]);
       markItemsShown(store, firstWake);
 
       for (reading = 1; reading < diskFreeGb.length; reading++) {

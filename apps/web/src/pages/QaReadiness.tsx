@@ -10,7 +10,7 @@ import {
   type ReviewShotView,
 } from "@mc/core";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, apiPost, apiReviewImage } from "../api.ts";
+import { ApiError, apiOperatorPicture, apiPost, apiReviewImage } from "../api.ts";
 import { useLocale, useNow, useTz } from "../clock.ts";
 import { MentionText } from "../comms/messages.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
@@ -690,27 +690,19 @@ function Pairs({
                             : `head ${shortSha(manifest.sha)}`}
                         </span>
                       </figcaption>
-                      <a
-                        href={`${base}-${kind}.png?repo=${enc(pr.repoId)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        <img
-                          src={`${base}-${kind}.png?repo=${enc(pr.repoId)}`}
-                          alt={`${pair.page}, ${pair.scheme}, ${kind}`}
-                          loading="lazy"
-                        />
-                      </a>
+                      <EvidenceImage
+                        path={`${base}-${kind}.png?repo=${enc(pr.repoId)}`}
+                        alt={`${pair.page}, ${pair.scheme}, ${kind}`}
+                      />
                     </figure>
                   ))}
                 </div>
-                <a
-                  href={`${base}-diff.png?repo=${enc(pr.repoId)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <EvidenceLink
+                  path={`${base}-diff.png?repo=${enc(pr.repoId)}`}
+                  loading="Loading pixel diff…"
                 >
                   Open pixel diff · {plural(pair.regions.length, "changed region")}
-                </a>
+                </EvidenceLink>
               </section>
             );
           })
@@ -819,6 +811,70 @@ function ReviewImage({ shot }: { shot: ReviewShotView }) {
         <p>{error ? "The review screenshot could not be loaded." : "Loading review screenshot…"}</p>
       )}
     </figure>
+  );
+}
+
+/** Evidence images use the API reader so Demo never sends a browser image request to the hub. */
+function useEvidenceUrl(path: string) {
+  const [url, setUrl] = useState<string>(),
+    [error, setError] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void apiOperatorPicture(path)
+      .then(
+        (blob) =>
+          new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () =>
+              typeof reader.result === "string"
+                ? resolve(reader.result)
+                : reject(new Error("The evidence image could not be read."));
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          }),
+      )
+      .then((value) => {
+        if (active) setUrl(value);
+      })
+      .catch(() => {
+        if (active) setError(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [path]);
+  return { url, error };
+}
+
+function EvidenceLink({
+  path,
+  loading,
+  children,
+}: {
+  path: string;
+  loading: string;
+  children: ReactNode;
+}) {
+  const { url, error } = useEvidenceUrl(path);
+  if (url)
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
+  return <p>{error ? "The evidence image could not be loaded." : loading}</p>;
+}
+
+function EvidenceImage({ path, alt }: { path: string; alt: string }) {
+  const { url, error } = useEvidenceUrl(path);
+  if (url)
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        <img src={url} alt={alt} loading="lazy" />
+      </a>
+    );
+  return (
+    <p>{error ? "The evidence image could not be loaded." : "Loading screenshot evidence…"}</p>
   );
 }
 

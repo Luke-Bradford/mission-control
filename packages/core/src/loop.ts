@@ -802,6 +802,8 @@ export interface LoopSnapshot {
   floorApproved?: boolean;
   /** The run's profile limits: CI tries and review rounds. Absent: `CI_TRIES` and `REVIEW_ROUNDS`. */
   limits?: { tries: number; rounds: number };
+  /** This repository uses its own bot for review, so unattended rework stops after three rounds. */
+  repoBotReview?: boolean;
   /** The card's column from the poll. */
   card: string | null;
   /** This run's seat_lines keys, with the time each was claimed. */
@@ -963,6 +965,22 @@ function reviewView(s: LoopSnapshot, loop: RunLoop) {
     !waived;
   const blocked = cur !== null && cur.state === "reported" && cur.blocking > 0;
   return { R, P, from, cur, waived, on, blocked };
+}
+
+/** A repository bot cannot review a draft, so green CI releases it before the bot's verdict. */
+function repoBotReadySha(s: LoopSnapshot, loop: RunLoop): string | null {
+  const P = s.pushed?.sha ?? null;
+  return s.repoBotReview &&
+    s.autoMerge === true &&
+    P !== null &&
+    loop.phase === "review" &&
+    s.ended === null &&
+    s.pr?.state === "open" &&
+    s.pr.headSha === P &&
+    s.headCommit === P &&
+    s.pr.ci === "passing"
+    ? P
+    : null;
 }
 
 /** Floors 2 and 7, with unreadable rules held for the operator. */
@@ -1617,7 +1635,9 @@ function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
   const granted =
     (loop.flightReworks?.[sha] ?? 0) > 0 ||
     (loop.flightReworkGrantEpoch !== undefined && loop.epoch >= loop.flightReworkGrantEpoch);
-  return granted ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
+  if (granted) return 1;
+  const rounds = s.limits?.rounds ?? REVIEW_ROUNDS;
+  return s.repoBotReview ? Math.min(3, rounds) : rounds;
 }
 
 /** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
@@ -1892,6 +1912,13 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     if (s.headCommit !== null && s.pushed?.sha !== s.headCommit) actions.push({ kind: "push" });
     else if (s.pushed !== null && s.pr === null) actions.push({ kind: "open-pr" });
   }
+  const repoBotReady = repoBotReadySha(s, loop);
+  const readyDone =
+    repoBotReady !== null &&
+    loop.merging?.sha === repoBotReady &&
+    (loop.merging.done ?? []).includes("ready");
+  if (repoBotReady !== null && s.pr?.isDraft !== false && !readyDone)
+    actions.push({ kind: "mark-ready" });
   if (rv.on && rv.R !== null && rv.P !== null) {
     const { R, P, cur } = rv;
     if (
@@ -1915,7 +1942,12 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
   if (gv.passes && gv.P !== null) {
     const done = loop.merging?.done ?? [];
     const readyDone = loop.merging?.sha === gv.P && done.includes("ready");
-    if (s.pr?.isDraft !== false && !readyDone) actions.push({ kind: "mark-ready" });
+    if (
+      s.pr?.isDraft !== false &&
+      !readyDone &&
+      !actions.some((action) => action.kind === "mark-ready")
+    )
+      actions.push({ kind: "mark-ready" });
     actions.push({ kind: "merge", sha: gv.P });
   }
   if (loop.phase !== "done") {

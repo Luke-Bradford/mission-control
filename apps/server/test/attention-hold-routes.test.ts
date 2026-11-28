@@ -21,7 +21,8 @@ it("held items leave attention and return with a release explanation; routes enf
     seatId: null,
     repoId: null,
     text: "Choose",
-    at: 1,
+    // the app reads the real clock: an item from 1970 would be settled as stale (#2285)
+    at: Date.now(),
   });
   const app = buildApp({ config, store, bus: new ChangeBus(), operatorToken: "test-token" });
   try {
@@ -85,7 +86,7 @@ it("refuses an operator hold that closes a cycle of item holds, storing nothing"
       seatId: null,
       repoId: null,
       text: key,
-      at: 1,
+      at: Date.now(),
     });
   const app = buildApp({ config, store, bus: new ChangeBus(), operatorToken: "test-token" });
   const headers = { "x-mc-operator": "test-token" };

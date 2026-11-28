@@ -70,7 +70,17 @@ export function openQuestionSubjects(d: {
   const flightId = flightSeat(config)?.seat.id ?? null;
   const questions = new Map(store.openQuestions().map((q) => [`ask:${q.id}`, q]));
   const out: QuestionSubject[] = [];
-  for (const item of attentionItems(config, store, now, d.lock ?? NO_LOCK)) {
+  // stale items too: a question whose ticket closed is closed here, and its seat told (#2285)
+  for (const item of attentionItems(
+    config,
+    store,
+    now,
+    d.lock ?? NO_LOCK,
+    undefined,
+    null,
+    false,
+    true,
+  )) {
     const asked = questions.get(item.key);
     const seatQuestion = asked !== undefined && asked.agentId !== flightId ? asked : undefined;
     const operatorBrief = item.brief !== undefined && item.brief.for !== "flight";

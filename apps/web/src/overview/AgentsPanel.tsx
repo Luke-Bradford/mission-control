@@ -44,6 +44,7 @@ import {
   seatItems,
   seatRoleTitle,
   seatStatus,
+  seatWorkPattern,
   waitText,
 } from "../crew.ts";
 import { RESOURCES, streamStatus, useResource, useResources, useReviewPrs } from "../data.ts";
@@ -715,6 +716,7 @@ function AgentRow({
       ref={rowElement}
       role="row"
       className={cls.filter(Boolean).join(" ")}
+      data-work-pattern={seatWorkPattern(row)}
       title={status.label === "Free" && crewStatus?.enabled === false ? "Crew is paused" : doing}
       onClick={(e) => {
         // a link in the row (a ticket on GitHub) goes where it points, not to the Agent page

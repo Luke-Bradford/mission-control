@@ -7,6 +7,16 @@ condition and the tracked agent consumers. The item keeps its original age and a
 through the whole capacity episode, including readings that move around a threshold. A
 percentage-disk episode closes only after ten minutes above the configured floor plus one point
 (6% with the default 5% floor). Other capacity conditions close after five minutes of headroom.
+A separate `disk-low` item opens once when free disk falls below 10%, even if the lower admission
+floor has not been crossed. It closes when free disk reaches 10% again.
+
+Each hourly leftovers pass compresses crew Claude and Codex session transcripts after 24 hours and
+deletes them after 14 days. It removes Playwright profiles and Chrome temporary entries older than
+six hours only when no live process names the entry. Claude and Codex files are selected only when
+their recorded worktree is under `crew.worktrees`; live worktrees are left alone. Ended worktrees
+already leave through the ten-minute crew tidy when their ticket closes or their PR merges or
+closes. The Machine response also reports byte counts for those transcript and browser stores;
+`/api/disk-use` reports the worktree total.
 
 The percentage breach timestamp is stored in hub settings, so a restart or the original reading
 leaving short history cannot clear an episode. The item keeps its original timestamp and dismissal

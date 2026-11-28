@@ -492,7 +492,7 @@ export class Store {
   }
 
   /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
-  private transaction(fn: () => void, writeLock = false): void {
+  transaction(fn: () => void, writeLock = false): void {
     this.db.exec(writeLock ? "BEGIN IMMEDIATE" : "BEGIN");
     try {
       fn();
@@ -1867,13 +1867,13 @@ export class Store {
   private writePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): void {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
-         review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
+         review, repo_bot_review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
          assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files,
          base, is_cross_repository)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
-         is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
+         is_draft = excluded.is_draft, review = excluded.review, repo_bot_review = excluded.repo_bot_review, ci = excluded.ci,
          created_at = excluded.created_at, updated_at = excluded.updated_at,
          merged_at = excluded.merged_at, read_at = excluded.read_at,
          head_sha = excluded.head_sha, mergeable = excluded.mergeable, author = excluded.author,
@@ -1970,6 +1970,7 @@ export class Store {
         p.state,
         p.isDraft ? 1 : 0,
         p.review,
+        JSON.stringify(p.repoBotReview ?? null),
         p.ci,
         p.createdAt,
         p.updatedAt,
@@ -3295,33 +3296,39 @@ export class Store {
   }
 
   private pullRequestRows(rows: Row[]): PullRequestView[] {
-    return rows.map((r) => ({
-      repoId: r.repo_id as string,
-      number: r.number as number,
-      title: r.title as string,
-      url: r.url as string,
-      branch: r.branch as string,
-      ticket: r.ticket as string | null,
-      state: r.state as PullRequestView["state"],
-      isDraft: r.is_draft === 1,
-      review: r.review as PullRequestView["review"],
-      ci: r.ci as PullRequestView["ci"],
-      createdAt: r.created_at as number,
-      updatedAt: r.updated_at as number,
-      mergedAt: r.merged_at as number | null,
-      headSha: r.head_sha as string | null,
-      mergeCommitSha: r.merge_commit_sha as string | null,
-      mergeable: r.mergeable as PullRequestView["mergeable"],
-      author: (r.author as string | null) ?? null,
-      assignees: parseJson<string[]>(r.assignees, []),
-      checks: parseJson<PrCheck[]>(r.checks, []),
-      closingIssues: parseJson<number[]>(r.closing_issues, []),
-      ...(r.is_cross_repository == null ? {} : { isCrossRepository: r.is_cross_repository === 1 }),
-      ...(r.additions == null ? {} : { additions: r.additions as number }),
-      ...(r.deletions == null ? {} : { deletions: r.deletions as number }),
-      ...(r.changed_files == null ? {} : { changedFiles: r.changed_files as number }),
-      ...(r.base == null ? {} : { base: r.base as string }),
-    }));
+    return rows.map((r) => {
+      const repoBotReview = parseJson<PullRequestView["repoBotReview"]>(r.repo_bot_review, null);
+      return {
+        repoId: r.repo_id as string,
+        number: r.number as number,
+        title: r.title as string,
+        url: r.url as string,
+        branch: r.branch as string,
+        ticket: r.ticket as string | null,
+        state: r.state as PullRequestView["state"],
+        isDraft: r.is_draft === 1,
+        review: r.review as PullRequestView["review"],
+        ...(repoBotReview === null ? {} : { repoBotReview }),
+        ci: r.ci as PullRequestView["ci"],
+        createdAt: r.created_at as number,
+        updatedAt: r.updated_at as number,
+        mergedAt: r.merged_at as number | null,
+        headSha: r.head_sha as string | null,
+        mergeCommitSha: r.merge_commit_sha as string | null,
+        mergeable: r.mergeable as PullRequestView["mergeable"],
+        author: (r.author as string | null) ?? null,
+        assignees: parseJson<string[]>(r.assignees, []),
+        checks: parseJson<PrCheck[]>(r.checks, []),
+        closingIssues: parseJson<number[]>(r.closing_issues, []),
+        ...(r.is_cross_repository == null
+          ? {}
+          : { isCrossRepository: r.is_cross_repository === 1 }),
+        ...(r.additions == null ? {} : { additions: r.additions as number }),
+        ...(r.deletions == null ? {} : { deletions: r.deletions as number }),
+        ...(r.changed_files == null ? {} : { changedFiles: r.changed_files as number }),
+        ...(r.base == null ? {} : { base: r.base as string }),
+      };
+    });
   }
 
   /** Marks the repo's stored PRs stale: a poll could not read them, so each row is its last good read. */

@@ -5,6 +5,7 @@ import {
   apiDelete,
   apiGet,
   apiOperatorGet,
+  apiOperatorPicture,
   apiPost,
   apiPut,
   apiReviewImage,
@@ -47,6 +48,10 @@ describe("Demo at the network door", () => {
     expect(await apiOperatorGet<{ operator: unknown }>("/api/config")).toHaveProperty("operator");
     const image = await apiReviewImage("f".repeat(32));
     expect(image.type).toBe("image/png");
+    const evidence = await apiOperatorPicture(
+      `/api/prs/1107/evidence/${"a".repeat(40)}/overview-dark-before.png?repo=mission-control`,
+    );
+    expect(evidence.type).toBe("image/png");
     const stream = openStream("/api/stream");
     expect(stream.readyState).not.toBe(2);
     stream.close();

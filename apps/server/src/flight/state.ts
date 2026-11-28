@@ -77,6 +77,7 @@ import {
   type PaceCheck,
   paceRefusal,
   priorityRank,
+  questionsWaiting,
   READY_LABEL,
   RULING_PARK,
   type Run,
@@ -1785,6 +1786,9 @@ export function wakeFacts(s: FlightState & TeamsDigestState): string {
     .map((p) => `${p.pr}:${p.headSha}:${p.unheld}:${p.review?.blocking ?? "unreviewed"}`)
     .sort();
   return JSON.stringify({
+    // first, so a wake names it first: a seat's question still unanswered after 10 minutes, so
+    // FLIGHT is woken a second time for it (#2285)
+    qAgain: questionsWaiting(s.questions).map((q) => q.id),
     // once a day or less: an instruction change, the daily retrospective, an arrival from another team
     instructions:
       s.instructionRevision && s.instructionRevision !== "0" ? [s.instructionRevision] : [],
@@ -1886,6 +1890,7 @@ const URGENT_CATEGORIES: readonly string[] = [
   "operator",
   "owed",
   "q",
+  "qAgain",
   "instructions",
   "planned",
   "retrospective",
