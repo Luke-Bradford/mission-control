@@ -197,7 +197,7 @@ function SeatCard({
       type="button"
       className={`seat-card${free ? " free" : ""}`}
       data-seat={row.id}
-      data-work-pattern={seatWorkPattern(row, now)}
+      data-work-pattern={seatWorkPattern(row)}
       aria-current={on}
       onClick={() => chooseSeat(row.id, shown)}
     >

@@ -121,8 +121,8 @@ function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
           })
         : null,
     workPattern: agent
-      ? seatWorkPattern(agent, ctx.now)
-      : `${col}|${Math.floor(Math.max(0, ctx.now - item.updatedAt) / 60_000)}m|—`,
+      ? seatWorkPattern(agent)
+      : `${col}|${item.updatedAt}|—`,
   };
 }
 
