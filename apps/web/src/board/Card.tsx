@@ -8,7 +8,9 @@ import {
   STATUS_OUT_OF_DATE,
 } from "@mc/core";
 import { type MouseEvent, memo } from "react";
+import { useNow } from "../clock.ts";
 import { seatStatus } from "../crew.ts";
+import { cost, elapsed } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill, PillButton } from "../hud/Pill.tsx";
@@ -120,8 +122,6 @@ export interface CardProps {
   you: CardYou | null;
   /** Its review found blocking problems: the rework line (`reworkLabel`); null when not. */
   rework?: string | null;
-  /** The state, duration and cost pattern from the seat currently on the card. */
-  workPattern?: string;
 }
 
 /**
@@ -156,7 +156,6 @@ export const Card = memo(function Card({
   statusOutOfDate,
   you,
   rework = null,
-  workPattern = "Unassigned|—|—",
 }: CardProps) {
   cardRenderProbe.onRender?.(ticketRef(item));
   const col = cardColumn(item);
@@ -305,6 +304,7 @@ export const Card = memo(function Card({
     ),
   ].filter(Boolean);
   const title = mine ? "Needs you" : worked ? "Being worked on or looked at now" : undefined;
+  const pattern = <WorkPattern agent={agent} col={col} outcome={outcome} when={when} />;
   return (
     // The card holds links (GitHub refs), so it is not a button: its title is the link a keyboard
     // or screen reader uses (Enter), and a click anywhere else on the card is a mouse shortcut to it.
@@ -314,7 +314,6 @@ export const Card = memo(function Card({
       className={`kcard${unacked ? " pulse-warn" : worked ? " pulse-ok" : ""}`}
       title={title}
       data-card={ticketRef(item)}
-      data-work-pattern={workPattern}
       onClick={click}
     >
       <div className="kref">
@@ -366,7 +365,36 @@ export const Card = memo(function Card({
           )}
         </div>
       )}
-      {overlay.length > 0 && <div className="overlay">{overlay}</div>}
+      {(overlay.length > 0 || pattern) && (
+        <div className="overlay">
+          {overlay}
+          {pattern}
+        </div>
+      )}
     </div>
   );
 }, sameProps);
+
+/** A compact, live tuple: the Board's visible state, elapsed work and recorded cost. */
+function WorkPattern({
+  agent,
+  col,
+  outcome,
+  when,
+}: Pick<CardProps, "agent" | "outcome" | "when"> & { col: BoardColumn }) {
+  const now = useNow();
+  const state = col === "Done" ? outcome : agent ? seatStatus(agent).label : col;
+  const duration =
+    col === "Done"
+      ? when
+      : agent
+        ? elapsed(Math.max(0, now - (agent.run?.startedAt ?? agent.stateSince)))
+        : "—";
+  const spend = agent ? cost(agent.run?.costUsd ?? null) : "—";
+  const value = `${state}|${duration}|${spend}`;
+  return (
+    <span className="xs muted" data-work-pattern={value}>
+      {state} · {duration} · {spend}
+    </span>
+  );
+}

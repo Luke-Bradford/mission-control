@@ -157,7 +157,7 @@ describeRendered("Demo, rendered", () => {
       const pages = [
         ["Overview", "/", "#agentsList .trow[data-work-pattern]"],
         ["Agents", "/agent", ".seat-card[data-work-pattern]"],
-        ["Board", "/board", ".kcard[data-work-pattern]"],
+        ["Board", "/board", ".kcard [data-work-pattern]"],
         ["FLIGHT", "/flight", ".fp-brow[data-work-pattern]"],
       ] as const;
       for (const [name, at, selector] of pages) {
@@ -167,15 +167,21 @@ describeRendered("Demo, rendered", () => {
           async () => (await count(page, selector)) >= 2,
           `${name} work cards`,
         );
-        const patterns = await page.evaluate(
-          (css) =>
-            [...document.querySelectorAll<HTMLElement>(css)].map(
-              (card) => card.dataset.workPattern ?? "",
-            ),
-          selector,
+        const patternGroups = await page.evaluate(
+          ({ css, board }) => {
+            const groups = board ? [...document.querySelectorAll(".kb")] : [document];
+            return groups.map((group) =>
+              [...group.querySelectorAll<HTMLElement>(css)].map(
+                (card) => card.dataset.workPattern ?? "",
+              ),
+            );
+          },
+          { css: selector, board: name === "Board" },
         );
+        const patterns = patternGroups.flat();
         expect(patterns.every(Boolean), `${name}: ${patterns.join(", ")}`).toBe(true);
-        expect(adjacentPatternsDiffer(patterns), `${name}: ${patterns.join(", ")}`).toBe(true);
+        for (const group of patternGroups)
+          expect(adjacentPatternsDiffer(group), `${name}: ${group.join(", ")}`).toBe(true);
         expect(apiRequests(page)).toEqual([]);
         await page.close();
       }
