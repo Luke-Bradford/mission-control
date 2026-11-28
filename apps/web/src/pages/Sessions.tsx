@@ -105,11 +105,23 @@ const message = (error: unknown): string =>
  */
 export function Sessions() {
   const res = useResource<CmuxSessionsView>(RESOURCES.sessions);
+  const crewApps = useResource<
+    {
+      id: string;
+      name: string;
+      running: boolean;
+      apps: { url: string; answers: boolean | null }[];
+    }[]
+  >(RESOURCES.crewApps);
   const sidebar = useResource<{ on: boolean }>(RESOURCES.sessionsSidebar);
   const [writesOverride, setWritesOverride] = useState<boolean | null>(null);
   const tz = useTz();
   useEffect(() => {
     const timer = setInterval(() => hub.refetch(RESOURCES.sessions.path), SESSIONS_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    const timer = setInterval(() => hub.refetch(RESOURCES.crewApps.path), 60_000);
     return () => clearInterval(timer);
   }, []);
   const view = res.data;
@@ -165,6 +177,11 @@ export function Sessions() {
           New session
         </button>
       </div>
+      {crewApps.data && crewApps.data.length > 0 && <CrewApps apps={crewApps.data} />}
+      {crewApps.loading && <p className="sess-note">Reading crew apps…</p>}
+      {crewApps.error && (
+        <p className="sess-banner">Could not read crew apps: {crewApps.error.message}</p>
+      )}
       {opening && <OpenForm onClose={() => setOpening(false)} />}
       {error && (
         <p className="sess-banner" role="alert">
@@ -187,6 +204,75 @@ export function Sessions() {
         Click a row or press Enter to open it in cmux. The hub never closes a session.
       </p>
     </section>
+  );
+}
+
+function CrewApps({
+  apps,
+}: {
+  apps: {
+    id: string;
+    name: string;
+    running: boolean;
+    apps: { url: string; answers: boolean | null }[];
+  }[];
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const healthId = useId();
+  const change = async (id: string, action: "start" | "stop") => {
+    setBusy(id);
+    try {
+      await apiPost(ACTIONS.crewApp(id, action));
+      hub.refetch(RESOURCES.crewApps.path);
+      hub.refetch(RESOURCES.sessions.path);
+    } catch (error) {
+      toast(message(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <fieldset className="sess-crew-apps">
+      <legend className="sr-only">Crew apps</legend>
+      {apps.map((app) => (
+        <div className="sess-crew-app" key={app.id}>
+          <span>{app.name}</span>
+          <span className={`sess-ans ${app.running ? "ok" : "muted"}`}>
+            {app.running ? "Running" : "Stopped"}
+          </span>
+          {app.apps.map((endpoint, index) => (
+            <span className="sess-appcell" key={endpoint.url}>
+              <a
+                className="sess-applink"
+                href={endpoint.url}
+                aria-describedby={`${healthId}-${app.id}-${index}`}
+              >
+                {shortUrl(endpoint.url)}
+              </a>
+              <span
+                id={`${healthId}-${app.id}-${index}`}
+                className={`sess-ans ${endpoint.answers === true ? "ok" : endpoint.answers === false ? "crit" : "muted"}`}
+              >
+                {endpoint.answers === true
+                  ? "Answers"
+                  : endpoint.answers === false
+                    ? "Not answering"
+                    : "Not checked"}
+              </span>
+            </span>
+          ))}
+          <button
+            type="button"
+            className="ghost"
+            disabled={busy === app.id}
+            aria-label={`${app.running ? "Stop" : "Start"} ${app.name} app`}
+            onClick={() => void change(app.id, app.running ? "stop" : "start")}
+          >
+            {app.running ? "Stop" : "Start"}
+          </button>
+        </div>
+      ))}
+    </fieldset>
   );
 }
 

@@ -278,6 +278,11 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
     rules: [
       rule(/^#\d+$/, TICKET, "A session's ticket opens its ticket page."),
       rule(/^PR \d+$/, EXTERNAL, "A session's pull request opens on GitHub."),
+      rule(
+        /^127\.0\.0\.1:\d+$/,
+        EXTERNAL,
+        "A crew app address opens its loopback development app in a new tab.",
+      ),
     ],
   },
   audit: {
@@ -393,7 +398,8 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/pages/Needs.tsx": "page: first item",
   "src/pages/Planner.tsx": "page: the plan list; the Planner views",
   "src/pages/QaReadiness.tsx": "page: QA, Audit; external: preview",
-  "src/pages/Sessions.tsx": "page: a session's ticket; external: its PR on GitHub",
+  "src/pages/Sessions.tsx":
+    "page: a session's ticket; external: its PR on GitHub, a crew app's loopback address",
   "src/pages/Setup.tsx": "page: Setup tabs",
   "src/pages/TicketPage.tsx": "page: back to Board",
   "src/palette/entries.ts": "page: whatever the palette entry names",

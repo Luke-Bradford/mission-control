@@ -457,6 +457,7 @@ import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import { registerSessionRoutes } from "./sessions/api.ts";
+import type { CrewApps } from "./sessions/apps.ts";
 import type { SessionChecks } from "./sessions/checks.ts";
 import type { SessionsService } from "./sessions/sessions.ts";
 import { weeklyProjection } from "./spend/projection.ts";
@@ -586,6 +587,8 @@ export interface AppDeps {
   onSessionSidebarChange?: (on: boolean) => void;
   /** Each cmux session's repo checks (the Sessions page's Run checks and Repo checks); absent: 503. */
   sessionChecks?: SessionChecks;
+  /** Development app workspaces for crew repositories. */
+  crewApps?: CrewApps;
   /** The hub's local notifications, shared with services that raise their own (session checks); absent: built here. */
   notifications?: LocalNotifications;
   attentionMaterials?: AttentionMaterialsService;
