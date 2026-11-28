@@ -164,7 +164,9 @@ describe("Sessions page", () => {
     expect(screen.getAllByText("Not answering").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Not checked").length).toBeGreaterThan(0);
     expect(screen.getByText("Stopped")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Stop guido-ae · autonomy-engine app" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Stop guido-ae · autonomy-engine app" }),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Start guido-eb · ebull app" }));
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
   });
