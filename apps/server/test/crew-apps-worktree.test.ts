@@ -83,6 +83,7 @@ function realPanes() {
       return "";
     },
     setStatus: async () => {},
+    clearStatus: async () => {},
   };
 }
 

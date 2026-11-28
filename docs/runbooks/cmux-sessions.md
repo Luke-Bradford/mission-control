@@ -39,11 +39,22 @@ Every route needs the operator token. A seat's token gets 403. A hub without cmu
 
 Each live crew seat runs its configured development app in terminal panes of its own cmux workspace,
 from that seat's worktree. `app_commands` names one command per pane. The hub reserves a distinct
-loopback port block for each running seat, passes `PORT` and repository-specific variables such as
-`BACKEND_PORT`, and sets the first URL as the workspace `app` status. Each endpoint's health goes in
-the `app-health` status, for cmux's sidebar; the Sessions page never shows it as the session's own
-status. It never starts eBull's
-launchd-owned jobs process.
+block of ten loopback ports for each running seat (5173–5182 for the first). Pane n gets `PORT` =
+the block's first port + n, and every pane gets `BACKEND_PORT` = the block's last port. The web app
+comes first, so its address is the workspace `app` status. A command's `url` may name `$PORT` or
+`$BACKEND_PORT`. Each endpoint's health goes in the `app-health` status, for cmux's sidebar; the
+Sessions page never shows it as the session's own status. A stop removes both with
+`cmux clear-status`. It never starts eBull's launchd-owned jobs process.
+
+The default commands:
+
+- eBull: the frontend, `cd frontend && pnpm exec vite --host 127.0.0.1 --port $PORT --strictPort`
+  (vite itself, as `pnpm dev` drops the port flags; `VITE_API_PROXY_TARGET` points it at the
+  backend), then the backend, uvicorn on `$BACKEND_PORT`.
+- autonomy-engine: the studio web app, `SERVER_PORT=$BACKEND_PORT` vite from
+  `@autonomy-studio/web` on `$PORT`, then the studio server: install, build
+  `@autonomy-studio/shared`, and run `@autonomy-studio/server` with `PORT=$BACKEND_PORT`. Its health
+  address is `/health` on the backend port.
 
 A writer seat uses `app_start`, `app_restart` and `app_status` to start its panes, restart after a
 code change, and read the last lines from every app pane. The Sessions page lists each seat app, its

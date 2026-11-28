@@ -10,22 +10,34 @@ export const APP_RESTART_MS = 5 * 60_000;
 export const APP_PORT_START = 5173;
 export const CREW_APP_STATE_SETTING = "crew-app-panes";
 const PORT_BLOCK = 10;
+/** Each seat's backend listens on the last port of its block; its panes take the first ones. */
+const BACKEND_OFFSET = PORT_BLOCK - 1;
 export const CREW_APP_DEFAULTS: Readonly<Record<string, readonly CrewAppCommand[]>> = {
   "autonomy-engine": [
     {
-      command: "cd studio && pnpm install --frozen-lockfile && pnpm dev",
+      // vite.config.ts sends /api and /health to SERVER_PORT; it retries until the server is up
+      command:
+        "cd studio && SERVER_PORT=$BACKEND_PORT pnpm --filter @autonomy-studio/web exec vite --host 127.0.0.1 --port $PORT --strictPort",
       url: "http://127.0.0.1:$PORT",
     },
+    {
+      // the server needs shared built first, as studio's own dev script does
+      command:
+        "cd studio && pnpm install --frozen-lockfile && pnpm --filter @autonomy-studio/shared build && PORT=$BACKEND_PORT pnpm --filter @autonomy-studio/server dev",
+      url: "http://127.0.0.1:$BACKEND_PORT/health",
+    },
   ],
+  // the web app first: the first pane's address is the one the hub shows
   ebull: [
+    {
+      // vite itself: `pnpm dev` would drop the port flags
+      command: "cd frontend && pnpm exec vite --host 127.0.0.1 --port $PORT --strictPort",
+      url: "http://127.0.0.1:$PORT",
+    },
     {
       command:
         "uv run uvicorn app.main:app --reload --reload-dir app --host 127.0.0.1 --port $BACKEND_PORT",
-      url: "http://127.0.0.1:$PORT",
-    },
-    {
-      command: "cd frontend && pnpm dev -- --host 127.0.0.1 --port $PORT",
-      url: "http://127.0.0.1:$PORT",
+      url: "http://127.0.0.1:$BACKEND_PORT",
     },
   ],
 };
@@ -45,7 +57,10 @@ export interface CrewAppSeat {
   worktree: string;
 }
 interface CrewAppsDeps {
-  cmux: Pick<Cmux, "closePane" | "newPane" | "setStatus" | "readPane" | "workspaces">;
+  cmux: Pick<
+    Cmux,
+    "closePane" | "newPane" | "setStatus" | "clearStatus" | "readPane" | "workspaces"
+  >;
   repos(): readonly CrewAppRepo[];
   seats(): readonly CrewAppSeat[];
   now?(): number;
@@ -77,12 +92,13 @@ export async function seatWorkspace(
     (await cmux.workspaces()).find((entry) => entry.name.startsWith(`${seatId} · `))?.id ?? null
   );
 }
-const urlAt = (url: string, port: number) => url.replaceAll("$PORT", String(port));
+const urlAt = (url: string, port: number, backendPort: number) =>
+  url.replaceAll("$BACKEND_PORT", String(backendPort)).replaceAll("$PORT", String(port));
 const quote = (value: string) => `'${value.replaceAll("'", "'\\\"'\\\"'")}'`;
 export function appCommand(repo: string, command: string, port: number, backendPort: number) {
   const rendered = command
-    .replaceAll("$PORT", String(port))
-    .replaceAll("$BACKEND_PORT", String(backendPort));
+    .replaceAll("$BACKEND_PORT", String(backendPort))
+    .replaceAll("$PORT", String(port));
   const proxy =
     repo.toLowerCase() === "ebull" && /cd frontend &&/.test(rendered)
       ? ` VITE_API_PROXY_TARGET=http://127.0.0.1:${backendPort}`
@@ -209,7 +225,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
   const clearStatuses = async (workspace: string) => {
     for (const key of [SESSION_APP_STATUS_KEY, SESSION_APP_HEALTH_STATUS_KEY])
       try {
-        await deps.cmux.setStatus(workspace, key, "");
+        await deps.cmux.clearStatus(workspace, key);
       } catch (error) {
         deps.log?.(`Could not clear the ${key} status of ${workspace}: ${String(error)}`);
       }
@@ -236,7 +252,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     stopped.delete(seatId);
     if (running.has(seatId)) await close(seatId);
     const startPort = portStart(seat.id);
-    const backendPort = startPort;
+    const backendPort = startPort + BACKEND_OFFSET;
     const apps: { pane: string; url: string; answers: boolean | null }[] = [];
     // panes and both statuses are one start: any failure undoes all of it
     try {
@@ -247,7 +263,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
           seat.worktree,
           appCommand(repo.id, entry.command, port, backendPort),
         );
-        apps.push({ pane, url: urlAt(entry.url, port), answers: null });
+        apps.push({ pane, url: urlAt(entry.url, port, backendPort), answers: null });
       }
       await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, apps[0]?.url ?? "");
       await deps.cmux.setStatus(workspace, SESSION_APP_HEALTH_STATUS_KEY, appStatus(apps));
@@ -359,7 +375,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
             apps:
               app?.apps.map(({ url, answers }) => ({ url, answers })) ??
               repo.commands.map((entry, index) => ({
-                url: urlAt(entry.url, portOf(seat.id, index)),
+                url: urlAt(entry.url, portOf(seat.id, index), portOf(seat.id, BACKEND_OFFSET)),
                 answers: null,
               })),
           },

@@ -16,6 +16,7 @@ const cmux = () => ({
   newPane: vi.fn().mockResolvedValue("pane"),
   closePane: vi.fn().mockResolvedValue(undefined),
   setStatus: vi.fn(),
+  clearStatus: vi.fn(),
   readPane: vi.fn().mockResolvedValue("ready"),
 });
 describe("crew apps", () => {
@@ -51,22 +52,47 @@ describe("crew apps", () => {
     });
     await apps.start(seat.id);
     expect(pane.newPane).toHaveBeenCalledTimes(2);
-    expect(pane.newPane).toHaveBeenCalledWith(
-      "ws",
-      "/crew/ebull",
-      expect.stringContaining("PORT=5173 BACKEND_PORT=5173"),
+    // the web app first, on the seat's first port: it is the address the hub shows
+    const [frontend, backend] = pane.newPane.mock.calls.map((call) => call[2] as string);
+    expect(frontend).toContain(
+      "PORT=5173 BACKEND_PORT=5182 VITE_API_PROXY_TARGET=http://127.0.0.1:5182",
     );
-    expect(pane.newPane).toHaveBeenCalledWith(
-      "ws",
-      "/crew/ebull",
-      expect.stringContaining("PORT=5174 BACKEND_PORT=5173"),
-    );
+    expect(frontend).toContain("pnpm exec vite --host 127.0.0.1 --port 5173 --strictPort");
+    expect(frontend).not.toContain("pnpm dev");
+    expect(backend).toContain("uvicorn app.main:app");
+    expect(backend).toContain("--host 127.0.0.1 --port 5182");
     expect(pane.setStatus).toHaveBeenCalledWith("ws", "app", "http://127.0.0.1:5173");
     expect(pane.setStatus).toHaveBeenCalledWith(
       "ws",
       "app-health",
-      "http://127.0.0.1:5173 starting · http://127.0.0.1:5174 starting",
+      "http://127.0.0.1:5173 starting · http://127.0.0.1:5182 starting",
     );
+  });
+  it("splits autonomy-engine's studio into a web pane on the hub address and a server on the backend port", async () => {
+    const ae = { id: "guido-ae", runId: "run-ae", repoId: "autonomy-engine", worktree: "/crew/ae" };
+    const pane = cmux();
+    pane.workspaces.mockResolvedValue([{ id: "ae", name: "guido-ae · #2", cwd: ae.worktree }]);
+    const apps = createCrewApps({
+      cmux: pane,
+      repos: () => [
+        { id: "autonomy-engine", commands: CREW_APP_DEFAULTS["autonomy-engine"] ?? [] },
+      ],
+      seats: () => [ae],
+    });
+    await apps.start(ae.id);
+    const [web, server] = pane.newPane.mock.calls.map((call) => call[2] as string);
+    expect(web).toContain(
+      "SERVER_PORT=5182 pnpm --filter @autonomy-studio/web exec vite --host 127.0.0.1 --port 5173 --strictPort",
+    );
+    expect(server).toContain("pnpm install --frozen-lockfile");
+    expect(server).toContain("pnpm --filter @autonomy-studio/shared build");
+    expect(server).toContain("PORT=5182 pnpm --filter @autonomy-studio/server dev");
+    expect(web).not.toContain("pnpm install");
+    expect(pane.setStatus).toHaveBeenCalledWith("ae", "app", "http://127.0.0.1:5173");
+    expect(apps.view()[0]?.apps.map((app) => app.url)).toEqual([
+      "http://127.0.0.1:5173",
+      "http://127.0.0.1:5182/health",
+    ]);
   });
   it("keeps autonomy-engine and eBull in their own live seat workspaces", async () => {
     const ae = {
@@ -143,7 +169,7 @@ describe("crew apps", () => {
   });
   it("reads each retained app pane rather than the selected workspace surface", async () => {
     const pane = cmux();
-    pane.newPane.mockResolvedValueOnce("backend-pane").mockResolvedValueOnce("frontend-pane");
+    pane.newPane.mockResolvedValueOnce("frontend-pane").mockResolvedValueOnce("backend-pane");
     pane.readPane.mockImplementation(async (surface: string) => `${surface} lines`);
     const apps = createCrewApps({
       cmux: pane,
@@ -152,7 +178,7 @@ describe("crew apps", () => {
     });
     await apps.start(seat.id);
     await expect(apps.status(seat.id)).resolves.toBe(
-      "App 1 (http://127.0.0.1:5173):\nbackend-pane lines\n\nApp 2 (http://127.0.0.1:5174):\nfrontend-pane lines",
+      "App 1 (http://127.0.0.1:5173):\nfrontend-pane lines\n\nApp 2 (http://127.0.0.1:5182):\nbackend-pane lines",
     );
     expect(pane.readPane).toHaveBeenCalledWith("backend-pane", 40);
     expect(pane.readPane).toHaveBeenCalledWith("frontend-pane", 40);
@@ -172,14 +198,15 @@ describe("crew apps", () => {
     expect(pane.setStatus).toHaveBeenCalledWith(
       "ws",
       "app-health",
-      "http://127.0.0.1:5173 not answering · http://127.0.0.1:5174 not answering",
+      "http://127.0.0.1:5173 not answering · http://127.0.0.1:5182 not answering",
     );
     pane.closePane.mockClear();
     seats = [];
     await apps.tick();
     expect(pane.closePane).toHaveBeenCalledTimes(2);
-    expect(pane.setStatus).toHaveBeenCalledWith("ws", "app", "");
-    expect(pane.setStatus).toHaveBeenCalledWith("ws", "app-health", "");
+    expect(pane.clearStatus).toHaveBeenCalledWith("ws", "app");
+    expect(pane.clearStatus).toHaveBeenCalledWith("ws", "app-health");
+    expect(pane.setStatus).not.toHaveBeenCalledWith("ws", expect.anything(), "");
   });
   it("restarts a stopped pane once in five minutes and logs the restart", async () => {
     let at = 0;
@@ -303,7 +330,7 @@ describe("crew apps", () => {
       { id: "ae", name: "guido-ae · #2", cwd: ae.worktree },
     ]);
     pane.newPane.mockImplementation(async (workspace: string, _cwd: string, command: string) => {
-      if (workspace === "eb" && command.includes("frontend"))
+      if (workspace === "eb" && command.includes("uvicorn"))
         throw new Error("cmux new-pane failed");
       return `${workspace}-pane`;
     });
@@ -325,7 +352,10 @@ describe("crew apps", () => {
     await apps.tick();
     expect(apps.view().find((app) => app.id === ae.id)).toMatchObject({
       running: true,
-      apps: [{ url: "http://127.0.0.1:5173", answers: false }],
+      apps: [
+        { url: "http://127.0.0.1:5173", answers: false },
+        { url: "http://127.0.0.1:5182/health", answers: false },
+      ],
     });
     expect(log).toHaveBeenCalledWith(expect.stringContaining("cmux new-pane failed"));
   });
@@ -361,8 +391,8 @@ describe("crew apps", () => {
       await expect(apps.start(seat.id)).rejects.toThrow("cmux set-status failed");
       expect(pane.closePane).toHaveBeenCalledWith("backend-pane");
       expect(pane.closePane).toHaveBeenCalledWith("frontend-pane");
-      expect(pane.setStatus).toHaveBeenCalledWith("ws", "app", "");
-      expect(pane.setStatus).toHaveBeenCalledWith("ws", "app-health", "");
+      expect(pane.clearStatus).toHaveBeenCalledWith("ws", "app");
+      expect(pane.clearStatus).toHaveBeenCalledWith("ws", "app-health");
       expect(apps.view()[0]?.running).toBe(false);
 
       seats = [other, seat];
@@ -373,7 +403,7 @@ describe("crew apps", () => {
       fail = false;
       await apps.tick();
       expect(apps.view().find((app) => app.id === seat.id)?.running).toBe(true);
-      expect(pane.newPane).toHaveBeenCalledTimes(5);
+      expect(pane.newPane).toHaveBeenCalledTimes(6);
     });
   }
   it("gives a seat's next run its own app, even with no tick between the runs", async () => {
@@ -412,9 +442,8 @@ describe("crew apps", () => {
         { id: "ws", name: "guido-eb · #1", cwd: seat.worktree },
         { id: "ae", name: "guido-ae · #2", cwd: ae.worktree },
       ]);
-      pane.setStatus.mockImplementation(async (ws: string, key: string, value: string) => {
-        if (ws === "ws" && key === failing && value === "")
-          throw new Error("cmux set-status failed");
+      pane.clearStatus.mockImplementation(async (ws: string, key: string) => {
+        if (ws === "ws" && key === failing) throw new Error("cmux clear-status failed");
       });
       let seats = [seat];
       const apps = createCrewApps({
@@ -429,7 +458,7 @@ describe("crew apps", () => {
       await apps.start(seat.id);
       seats = [{ ...seat, runId: "run-eb-2" }, ae];
       await apps.tick();
-      expect(pane.newPane).toHaveBeenCalledTimes(5);
+      expect(pane.newPane).toHaveBeenCalledTimes(6);
       expect(apps.view().map((app) => [app.id, app.running, app.apps[0]?.url])).toEqual([
         [seat.id, true, "http://127.0.0.1:5173"],
         [ae.id, true, "http://127.0.0.1:5183"],
