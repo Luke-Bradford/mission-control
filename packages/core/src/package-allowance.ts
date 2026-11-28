@@ -179,7 +179,18 @@ export function lockfileProblems(
   const resolved = (value: unknown, version: string): string | null => {
     const v = isObject(value) ? value.version : value;
     if (typeof v !== "string") return String(v);
-    return v === version || v.startsWith(`${version}(`) ? null : v;
+    if (v !== version && !v.startsWith(`${version}(`)) return v;
+    if (isObject(value)) {
+      const specifier = value.specifier;
+      if (
+        specifier !== version &&
+        specifier !== `^${version}` &&
+        specifier !== `~${version}`
+      ) {
+        return String(specifier);
+      }
+    }
+    return null;
   };
   const fields = new Set<string>(DEP_FIELDS);
   const added: string[] = [];
