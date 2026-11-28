@@ -15,11 +15,12 @@ import { crewTelemetry, crewTelemetryApi } from "./telemetryCrewFixture.ts";
 const { renderAt } = browserSession();
 const evidence = process.env.MC_QA_EVIDENCE_DIR;
 const DAY = 24 * HOUR;
+type RepoWeeks = NonNullable<ReturnType<typeof crewTelemetry>["repoWeeks"]>;
 const LONG_TITLE =
   "Telemetry throughput ticket with a deliberately long board-card title that must remain readable without hiding the merged date, cycle time, or cost";
 const LONG_TICKET = "repository-with-a-schema-length-name-that-must-remain-visible#1900";
 
-function throughputApi(): Record<string, unknown> {
+function throughputApi(repoWeeks?: RepoWeeks): Record<string, unknown> {
   const base = crewTelemetryApi();
   const data = crewTelemetry();
   const days = (data.throughput as { day: string }[]).map((d) => d.day);
@@ -56,12 +57,41 @@ function throughputApi(): Record<string, unknown> {
       tickets,
       ticketsInProgress: days.map((day, i) => ({ day, tickets: i < 2 ? null : 2 + ((i * 3) % 5) })),
     },
+    ...(repoWeeks === undefined ? {} : { repoWeeks }),
   };
   for (const r of ["1h", "6h", "24h", "7d"]) base[`/api/telemetry?range=${r}`] = withSeries;
   return base;
 }
 
-const api = () => ({ ...desktopFixture().api, ...throughputApi() });
+const api = (repoWeeks?: RepoWeeks) => ({ ...desktopFixture().api, ...throughputApi(repoWeeks) });
+
+function repoWeeksFixture(repositories = 3): RepoWeeks {
+  return Array.from({ length: repositories }, (_, index) => {
+    const zeroMerge = index === 1;
+    const longValue = index === 2;
+    return {
+      repoId: longValue
+        ? "repository-with-a-deliberately-long-name-that-must-remain-reachable-in-the-scoreboard"
+        : `crew-repo-${index + 1}`,
+      baseline: {
+        mergedPrsPerWeek: { min: 76, max: 100 },
+        tokensPerWeek: { min: 1_300_000_000, max: 1_700_000_000 },
+      },
+      weeks: [
+        {
+          week: "2026-11-02",
+          mergedPrs: zeroMerge ? 0 : 101,
+          tokensPerMergedPr: zeroMerge
+            ? { claude: null, codex: null }
+            : { claude: 20_000_000, codex: 9_000_000 },
+          reviewRoundsPerPr: zeroMerge ? null : 1.4,
+          medianReadyToMergeHours: zeroMerge ? null : 6.5,
+          noSeatWorkingHours: zeroMerge ? null : 2,
+        },
+      ],
+    };
+  });
+}
 
 async function ready(page: RenderedPage) {
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 150)), undefined);
@@ -260,6 +290,118 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
             await page.screenshot(
               join(evidence, `telemetry-throughput-table-1600x1000-${scheme}.png`),
             );
+          }
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
+
+  it(
+    "explains an empty repository scoreboard",
+    async () => {
+      const page = await renderAt({
+        page: "test/desktopBrowser.html",
+        width: 1280,
+        height: 600,
+        colorScheme: "dark",
+        api: api([]),
+        search: "?path=/telemetry%3Ftab%3Dthroughput%26view%3Dtable",
+      });
+      try {
+        await ready(page);
+        expect(page.errors()).toEqual([]);
+        const text = await page.evaluate(
+          () => document.querySelector("#tRepoScoreboard")?.textContent,
+          undefined,
+        );
+        expect(text).toContain("No repository telemetry is configured yet.");
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  for (const [width, height, scheme] of [
+    [1280, 600, "dark"],
+    [1280, 600, "light"],
+    [1600, 1000, "dark"],
+    [1600, 1000, "light"],
+    [1920, 1000, "dark"],
+    [1920, 1000, "light"],
+  ] as const) {
+    it(
+      `keeps a long, zero-merge repository scoreboard usable at ${width}x${height}, ${scheme}`,
+      async () => {
+        const page = await renderAt({
+          page: "test/desktopBrowser.html",
+          width,
+          height,
+          colorScheme: scheme,
+          api: api(repoWeeksFixture(12)),
+          search: "?path=/telemetry%3Ftab%3Dthroughput%26view%3Dtable",
+        });
+        try {
+          await ready(page);
+          const scoreboard = await page.evaluate(() => {
+            const panel = document.querySelector("#tRepoScoreboard") as HTMLElement;
+            const scroll = panel.querySelector(".repo-scoreboard-scroll") as HTMLElement;
+            const summaries = [
+              ...panel.querySelectorAll(".repo-scoreboard-repo > summary"),
+            ] as HTMLElement[];
+            const firstRepository = panel.querySelector(".repo-scoreboard-repo") as HTMLElement;
+            const headers = [...firstRepository.querySelectorAll("thead th")].map((cell) => {
+              const box = cell.getBoundingClientRect();
+              return { left: box.left, right: box.right };
+            });
+            const cells = [...firstRepository.querySelectorAll("tbody tr:first-child > *")].map(
+              (cell) => {
+                const box = cell.getBoundingClientRect();
+                return { left: box.left, right: box.right };
+              },
+            );
+            summaries[0]?.focus();
+            const summaryStyle = getComputedStyle(summaries[0]);
+            scroll.scrollTop = scroll.scrollHeight;
+            const scrollBox = scroll.getBoundingClientRect();
+            const finalBox = summaries.at(-1)?.getBoundingClientRect();
+            return {
+              count: summaries.length,
+              cue: panel.querySelector(".repo-scoreboard-cue")?.textContent,
+              headers,
+              cells,
+              summaryHeight: summaries[0]?.getBoundingClientRect().height ?? 0,
+              focusOutline: summaryStyle.outlineStyle,
+              scrolled: scroll.scrollTop > 0,
+              finalVisible: (finalBox?.bottom ?? Infinity) <= scrollBox.bottom + 1,
+              text: panel.textContent,
+            };
+          }, undefined);
+          expect(page.errors()).toEqual([]);
+          expect(scoreboard.count).toBe(12);
+          expect(scoreboard.cue).toContain("12 repositories · scroll to compare all");
+          expect(scoreboard.summaryHeight).toBeGreaterThanOrEqual(24);
+          expect(scoreboard.focusOutline).not.toBe("none");
+          expect(scoreboard.scrolled).toBe(true);
+          expect(scoreboard.finalVisible).toBe(true);
+          expect(scoreboard.text).toContain("No merged PRs");
+          expect(scoreboard.text).toContain(
+            "repository-with-a-deliberately-long-name-that-must-remain-reachable-in-the-scoreboard",
+          );
+          expect(scoreboard.headers).toHaveLength(6);
+          expect(scoreboard.cells).toHaveLength(6);
+          for (const [index, header] of scoreboard.headers.entries()) {
+            const cell = scoreboard.cells[index];
+            expect(Math.abs(header.left - cell.left), `column ${index} left`).toBeLessThanOrEqual(
+              1,
+            );
+            expect(
+              Math.abs(header.right - cell.right),
+              `column ${index} right`,
+            ).toBeLessThanOrEqual(1);
           }
         } finally {
           await page.close();
