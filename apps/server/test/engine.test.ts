@@ -1740,7 +1740,7 @@ describe("CI and review", () => {
     clock += 1000;
     setPr(failing);
     await h.engine.reconcileRun(RUN);
-    expect(loopTexts()).toContain("CI failed on aaaaaaa (failing: check)");
+    expect(loopTexts()).toContain("CI failed on aaaaaaa (failing: check; every check decides)");
   });
 
   it("a first CI failure is re-run once, without a word to the seat", async () => {
@@ -3802,17 +3802,14 @@ describe("FLIGHT settles a ruling", () => {
     },
   );
 
-  it.each([
-    ["pending", "still pending: lint"],
-    ["failing", "failed: lint"],
-  ] as const)("refuses a moved head with a %s non-required check", async (state, message) => {
-    await ruled();
+  // an optional check never holds a crew PR, on a moved head or on the ruled one
+  const optional = (state: "pending" | "failing", headSha?: string) => {
     const repo = config.repos[0];
     if (repo === undefined) throw new Error("missing repo");
     repo.requiredChecks = ["server"];
     setPr({
       ci: "passing",
-      headSha: SHA_B,
+      ...(headSha === undefined ? {} : { headSha }),
       checks: [
         {
           name: "server",
@@ -3822,17 +3819,27 @@ describe("FLIGHT settles a ruling", () => {
           attempt: 1,
           url: null,
         },
-        { name: "lint", kind: "check", state, conclusion: state, attempt: 1, url: null },
+        { name: "supply-chain", kind: "check", state, conclusion: state, attempt: 1, url: null },
       ],
     });
+  };
 
-    expect(await accept()).toEqual({
-      kind: "not",
-      text:
-        state === "failing"
-          ? `checks on the PR's new head ${SHA_B.slice(0, 7)} ${message}`
-          : `checks on the PR's new head ${SHA_B.slice(0, 7)} are ${message}`,
-    });
+  it.each(["pending", "failing"] as const)(
+    "accepts a moved head whose only %s check is not required",
+    async (state) => {
+      await ruled();
+      optional(state, SHA_B);
+      expect(await accept()).toEqual({ kind: "accepted", sha: SHA_B });
+      expect(loopOf()).toMatchObject({ phase: "review", ciFailedSha: null, hold: null });
+    },
+  );
+
+  it("accepts the ruled head once its required checks pass, though an optional one still fails", async () => {
+    await ruled();
+    optional("failing");
+    expect(await accept()).toEqual({ kind: "accepted", sha: SHA });
+    expect(loopOf()).toMatchObject({ phase: "review", ciFailedSha: null, hold: null });
+    expect(h.rulingReruns).toEqual([]);
   });
 
   it("accepts a ruling whose same head went green on its own, with no re-run asked for", async () => {

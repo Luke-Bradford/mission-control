@@ -1017,11 +1017,15 @@ Setup's board action also creates the board's fields and the repo's type labels,
 
 - **`repos[].required_checks`** (default `[]`) names the checks that decide CI on a PR's head, by
   check run name or status context, e.g. `["check"]`.
-  - Unset, every check decides except `mc/review`, Mission Control's own review status (it is
-    refused in this list). A listed check the PR does not report counts as missing, so CI reads
-    pending.
+  - Unset, the checks the default branch's protection or rulesets require decide, read with each
+    board poll, leaving out `mc/review` and the repo's `review` bot check (review-once handles
+    them). A failing check that is not required never holds a PR up. With no protection that
+    requires checks, or when the read fails, every check decides except `mc/review`, Mission
+    Control's own review status (it is refused in this list); a failed read shows in the GitHub
+    health line. A listed check the PR does not report counts as missing, so CI reads pending.
   - The merge gate still waits for `mc/review` to pass on GitHub, apart from CI.
-  - A CI failure or a long pending names the checks in the Activity line and the park note. Only
+  - A CI failure or a long pending names the checks in the Activity line and the park note; a CI
+    failure also says which checks decided (`required_checks`, branch protection, or every). Only
     the first 50 checks of a head are read. A change needs a hub restart.
 - **`repos[].review`** is optional. Set it when the repository's own bot is the review gate:
 

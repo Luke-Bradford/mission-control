@@ -781,6 +781,8 @@ export interface LoopSnapshot {
       missing: string[];
       /** When each running check started (ms), by name; absent: queued or not known. */
       startedAt?: Record<string, number>;
+      /** Which checks decided `ci`, as one phrase for the park note; absent: not said. */
+      decidedBy?: string;
     };
     /** The state of `mc/review` on GitHub; null when not reported. Absent: not reported. */
     reviewStatus?: PrCheck["state"] | null;
@@ -1442,7 +1444,10 @@ function stateStep(s: LoopSnapshot): Step {
       // a poll from before the re-run still shows the old failure
       if (pr.polledAt <= loop.rerun.at) return unchanged(loop);
       const failed = { ...loop, ciFails: loop.ciFails + 1, ciFailedSha: pushed.sha };
-      const named = pr.checks?.failing.length ? ` (failing: ${pr.checks.failing.join(", ")})` : "";
+      const decided = pr.checks?.decidedBy ? `; ${pr.checks.decidedBy}` : "";
+      const named = pr.checks?.failing.length
+        ? ` (failing: ${pr.checks.failing.join(", ")}${decided})`
+        : "";
       if (failed.ciFails >= (s.limits?.tries ?? CI_TRIES)) {
         return park(
           failed,

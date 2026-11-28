@@ -852,6 +852,24 @@ describe("state step", () => {
     expect(parked.loop.hold?.reason).toBe("CI failed 3 times; last on aaaaaaa (failing: check)");
   });
 
+  it("12: the park note names the checks that decided CI", () => {
+    const checks = {
+      failing: ["lint"],
+      pending: [],
+      missing: [],
+      decidedBy: "branch protection requires lint, verify-issue-link",
+    };
+    const parked = reconcile(
+      inCi(
+        { pr: pr({ ci: "failing", checks }) },
+        { ciFails: CI_TRIES - 1, ciFailedSha: SHA2, rerun: reran() },
+      ),
+    );
+    expect(parked.loop.hold?.reason).toBe(
+      "CI failed 3 times; last on aaaaaaa (failing: lint; branch protection requires lint, verify-issue-link)",
+    );
+  });
+
   it("12: no checks keeps today's CI texts", () => {
     const checks = { failing: [], pending: [], missing: [] };
     const r = reconcile(inCi({ pr: pr({ ci: "failing", checks }) }, { rerun: reran() }));

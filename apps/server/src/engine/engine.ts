@@ -164,6 +164,7 @@ import {
 import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
+import { ciDecidedByText, ciDeciders, prCiVerdict } from "../collectors/github.ts";
 import { pausedSeat, reviewPausedMs } from "../config/crew-pause.ts";
 import {
   type CcConfig,
@@ -922,6 +923,16 @@ export function createEngine(deps: EngineDeps): Engine {
     );
   }
 
+  /** A PR head's CI verdict, judged only by the checks that decide CI in its repo. */
+  function headVerdict(
+    repo: CcConfig["repos"][number] | undefined,
+    checks: NonNullable<ReturnType<Store["pullRequests"]>[number]["checks"]>,
+  ) {
+    return repo === undefined
+      ? ciVerdict(checks, [])
+      : prCiVerdict(repo, ciDeciders(store, repo), checks);
+  }
+
   /** The run's PR: the stored number, else the PR on its branch opened since the run began. */
   function findPr(run: Run, loop: RunLoop): ReturnType<Store["pullRequests"]>[number] | null {
     const prs = prsFor(run.repoId);
@@ -1127,7 +1138,11 @@ export function createEngine(deps: EngineDeps): Engine {
     const evidence = store.latestEvidence(run.id);
     const pr = findPr(run, loop);
     const repo = config.repos.find((r) => r.id === run.repoId);
-    const verdict = ciVerdict(pr?.checks ?? [], repo?.requiredChecks ?? []);
+    const deciders = repo === undefined ? null : ciDeciders(store, repo);
+    const verdict =
+      repo === undefined || deciders === null
+        ? ciVerdict(pr?.checks ?? [], [])
+        : prCiVerdict(repo, deciders, pr?.checks ?? []);
     const item = store.boardItem(run.repoId, issue) ?? undefined;
     const pushed = store.runPush(run.id);
     const turnEnded = row?.lastTurnEndedAt ?? null;
@@ -1218,6 +1233,7 @@ export function createEngine(deps: EngineDeps): Engine {
                 failing: verdict.failing,
                 pending: verdict.pending,
                 missing: verdict.missing,
+                ...(deciders === null ? {} : { decidedBy: ciDecidedByText(deciders) }),
                 startedAt: Object.fromEntries(
                   (pr.checks ?? []).flatMap((c) =>
                     c.state === "pending" && c.startedAt !== undefined
@@ -3976,25 +3992,14 @@ export function createEngine(deps: EngineDeps): Engine {
         if (head === null) return not("the ruled commit is no longer its open PR's head");
         if (head !== sha) {
           const repo = config.repos.find((r) => r.id === run.repoId);
-          const verdict = ciVerdict(pr.checks ?? [], repo?.requiredChecks ?? []);
+          // only the checks that decide CI judge the new head; an optional failure never holds it
+          const verdict = headVerdict(repo, pr.checks ?? []);
           const short = head.slice(0, 7);
-          const checks = (pr.checks ?? []).filter(
-            (check) => check.name !== REVIEW_STATUS_CONTEXT && !check.skipped,
-          );
-          const failing = [
-            ...new Set(
-              checks.filter((check) => check.state === "failing").map((check) => check.name),
-            ),
-          ];
-          if (failing.length > 0)
-            return not(`checks on the PR's new head ${short} failed: ${failing.join(", ")}`);
-          const pending = [
-            ...new Set([
-              ...verdict.pending,
-              ...verdict.missing,
-              ...checks.filter((check) => check.state === "pending").map((check) => check.name),
-            ]),
-          ];
+          if (verdict.failing.length > 0)
+            return not(
+              `checks on the PR's new head ${short} failed: ${verdict.failing.join(", ")}`,
+            );
+          const pending = [...new Set([...verdict.pending, ...verdict.missing])];
           if (pending.length > 0 || pr.ci === "pending")
             return not(
               `checks on the PR's new head ${short} are still pending${pending.length > 0 ? `: ${pending.join(", ")}` : ""}`,
@@ -4053,28 +4058,13 @@ export function createEngine(deps: EngineDeps): Engine {
         if (rerun === null || rerun.outcome !== "pending") {
           // the failure may already be cleared by a re-run from GitHub or a person
           const repo = config.repos.find((r) => r.id === run.repoId);
-          const checks = (pr.checks ?? []).filter(
-            (check) => check.name !== REVIEW_STATUS_CONTEXT && !check.skipped,
-          );
-          const verdict = ciVerdict(pr.checks ?? [], repo?.requiredChecks ?? []);
-          const failingNow =
-            pr.ci === "failing" ||
-            verdict.ci === "failing" ||
-            checks.some((check) => check.state === "failing");
+          const verdict = headVerdict(repo, pr.checks ?? []);
+          const failingNow = pr.ci === "failing" || verdict.ci === "failing";
           if (!failingNow) {
             const stillPending =
-              pr.ci === "pending" ||
-              verdict.pending.length > 0 ||
-              verdict.missing.length > 0 ||
-              checks.some((check) => check.state === "pending");
+              pr.ci === "pending" || verdict.pending.length > 0 || verdict.missing.length > 0;
             if (stillPending) {
-              const waiting = [
-                ...new Set([
-                  ...verdict.pending,
-                  ...verdict.missing,
-                  ...checks.filter((check) => check.state === "pending").map((check) => check.name),
-                ]),
-              ];
+              const waiting = [...new Set([...verdict.pending, ...verdict.missing])];
               return { kind: "pending", sha, waiting };
             }
             if (pr.ci === "passing") {

@@ -279,7 +279,7 @@ export interface CcConfig {
     runCommand?: string;
     /** Development processes the hub keeps in a dedicated cmux app workspace. */
     appCommands?: { command: string; url: string }[];
-    /** The checks that decide CI on a PR head, by name. [] = every check but mc/review. Loaded: always set. */
+    /** The checks that decide CI on a PR head, by name. [] = the branch protection's, else every check but mc/review. Loaded: always set. */
     requiredChecks?: string[];
     /** A repository-owned bot whose verdict replaces the crew review. */
     review?:

@@ -9,6 +9,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   call,
+  ciDecidedByText,
+  ciDeciders,
   collectGithub,
   collectWaitedPrs,
   describeGqlErrors,
@@ -379,6 +381,8 @@ function stub(opts: {
   /** The repo's milestones, as the Milestones query answers them. */
   milestones?: unknown[];
   milestoneError?: Error;
+  /** The default branch's protection as the RequiredChecks query answers it, or its failure. */
+  protection?: unknown;
 }) {
   const calls: Call[] = [];
   let p = 0;
@@ -389,6 +393,10 @@ function stub(opts: {
     if (q.includes("Milestones")) {
       if (opts.milestoneError) throw opts.milestoneError;
       return { repository: { milestones: { nodes: opts.milestones ?? [] } } };
+    }
+    if (q.includes("RequiredChecks")) {
+      if (opts.protection instanceof Error) throw opts.protection;
+      return { repository: { defaultBranchRef: opts.protection ?? null } };
     }
     if (q.includes("pullRequests")) {
       if (opts.prError) throw opts.prError;
@@ -2074,6 +2082,103 @@ describe("collectGithub pull requests", () => {
     const { gql } = stub({ prPages: [prPage([pull(1)])] });
     await collectGithub({ ...repo, requiredChecks: ["check", "e2e"] }, store, gql, NOW);
     expect(prs()[0]?.ci).toBe("pending");
+  });
+
+  describe("with required_checks unset, the default branch's protection decides", () => {
+    // eBull, 28 Nov: supply-chain fails on every PR but only lint, review and verify-issue-link are required
+    const red = () =>
+      prPage([
+        pull(1, {
+          commits: heads(
+            "FAILURE",
+            checkRun("lint", "SUCCESS"),
+            checkRun("supply-chain", "FAILURE"),
+          ),
+        }),
+      ]);
+    const rule = (...contexts: string[]) => ({
+      branchProtectionRule: { requiredStatusChecks: contexts.map((context) => ({ context })) },
+      rules: { nodes: [] },
+    });
+
+    it("a failing check that branch protection does not require leaves CI passing", async () => {
+      const { gql } = stub({ prPages: [red()], protection: rule("lint", "mc/review") });
+      await collectGithub(repo, store, gql, NOW);
+      expect(prs()[0]?.ci).toBe("passing");
+      expect(ciDeciders(store, repo)).toEqual({ names: ["lint"], source: "protection" });
+      expect(ciDecidedByText(ciDeciders(store, repo))).toBe("branch protection requires lint");
+    });
+
+    it("reads a ruleset's required checks too, and leaves out the repo's review bot", async () => {
+      const botRepo = {
+        ...repo,
+        review: { kind: "repo-bot" as const, check: "review", verdict: "check" as const },
+      };
+      const { gql } = stub({
+        prPages: [red()],
+        protection: {
+          branchProtectionRule: null,
+          rules: {
+            nodes: [
+              { type: "PULL_REQUEST", parameters: {} },
+              {
+                type: "REQUIRED_STATUS_CHECKS",
+                parameters: { requiredStatusChecks: [{ context: "lint" }, { context: "review" }] },
+              },
+            ],
+          },
+        },
+      });
+      await collectGithub(botRepo, store, gql, NOW);
+      expect(prs()[0]?.ci).toBe("passing");
+      expect(ciDeciders(store, botRepo)).toEqual({ names: ["lint"], source: "protection" });
+    });
+
+    it("a protection that requires only the review bot leaves no CI check to decide", async () => {
+      const botRepo = {
+        ...repo,
+        review: { kind: "repo-bot" as const, check: "review", verdict: "check" as const },
+      };
+      const { gql } = stub({ prPages: [red()], protection: rule("review") });
+      await collectGithub(botRepo, store, gql, NOW);
+      expect(prs()[0]?.ci).toBe("passing");
+      expect(ciDeciders(store, botRepo)).toEqual({ names: [], source: "protection" });
+      expect(ciDecidedByText(ciDeciders(store, botRepo))).toBe(
+        "branch protection requires only review checks",
+      );
+    });
+
+    it("with no protection, every check decides, as before", async () => {
+      const { gql } = stub({ prPages: [red()], protection: rule() });
+      await collectGithub(repo, store, gql, NOW);
+      expect(prs()[0]?.ci).toBe("failing");
+      expect(ciDeciders(store, repo)).toEqual({ names: [], source: "every" });
+      expect(ciDecidedByText(ciDeciders(store, repo))).toBe("every check decides");
+    });
+
+    it("an unreadable protection falls back to every check and says so", async () => {
+      await collectGithub(
+        repo,
+        store,
+        stub({ prPages: [red()], protection: rule("lint") }).gql,
+        NOW,
+      );
+      const { gql } = stub({ prPages: [red()], protection: new Error("Resource not accessible") });
+      await collectGithub(repo, store, gql, NOW + 60_000);
+      expect(prs()[0]?.ci).toBe("failing");
+      expect(ciDeciders(store, repo).source).toBe("every");
+      expect(statusOf()).toMatchObject({ ok: true });
+      expect(statusOf()?.error).toContain("required checks: Resource not accessible");
+    });
+
+    it("a configured required_checks wins over the protection", async () => {
+      const own = { ...repo, requiredChecks: ["supply-chain"] };
+      const { gql } = stub({ prPages: [red()], protection: rule("lint") });
+      await collectGithub(own, store, gql, NOW);
+      expect(prs()[0]?.ci).toBe("failing");
+      expect(ciDeciders(store, own)).toEqual({ names: ["supply-chain"], source: "config" });
+      expect(ciDecidedByText(ciDeciders(store, own))).toBe("required_checks names supply-chain");
+    });
   });
 
   it("an in-progress check run is pending with its status as conclusion", async () => {

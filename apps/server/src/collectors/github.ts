@@ -4,6 +4,7 @@ import {
   BOARD_KEEP_DONE_MS,
   type BoardItem,
   bodyDependencies,
+  type CiVerdict,
   COMMENTS_MAX_PAGES,
   COMMENTS_PAGE_SIZE,
   ciVerdict,
@@ -212,6 +213,9 @@ export const TICKET_BODY_MAX = 20_000;
 
 /** A PR's diff is read up to this many files; the QA board's tests-per-PR count is from them. */
 export const PR_FILES_MAX = 100;
+
+/** The default branch's rulesets read per poll, for the checks they require. */
+const PROTECTION_RULES_MAX = 50;
 
 /** A PR head's checks read per poll; a required check past them reads as missing. */
 export const PR_CHECKS_MAX = 50;
@@ -1265,9 +1269,128 @@ function repoBotComment(
   };
 }
 
+const REQUIRED_CHECKS_QUERY = `query RequiredChecks($owner: String!, $name: String!) {
+  ${RATE_LIMIT_SELECTION}
+  repository(owner: $owner, name: $name) {
+    defaultBranchRef {
+      branchProtectionRule { requiredStatusChecks { context } }
+      rules(first: ${PROTECTION_RULES_MAX}) {
+        nodes { type parameters { ... on RequiredStatusChecksParameters { requiredStatusChecks { context } } } }
+      }
+    }
+  }
+}`;
+
+/** The checks the default branch's protection and rulesets require, by name; [] when none. */
+export async function fetchProtectedChecks(
+  repo: CcConfig["repos"][number],
+  gql: Gql,
+): Promise<string[]> {
+  const [owner = "", name = ""] = repo.github.split("/");
+  const ref = path(
+    await call(gql, REQUIRED_CHECKS_QUERY, { owner, name }),
+    "repository",
+    "defaultBranchRef",
+  );
+  const contexts = (list: unknown): string[] =>
+    Array.isArray(list)
+      ? list.flatMap((c) =>
+          typeof path(c, "context") === "string" ? [str(path(c, "context"), "")] : [],
+        )
+      : [];
+  const rules = path(ref, "rules", "nodes");
+  return [
+    ...new Set([
+      ...contexts(path(ref, "branchProtectionRule", "requiredStatusChecks")),
+      ...(Array.isArray(rules) ? rules : []).flatMap((rule) =>
+        contexts(path(rule, "parameters", "requiredStatusChecks")),
+      ),
+    ]),
+  ].filter((c) => c !== "");
+}
+
+/** Per store, the checks each repo's default branch required at its last good read. */
+const protectedChecks = new WeakMap<Store, Map<string, string[]>>();
+
+/**
+ * Re-reads what the default branch requires; a failed read forgets it, so every check decides
+ * again. The failure's text, else null.
+ */
+async function refreshProtectedChecks(
+  repo: CcConfig["repos"][number],
+  store: Store,
+  gql: Gql,
+): Promise<string | null> {
+  const byRepo = protectedChecks.get(store) ?? new Map<string, string[]>();
+  protectedChecks.set(store, byRepo);
+  // a repo that names its own checks never needs the read
+  if ((repo.requiredChecks ?? []).length > 0) {
+    byRepo.delete(repo.id);
+    return null;
+  }
+  try {
+    byRepo.set(repo.id, await fetchProtectedChecks(repo, gql));
+    return null;
+  } catch (e) {
+    byRepo.delete(repo.id);
+    return errMsg(e);
+  }
+}
+
+/** Which checks decide CI on a repo's PR heads, and where that list came from. */
+export interface CiDeciders {
+  /** [] with source "every": every check (but mc/review) decides; with "protection": none does. */
+  names: string[];
+  source: "config" | "protection" | "every";
+}
+
+/**
+ * The repo's `required_checks` when set; else what its default branch's protection requires,
+ * leaving out mc/review and the repo's own review bot (review-once handles them); else every check.
+ */
+export function ciDeciders(store: Store, repo: CcConfig["repos"][number]): CiDeciders {
+  const own = repo.requiredChecks ?? [];
+  if (own.length > 0) return { names: [...own], source: "config" };
+  const read = protectedChecks.get(store)?.get(repo.id) ?? [];
+  if (read.length === 0) return { names: [], source: "every" };
+  // a protection that requires only review checks leaves no CI check to decide, not every one
+  const names = read.filter((c) => c !== REVIEW_STATUS_CONTEXT && c !== repo.review?.check);
+  return { names, source: "protection" };
+}
+
+/** The deciders as one phrase for a park note. */
+export function ciDecidedByText(d: CiDeciders): string {
+  if (d.source === "config") return `required_checks names ${d.names.join(", ")}`;
+  if (d.source === "protection")
+    return d.names.length > 0
+      ? `branch protection requires ${d.names.join(", ")}`
+      : "branch protection requires only review checks";
+  return "every check decides";
+}
+
+/**
+ * The CI verdict of a PR head's checks as the deciders judge it. The repo's review bot is its own
+ * gate, so its check never decides CI; with no deciding check left, reported checks pass.
+ */
+export function prCiVerdict(
+  repo: CcConfig["repos"][number],
+  deciders: CiDeciders,
+  checks: readonly PrCheck[],
+): CiVerdict {
+  const own =
+    repo.review === undefined ? checks : checks.filter((c) => c.name !== repo.review?.check);
+  const names = deciders.names.filter((c) => c !== repo.review?.check);
+  if (deciders.source !== "every" && names.length === 0) {
+    const reported = own.some((c) => c.name !== REVIEW_STATUS_CONTEXT);
+    return { ci: reported ? "passing" : null, failing: [], pending: [], missing: [] };
+  }
+  return ciVerdict(own, names);
+}
+
 function mapPr(
   repo: CcConfig["repos"][number],
   n: Record<string, unknown>,
+  deciders: CiDeciders,
 ): PullRequestView | null {
   if (typeof n.number !== "number") return null;
   const branch = str(n.headRefName, "");
@@ -1304,12 +1427,7 @@ function mapPr(
     review: lookup(REVIEWS, n.reviewDecision),
     // A configured repository bot is its own review gate. Its failed check must reach the author
     // as review findings, rather than parking the run as an ordinary CI failure.
-    ci: ciVerdict(
-      repo.review === undefined
-        ? checks
-        : checks.filter((check) => check.name !== repo.review?.check),
-      (repo.requiredChecks ?? []).filter((check) => check !== repo.review?.check),
-    ).ci,
+    ci: prCiVerdict(repo, deciders, checks).ci,
     checks,
     createdAt: ms(n.createdAt),
     updatedAt: ms(n.updatedAt),
@@ -1346,8 +1464,9 @@ async function completePrFiles(
   repo: CcConfig["repos"][number],
   node: Record<string, unknown>,
   gql: Gql,
+  store: Store,
 ): Promise<PullRequestView | null> {
-  const pr = mapPr(repo, node);
+  const pr = mapPr(repo, node, ciDeciders(store, repo));
   if (!pr || pr.changedFiles == null || (pr.files?.length ?? 0) >= pr.changedFiles) return pr;
   const [owner = "", name = ""] = repo.github.split("/");
   let info = path(node, "files", "pageInfo");
@@ -1424,7 +1543,7 @@ async function fetchPrs(
     nodes += conn.nodes.length;
     for (const n of conn.nodes) {
       if (!isObj(n)) continue;
-      const pr = await completePrFiles(repo, n, gql);
+      const pr = await completePrFiles(repo, n, gql, store);
       if (!pr) continue;
       if (all && now - pr.updatedAt > PR_KEEP_MS) {
         reachedOld = true;
@@ -1504,7 +1623,7 @@ export async function collectWaitedPrs(
         "repository",
         "pullRequest",
       );
-      const pr = isObj(node) ? await completePrFiles(repo, node, gql) : null;
+      const pr = isObj(node) ? await completePrFiles(repo, node, gql, store) : null;
       if (pr) prs.push(pr);
     }
   } catch (e) {
@@ -1565,7 +1684,7 @@ async function readNamedPrs(
       "repository",
       "pullRequest",
     );
-    const pr = isObj(node) ? await completePrFiles(repo, node, gql) : null;
+    const pr = isObj(node) ? await completePrFiles(repo, node, gql, store) : null;
     if (pr) prs.push(pr);
   }
   return store.upsertPullRequests(repo.id, prs, readAt);
@@ -1615,6 +1734,8 @@ export async function collectGithub(
     const [owner = ""] = repo.github.split("/");
     failures.push(`board: ${ssoRefusal(e, owner) ?? errMsg(e)}`);
   }
+  // Before the PR read, so its verdicts use what the default branch requires now.
+  const protectionFailure = await refreshProtectedChecks(repo, store, gql);
   try {
     const found = await fetchEscalations(repo, gql);
     changes.escalations = store.replaceEscalations(repo.id, found.escalations);
@@ -1657,6 +1778,9 @@ export async function collectGithub(
         ? [`project list missed ${recovered} items; read them from the issues`]
         : []),
       ...(truncated.length > 0 ? [`truncated: ${truncated.join(", ")} hit the page bound`] : []),
+      ...(protectionFailure !== null
+        ? [`required checks: ${protectionFailure}; every check decides CI`]
+        : []),
     ];
     store.setStatus(collector, true, notes.length > 0 ? notes.join("; ") : null);
   }
