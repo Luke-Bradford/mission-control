@@ -120,9 +120,7 @@ function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
             pr: pr?.number ?? null,
           })
         : null,
-    workPattern: agent
-      ? seatWorkPattern(agent)
-      : `${col}|${item.updatedAt}|—`,
+    workPattern: agent ? seatWorkPattern(agent) : `${col}|${item.updatedAt}|—`,
   };
 }
 
