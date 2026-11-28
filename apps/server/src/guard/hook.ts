@@ -94,6 +94,9 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
       ["file_path", "string"],
       ["pages", "string"],
       ["run_in_background", "boolean"],
+      // The server refuses this Bash escape hatch. Keep it in the request rather than dropping it
+      // before the guard can make that decision.
+      ["dangerouslyDisableSandbox", "boolean"],
     ] as const) {
       if (raw[k] === undefined) continue;
       if (typeof raw[k] !== type) throw new Unusable();
