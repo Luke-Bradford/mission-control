@@ -11,6 +11,8 @@ export const SEAT_CONTEXT_ROTATE_TOKENS = FLIGHT_CONTEXT_ROTATE_TOKENS;
 /** Fresh sessions one run may have in `SEAT_FRESH_WINDOW_MS` before the hub stops starting them. */
 export const SEAT_FRESH_MAX = 3;
 export const SEAT_FRESH_WINDOW_MS = 60 * 60_000;
+/** The setting that holds when a run's recent fresh sessions started (a JSON list of times). */
+export const seatFreshKey = (runId: string): string => `seat-fresh:${runId}`;
 
 /** The longest one run-notes line is (done, a blocker, a decision, or next). */
 export const RUN_NOTE_LINE_MAX = 500;

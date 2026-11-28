@@ -139,6 +139,7 @@ import {
   seatBusyText,
   seatCallSign,
   seatDef,
+  seatFreshKey,
   seatInstructionBlock,
   signedOffQaPlan,
   type TicketView,
@@ -3059,15 +3060,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     seatDef(l.info.seat).loop === "build" &&
     modeOfSeat(l.info.seat) === "writer";
 
-  const freshKey = (runId: string): string => `seat-fresh:${runId}`;
   /** Records a fresh session's start; false (nothing recorded) once the run has had its hour's share. */
   function claimFresh(runId: string, at: number): boolean {
-    const recent = parseJson<unknown>(store.getSetting(freshKey(runId)), []);
+    const recent = parseJson<unknown>(store.getSetting(seatFreshKey(runId)), []);
     const kept = (Array.isArray(recent) ? recent : []).filter(
       (t): t is number => typeof t === "number" && at - t < SEAT_FRESH_WINDOW_MS,
     );
     if (kept.length >= SEAT_FRESH_MAX) return false;
-    store.setSetting(freshKey(runId), JSON.stringify([...kept, at]));
+    store.setSetting(seatFreshKey(runId), JSON.stringify([...kept, at]));
     return true;
   }
 

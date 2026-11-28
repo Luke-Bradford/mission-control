@@ -36,7 +36,9 @@ import {
   type RunProfile,
   retiringText,
   reworkFirstText,
+  SEAT_FRESH_MAX,
   seatBusyText,
+  seatFreshKey,
   ticketInReviewText,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
@@ -2067,6 +2069,11 @@ describe("a run set aside in review", () => {
     const { sup, runId } = await aside(false);
     const other = await sup.startRun("guido-1", 43, { loop: NEW_LOOP });
     await until(() => expect(seatState("guido-1")).toBe("idle"));
+    // the run has had its hour's fresh sessions, so the crash leaves the seat in error (#2319)
+    store.setSetting(
+      seatFreshKey(other.runId),
+      JSON.stringify(Array.from({ length: SEAT_FRESH_MAX }, () => Date.now())),
+    );
     await sup.message("guido-1", "DIE", { interrupt: false });
     await until(() => expect(seatState("guido-1")).toBe("error"));
     const reason = store.seatSession("guido-1")?.reason as string;
