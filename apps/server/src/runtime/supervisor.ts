@@ -594,6 +594,9 @@ export type SupervisorEvent =
 export type SendResult = "sent" | "busy" | "no-session" | "dup" | "gone";
 
 /** What the snapshot reads of a seat's process. */
+/** What `recoverRelay` put right: the seat row's run, an unfinished attach, or a stale open turn. */
+export type RelayRecovery = "owner" | "attach" | "turn";
+
 export interface SeatFacts {
   inTurn: boolean;
   /** `Date.now()` at the resume that spawned the process; null for a fresh start. */
@@ -662,12 +665,16 @@ export interface Supervisor {
   /** null when the seat has no live process. */
   seatFacts(seatId: string): SeatFacts | null;
   /**
-   * Ends a turn the hub still counts as open on the seat's live session for `runId`, when that
-   * turn began before `before` (so nothing since has kept it going): it interrupts the CLI, then
-   * clears the flag, as a missed turn end would have. Never for a seat waiting on a dialog. True
-   * when it cleared one.
+   * Puts right a stale state that keeps the engine's lines from the seat's live session for
+   * `runId`, where it dates from before `before` (when the owed line was recorded). One per call,
+   * first match: `owner`, the seat's row names no run or an ended one while its live process runs
+   * `runId` (the row is set back to it); `attach`, an attach begun before then never finished its
+   * replay (it is finished, its open turn as the keeper reported it); `turn`, a turn begun before
+   * then is still counted as open (the CLI is interrupted, and only once it confirms is the turn
+   * counted as ended). Never for a seat waiting on a dialog or still starting. Null when nothing
+   * was put right, a refused or unanswered interrupt included.
    */
-  clearStaleTurn?(seatId: string, runId: string, before: number): Promise<boolean>;
+  recoverRelay?(seatId: string, runId: string, before: number): Promise<RelayRecovery | null>;
   /**
    * Whether the seat's CLI session is attached and alive, for the run its row holds: the process
    * the hub holds, not the run row. Null while the hub cannot tell: crew is off or stopping, the startup take-back is running,
@@ -844,6 +851,8 @@ interface Live {
   spawn: string;
   /** Attached to a keeper that is still replaying the lines the hub missed: no line goes out yet. */
   attaching: boolean;
+  /** now() when the attach began; null for a session the hub started itself. */
+  attachStartedAt: number | null;
   /** At an attach: the keeper's line count, below which the lines are a replay of what the last hub missed. */
   replayedBelow: number;
   /** At an attach: the keeper said a turn was open. A replayed `result` is then an earlier turn's. */
@@ -2857,6 +2866,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       lastStderr: null,
       lastStderrAt: null,
       attaching: false,
+      attachStartedAt: null,
       replayedBelow: 0,
       awaitingAtAttach: false,
       keeperPid: null,
@@ -3557,6 +3567,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     track(info, run, driver, grant(info, run), {
       spawn: hello.spawn,
       attaching: true,
+      attachStartedAt: now(),
       replayedBelow: hello.lines,
       awaitingAtAttach: hello.awaiting,
       keeperPid: readPidFile(crewKeeperDir(deps.dbPath, runId), KEEPER_PID_FILE),
@@ -6001,29 +6012,62 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return { inTurn: l.inTurn, resumedAt: l.resumedAt, rateLimitedUntil: l.rateLimitedUntil };
     },
 
-    async clearStaleTurn(seatId, runId, before) {
+    async recoverRelay(seatId, runId, before) {
+      if (
+        !mayAct() ||
+        stopping ||
+        reattaching !== null ||
+        starting.has(seatId) ||
+        transfers.has(seatId)
+      )
+        return null;
       const l = live.get(seatId);
-      const stale = (x: Live, row = store.seatSession(seatId)) =>
+      // only the process that runs this run, alive and not being ended, is put right
+      const ours = (x: Live) =>
+        live.get(seatId) === x &&
         x.session.alive &&
-        x.inTurn &&
         x.run.id === runId &&
         x.ending === null &&
-        !x.attaching &&
-        row?.runId === runId &&
-        row.state !== "needs-input" &&
-        (row.lastTurnStartedAt ?? 0) < before;
-      if (l === undefined || !mayAct() || stopping || starting.has(seatId) || !stale(l))
-        return false;
-      return enqueue(l, async () => {
-        if (!stale(l)) return false;
-        // a turn really going ends here; a turn end the hub missed has nothing to interrupt
-        await sendInterrupt(l).catch((e) => log(`${seatId}: stale turn interrupt: ${errText(e)}`));
-        if (!l.inTurn) return true;
-        l.inTurn = false;
-        l.interrupted = false;
-        setState(l, "idle", null);
-        emit({ kind: "idle", seatId, runId: l.run.id, resumed: false });
-        return true;
+        store.run(runId)?.endedAt === null;
+      if (l === undefined || !ours(l)) return null;
+      const row = store.seatSession(seatId);
+      if (row === null || row.state === "needs-input" || row.state === "starting") return null;
+      if (row.runId !== runId) {
+        // a row left naming no run, or one that has ended: the live process is the truth. A row
+        // naming another live run is that run's, not this one's to take.
+        const holder = row.runId === null ? null : store.run(row.runId);
+        if (holder !== null && holder.endedAt === null) return null;
+        setSeat(seatId, { runId, cliSessionId: l.run.sessionId ?? row.cliSessionId });
+        log(`${seatId}: its row named ${row.runId ?? "no run"}; set back to ${runId}`);
+        return "owner";
+      }
+      if (l.attaching) {
+        if (l.attachStartedAt === null || l.attachStartedAt >= before) return null;
+        // the keeper's own word on an open turn (taken at the attach) stands
+        onAttached(l, false);
+        log(`${seatId}: an attach begun ${new Date(l.attachStartedAt).toISOString()} never finished; finished it`);
+        return "attach";
+      }
+      if (!l.inTurn || (row.lastTurnStartedAt ?? 0) >= before) return null;
+      return enqueue(l, async (): Promise<RelayRecovery | null> => {
+        const now_ = store.seatSession(seatId);
+        if (!ours(l) || !l.inTurn || now_?.runId !== runId || now_.state === "needs-input")
+          return null;
+        try {
+          await sendInterrupt(l);
+        } catch (e) {
+          // refused or unanswered: the turn may well be going, so it is left as it is
+          log(`${seatId}: stale turn interrupt failed: ${errText(e)}`);
+          return null;
+        }
+        // confirmed: a turn really going ends with its own result; one whose end was missed is
+        // ended here, as that result would have
+        if (l.inTurn) {
+          l.inTurn = false;
+          setState(l, "idle", null);
+          emit({ kind: "idle", seatId, runId: l.run.id, resumed: false });
+        }
+        return "turn";
       });
     },
 

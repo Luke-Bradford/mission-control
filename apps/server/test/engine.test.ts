@@ -312,8 +312,12 @@ interface Harness {
   pushes: string[];
   prs: { title: string; note: string }[];
   excerpts: string[];
-  /** Seats whose stale turn flag the engine cleared. */
+  /** Stale states the engine had put right: a seat id for a turn, `owner:` or `attach:` before it. */
   staleTurns: string[];
+  /** The seat's attach never finished: its lines are refused as busy until recovered. */
+  stuckAttach: boolean;
+  /** The CLI refuses (or does not answer) the stale turn's interrupt. */
+  interruptRefused: boolean;
   moves: Move[];
   ended: string[];
   endedReasons: Record<string, string | undefined>;
@@ -445,6 +449,8 @@ function harness(): Harness {
     prs: [],
     excerpts: [],
     staleTurns: [],
+    stuckAttach: false,
+    interruptRefused: false,
     moves: [],
     ended: [],
     endedReasons: {},
@@ -726,11 +732,25 @@ function harness(): Harness {
             return store.seatSession(id);
           },
           seatFacts: (id) => (id === RETRO ? x.retroFacts : x.facts),
-          async clearStaleTurn(seatId) {
-            if (x.facts?.inTurn !== true) return false;
+          // like the real one, one stale state per call: the row's run, the attach, the turn
+          async recoverRelay(seatId, runId) {
+            const row = store.seatSession(seatId);
+            if (row !== null && row.runId !== runId) {
+              store.setSeatSession({ ...row, runId });
+              x.staleTurns.push(`owner:${seatId}`);
+              return "owner";
+            }
+            if (x.stuckAttach) {
+              x.stuckAttach = false;
+              x.busy = false;
+              x.staleTurns.push(`attach:${seatId}`);
+              return "attach";
+            }
+            if (x.facts?.inTurn !== true) return null;
+            if (x.interruptRefused) return null;
             x.staleTurns.push(seatId);
             x.facts = { ...x.facts, inTurn: false };
-            return true;
+            return "turn";
           },
           async endRunByEngine(runId, reason) {
             const r = store.run(runId);
@@ -1753,14 +1773,28 @@ describe("CI and review", () => {
     expect(loopOf()).toMatchObject({ ciFails: 1, ciFailedSha: SHA });
   });
 
-  describe("a failure after the re-run, held back by a turn flag left on from before it", () => {
+  describe("a failure after the re-run, held back by stale seat state from before it", () => {
     const EXCERPT =
       "studio:\n1) [chromium] › e2e/board.spec.ts:12:5 › shows the board\nError: expect(locator).toBeVisible() failed";
-    /** Fail, re-run, fail, with the seat's turn flag stuck on from a turn begun before the push. */
-    async function failWithStaleTurn(): Promise<number> {
-      await inCi();
+    type Stale = "turn" | "owner" | "attach";
+    /** Puts the seat in one stale state that holds the engine's lines back. */
+    const goStale = (state: Stale) => {
       store.setSeatTurnStarted(SEAT, clock - MIN);
-      h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      if (state === "turn") h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      if (state === "owner") {
+        const row = store.seatSession(SEAT);
+        if (row === null) throw new Error("no seat row");
+        store.setSeatSession({ ...row, runId: null });
+      }
+      if (state === "attach") {
+        h.busy = true;
+        h.stuckAttach = true;
+      }
+    };
+    /** Fail, re-run, fail, with the seat stale (`state`) from before the push. */
+    async function failWithStaleTurn(state: Stale = "turn"): Promise<number> {
+      await inCi();
+      goStale(state);
       setPr({ ci: "failing" });
       await h.engine.reconcileRun(RUN);
       clock += 1000;
@@ -1773,18 +1807,51 @@ describe("CI and review", () => {
       return clock;
     }
 
-    it("goes back to the seat within 5 minutes with the failing test's name and error", async () => {
-      const failedAt = await failWithStaleTurn();
+    /** Ticks a minute at a time until the seat has a line or 5 minutes have passed. */
+    async function untilSent(failedAt: number): Promise<void> {
       while (h.sent.length === 0 && clock - failedAt < 5 * MIN) {
         clock += MIN;
         await h.engine.tick();
       }
-      expect(clock - failedAt).toBeLessThan(5 * MIN);
-      expect(h.staleTurns).toEqual([SEAT]);
-      expect(h.sent[0]?.key).toBe(`ci:${RUN}:${SHA}`);
-      expect(h.sent[0]?.text).toContain("1) [chromium] › e2e/board.spec.ts:12:5 › shows the board");
-      expect(h.sent[0]?.text).toContain("Error: expect(locator).toBeVisible() failed");
-      expect(loopOf().relayedSha).toBe(SHA);
+    }
+
+    it.each([
+      ["a turn flag left on", "turn", SEAT],
+      ["its seat row naming no run", "owner", `owner:${SEAT}`],
+      ["an attach that never finished", "attach", `attach:${SEAT}`],
+    ] as const)(
+      "%s: goes back to the seat within 5 minutes with the failing test's name and error",
+      async (_what, state, put) => {
+        const failedAt = await failWithStaleTurn(state);
+        await untilSent(failedAt);
+        expect(clock - failedAt).toBeLessThan(5 * MIN);
+        expect(h.staleTurns).toEqual([put]);
+        expect(h.sent[0]?.key).toBe(`ci:${RUN}:${SHA}`);
+        expect(h.sent[0]?.text).toContain(
+          "1) [chromium] › e2e/board.spec.ts:12:5 › shows the board",
+        );
+        expect(h.sent[0]?.text).toContain("Error: expect(locator).toBeVisible() failed");
+        expect(loopOf().relayedSha).toBe(SHA);
+      },
+    );
+
+    it("a refused interrupt leaves the turn as it is and sends nothing", async () => {
+      h.interruptRefused = true;
+      const failedAt = await failWithStaleTurn();
+      await untilSent(failedAt);
+      expect(h.staleTurns).toEqual([]);
+      expect(h.sent).toEqual([]);
+      expect(h.facts?.inTurn).toBe(true);
+    });
+
+    it("leaves a row naming another live run alone", async () => {
+      store.upsertRun(run({ id: "guido-1:other" }));
+      const failedAt = await failWithStaleTurn("owner");
+      const row = store.seatSession(SEAT);
+      if (row === null) throw new Error("no seat row");
+      store.setSeatSession({ ...row, runId: "guido-1:other" });
+      await untilSent(failedAt);
+      expect(h.staleTurns).toEqual([]);
     });
 
     it("leaves a turn begun after the failure alone", async () => {

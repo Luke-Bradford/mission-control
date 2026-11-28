@@ -242,6 +242,54 @@ describe("seat states", () => {
     },
   );
 
+  describe("recoverRelay on a turn begun before the owed line", () => {
+    const LATER = Number.MAX_SAFE_INTEGER;
+    /** A run on guido-1 in a long turn the CLI answers interrupts for as `mode` says. */
+    async function inLongTurn(mode = "") {
+      const { sup } = make();
+      sup.start();
+      await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.message("guido-1", `${mode} SLOW`.trim(), { interrupt: false });
+      await until(() => expect(seatState("guido-1")).toBe("running"));
+      const runId = store.seatSession("guido-1")?.runId ?? "";
+      return { sup, runId };
+    }
+
+    it("ends it once the CLI confirms the interrupt", async () => {
+      const { sup, runId } = await inLongTurn();
+      expect(await sup.recoverRelay?.("guido-1", runId, LATER)).toBe("turn");
+      expect(sup.seatFacts("guido-1")?.inTurn).toBe(false);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+    });
+
+    it.each(["REFUSEINT", "NOCONTROL"])("keeps it running when the interrupt is %s", async (mode) => {
+      const { sup, runId } = await inLongTurn(mode);
+      expect(await sup.recoverRelay?.("guido-1", runId, LATER)).toBeNull();
+      expect(sup.seatFacts("guido-1")?.inTurn).toBe(true);
+      expect(seatState("guido-1")).toBe("running");
+    });
+
+    it("leaves a turn begun after the owed line alone", async () => {
+      const { sup, runId } = await inLongTurn();
+      expect(await sup.recoverRelay?.("guido-1", runId, 0)).toBeNull();
+      expect(sup.seatFacts("guido-1")?.inTurn).toBe(true);
+    });
+
+    it("sets a row naming no run back to the run its live process runs", async () => {
+      const { sup } = make();
+      sup.start();
+      await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      const row = store.seatSession("guido-1");
+      const runId = row?.runId ?? "";
+      if (row === null) throw new Error("no seat row");
+      store.setSeatSession({ ...row, runId: null });
+      expect(await sup.recoverRelay?.("guido-1", runId, LATER)).toBe("owner");
+      expect(store.seatSession("guido-1")?.runId).toBe(runId);
+    });
+  });
+
   it("accepts an interrupt before a result in the same stdout write", async () => {
     const { sup } = make();
     sup.start();

@@ -179,7 +179,7 @@ import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import { REPO_BOT_SEAT, repoBotVerdict } from "../review/repo-bot.ts";
-import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
+import { type RelayRecovery, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { wakeDueAsideRun } from "./aside.ts";
@@ -246,6 +246,13 @@ export function ciNoticeText(sha: string, excerpt: string, repo: string, again: 
 /** What `ciExcerpt` says when it has no excerpt to give: not kept, but asked for again. */
 const NOT_EXCERPTS = [NO_FAILED_RUN, CI_LOG_UNREADABLE, EMPTY_LOG];
 
+/** The loop event's opening for each stale state `recoverRelay` put right. */
+const RELAY_RECOVERED_TEXT: Record<RelayRecovery, (call: string) => string> = {
+  owner: (call) => `${call}'s seat row named another run; set it back`,
+  attach: (call) => `${call}'s attach never finished; finished it`,
+  turn: (call) => `${call}'s turn from before the failure was still open; interrupted it`,
+};
+
 /** An ended run's loop is still reconciled for this long after the end. */
 export const ENDED_RECONCILE_MS = 7 * 24 * 60 * 60_000;
 /** A pass that changed what the next one acts on runs again at once, up to this many times. */
@@ -263,7 +270,7 @@ export interface EngineDeps {
     | "resumeDeferredRuns"
     | "seat"
     | "seatFacts"
-    | "clearStaleTurn"
+    | "recoverRelay"
     | "endRunByEngine"
     | "startReview"
     | "busy"
@@ -702,9 +709,9 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /**
    * A CI failure on the run's pushed sha, owed to its seat and still unsent CI_RELAY_RECOVER_MS
-   * after it was recorded, because the hub counts the seat as in a turn that began before the
-   * failure: that turn's end was missed (or it has run on with nothing new). The supervisor ends
-   * it, so this pass plans the line as usual.
+   * after it was recorded: something stale on the seat's live session holds the line back (its row
+   * naming another run, an attach that never finished, a turn whose end was missed). The
+   * supervisor puts it right, so this pass plans the line as usual.
    */
   async function recoverCiRelay(run: Run, loop: RunLoop, at: number): Promise<void> {
     const sha = loop.ciFailedSha;
@@ -714,8 +721,7 @@ export function createEngine(deps: EngineDeps): Engine {
       loop.hold?.worktree ||
       loop.relayedSha === sha ||
       store.runPush(run.id)?.sha !== sha ||
-      `ci:${run.id}:${sha}` in store.claimedKeys(run.id) ||
-      supervisor.seatFacts(run.agentId)?.inTurn !== true
+      `ci:${run.id}:${sha}` in store.claimedKeys(run.id)
     )
       return;
     const failedAt = store
@@ -730,23 +736,26 @@ export function createEngine(deps: EngineDeps): Engine {
     if (failedAt === 0 || at - failedAt < CI_RELAY_RECOVER_MS) return;
     // a dialog is FLIGHT's to answer; a turn begun since the failure may be the seat's own work
     const row = store.seatSession(run.agentId);
+    // a row naming another live run is that run's seat now (the aside and wake path's, not this)
+    const holder = row?.runId == null || row.runId === run.id ? null : store.run(row.runId);
     if (
-      row?.runId !== run.id ||
+      row === null ||
+      (holder !== null && holder.endedAt === null) ||
       row.state === "needs-input" ||
       (row.lastTurnStartedAt ?? 0) >= failedAt
     )
       return;
-    const cleared = await supervisor
-      .clearStaleTurn?.(run.agentId, run.id, failedAt)
-      .catch((e: unknown) => {
-        log(`${run.id}: could not end a stale turn: ${e instanceof Error ? e.message : String(e)}`);
-        return false;
-      });
-    if (cleared === true)
+    const put = await (supervisor.recoverRelay?.(run.agentId, run.id, failedAt) ?? null).catch(
+      (e: unknown) => {
+        log(`${run.id}: could not recover the CI line: ${e instanceof Error ? e.message : String(e)}`);
+        return null;
+      },
+    );
+    if (put !== null)
       store.addLoopEvent(
-        `${run.id}:stale-turn:${sha}`,
+        `${run.id}:relay-${put}:${sha}`,
         run.id,
-        `${seatCallSign(run.agentId)}'s turn from before CI failed on ${sha.slice(0, 7)} was still open; ended it to send the failure`,
+        `${RELAY_RECOVERED_TEXT[put](seatCallSign(run.agentId))} to send the failure on ${sha.slice(0, 7)}`,
         at,
       );
   }

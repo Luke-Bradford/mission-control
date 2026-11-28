@@ -931,10 +931,15 @@ hub holding the crew lock) carries a loop. A writer run started without one cann
   without an accepted reason. The engine pushes and opens the draft PR (or pushes to the run's PR
   on a later report), then waits for CI.
 - **CI.** A failure goes back to the seat as a log excerpt, twice; the third failure parks the
-  run. A failure still unsent 2 minutes after it was recorded, because the hub counts the seat as
-  in a turn that began before the failure, ends that turn (an interrupt, then the hub clears its
-  turn flag) so the excerpt goes on the next pass; a seat waiting on a dialog is left to FLIGHT.
-  The loop event reads "…'s turn from before CI failed on <sha> was still open". A pass raises "Ready for review" in Needs you. Review fixes go to the seat by message: it
+  run. A failure still unsent 2 minutes after it was recorded is held back by stale seat state,
+  which the hub puts right, one state a pass, so the excerpt goes within 5 minutes: a seat row
+  naming no run or an ended one while the live process runs this run is set back to it; an attach
+  begun before the failure that never finished its replay is finished; a turn begun before the
+  failure that still counts as open is interrupted, and counted as ended only once the CLI
+  confirms (a refused or unanswered interrupt leaves it running). A seat waiting on a dialog, a
+  turn begun since the failure, and a row naming another live run are left alone; the 30-minute
+  `red_pr_idle` signal still wakes FLIGHT. Each recovery is a loop event ("…; set it back",
+  "…; finished it", "…; interrupted it"). A pass raises "Ready for review" in Needs you. Review fixes go to the seat by message: it
   commits and reports again, and the engine pushes to the same PR.
 - **Parked.** Any limit parks the run with a Blocked note (and, in a `merge` repo, the card in
   *Blocked*). Your next message to the seat resumes it; the seat then needs a new commit, or a
