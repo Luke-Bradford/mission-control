@@ -365,12 +365,8 @@ export const Card = memo(function Card({
           )}
         </div>
       )}
-      {(overlay.length > 0 || pattern) && (
-        <div className="overlay">
-          {overlay}
-          {pattern}
-        </div>
-      )}
+      {overlay.length > 0 && <div className="overlay">{overlay}</div>}
+      <div className="kwork-pattern">{pattern}</div>
     </div>
   );
 }, sameProps);
