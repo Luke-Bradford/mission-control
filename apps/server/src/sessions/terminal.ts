@@ -5,6 +5,7 @@
  * go to files the hub reads; the pane stays open for the operator to watch.
  */
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -60,6 +61,46 @@ const TERMINAL_CREDENTIAL_FOLDERS = [
   ".git-credentials",
   ".netrc",
 ] as const;
+
+const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
+
+const sandboxPath = (path: string) => {
+  if (
+    [...path].some(
+      (character) =>
+        character === '"' ||
+        character === "\\" ||
+        character.charCodeAt(0) < 32 ||
+        character.charCodeAt(0) === 127,
+    )
+  )
+    throw new Error("Terminal sandbox path contains an unsafe character.");
+  return `"${path}"`;
+};
+
+/**
+ * Seatbelt confines every process the terminal pane starts. Unlike command inspection, this
+ * resolves shell expansions, symlinks and interpreter-controlled file access at execution time.
+ */
+export function terminalSandboxProfile(input: {
+  worktree: string;
+  scratch: string;
+  denyRead: readonly string[];
+}): string {
+  const denied = [
+    ...TERMINAL_CREDENTIAL_FOLDERS.map((folder) => join(homedir(), folder)),
+    ...input.denyRead,
+  ];
+  return [
+    "(version 1)",
+    "(allow default)",
+    "(deny network-outbound)",
+    "(deny file-write*)",
+    `(allow file-write* (subpath ${sandboxPath(resolve(input.worktree))}))`,
+    `(allow file-write* (subpath ${sandboxPath(resolve(input.scratch))}))`,
+    ...denied.map((path) => `(deny file-read* (subpath ${sandboxPath(resolve(path))}))`),
+  ].join("\n");
+}
 
 const localHost = (value: string) => {
   try {
@@ -135,6 +176,21 @@ export function terminalCommandDecision(input: TerminalCommandInput): string | n
   return null;
 }
 
+/** Resolve terminal policy from the live repository configuration at the command boundary. */
+export function terminalCommandPolicy(
+  config: CcConfig,
+  repoId: string,
+  worktree: string,
+  command: string,
+): string | null {
+  return terminalCommandDecision({
+    command,
+    worktree,
+    denyRead: config.crew?.denyRead ?? [],
+    commands: config.repos.find((repo) => repo.id === repoId)?.terminalCommands,
+  });
+}
+
 interface SeatTerminalDeps {
   cmux: Pick<Cmux, "workspaces" | "newPane" | "sendPane" | "closePane">;
   /** Where the hub keeps each command's script, output and exit code. */
@@ -149,6 +205,8 @@ interface SeatTerminalDeps {
   pollMs?: number;
   /** Refuses a command before it is typed into the operator's pane. */
   commandGuard?: (input: TerminalRun) => string | null;
+  /** Seatbelt profile for the pane; absent only in isolated unit fixtures. */
+  sandboxProfile?: (worktree: string) => string;
   log?(message: string): void;
 }
 
@@ -159,7 +217,13 @@ export interface SeatTerminal {
 }
 
 /** The pane keeps the operator's toolchain, but never the hub or provider credentials. */
-const PANE_SHELL = `exec /bin/zsh -fc 'unset GH_TOKEN GITHUB_TOKEN ANTHROPIC_API_KEY; for name in \${(k)parameters}; do [[ $name == MC_* ]] && unset "$name"; done; exec "\${SHELL:-/bin/zsh}" -l'`;
+export function terminalPaneShell(profile?: string, command?: string): string {
+  const login = `unset GH_TOKEN GITHUB_TOKEN ANTHROPIC_API_KEY; for name in \${(k)parameters}; do [[ $name == MC_* ]] && unset "$name"; done; exec "\${SHELL:-/bin/zsh}" -l${command === undefined ? "" : ` -c ${shellQuote(command)}`}`;
+  const shell = `exec /bin/zsh -fc ${shellQuote(login)}`;
+  if (profile === undefined) return shell;
+  if (!existsSync(SANDBOX_EXEC)) throw new Error("Seat terminal requires macOS sandbox-exec.");
+  return `exec ${shellQuote(SANDBOX_EXEC)} -p ${shellQuote(profile)} ${shell}`;
+}
 
 const tail = (text: string) =>
   text.length <= TERMINAL_OUTPUT_MAX ? text : text.slice(-TERMINAL_OUTPUT_MAX);
@@ -202,7 +266,11 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
     if (kept !== undefined) await deps.cmux.closePane(kept).catch(() => {});
     const workspace = await seatWorkspace(deps.cmux, seatId);
     if (workspace === null) throw new Error("No live cmux workspace for this seat.");
-    const surface = await deps.cmux.newPane(workspace, worktree, PANE_SHELL);
+    const surface = await deps.cmux.newPane(
+      workspace,
+      worktree,
+      terminalPaneShell(deps.sandboxProfile?.(worktree)),
+    );
     panes.set(seatId, surface);
     return surface;
   };

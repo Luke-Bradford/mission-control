@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,14 +9,18 @@ import {
   createSeatTerminal,
   type TerminalRun,
   terminalCommandDecision,
+  terminalPaneShell,
+  terminalSandboxProfile,
   terminalSuite,
 } from "../src/sessions/terminal.ts";
 import { Store } from "../src/store.ts";
+import { blockedHere } from "./sandbox-gaps.ts";
 
 const SEAT = "guido-eb";
 const RUN = "run-1";
 const OTHER = "guido-ae";
 const OTHER_RUN = "run-2";
+const seatbeltBlocked = await blockedHere("seatbelt");
 /** Stands in for the guard's full-suite classification: a command naming `suite` is one. */
 const suiteOf = ({ command }: { command: string }) =>
   /suite/.test(command) ? "pnpm -s test" : null;
@@ -53,6 +57,61 @@ const terminal = (cmux: ReturnType<typeof paneCmux>, extra = {}) =>
   createSeatTerminal({ cmux, dir: join(dir, "hub"), pollMs: 20, ...extra });
 
 describe("seat terminal", () => {
+  it("starts the final login shell without provider or hub tokens", () => {
+    const output = execFileSync("/bin/zsh", ["-fc", terminalPaneShell(undefined, "env")], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GH_TOKEN: "github",
+        GITHUB_TOKEN: "github",
+        ANTHROPIC_API_KEY: "anthropic",
+        MC_OPERATOR_TOKEN: "operator",
+        MC_CONTROLLER_TOKEN: "controller",
+      },
+    });
+    expect(output).not.toMatch(/^(?:GH_TOKEN|GITHUB_TOKEN|ANTHROPIC_API_KEY|MC_[A-Z0-9_]+)=/m);
+    expect(output).toMatch(/^PATH=.+/m);
+  });
+
+  it.skipIf(process.platform !== "darwin" || seatbeltBlocked)(
+    "enforces credentials and worktree access after shell expansion and through symlinks",
+    () => {
+      const privateDir = join(dir, "private");
+      const scratch = join(dir, "hub");
+      mkdirSync(privateDir);
+      mkdirSync(scratch);
+      writeFileSync(join(privateDir, "token"), "secret\n");
+      writeFileSync(join(worktree, "payload"), "payload\n");
+      symlinkSync(privateDir, join(worktree, "private-link"));
+      const profile = terminalSandboxProfile({
+        worktree,
+        scratch,
+        denyRead: [privateDir],
+      });
+      const run = (command: string) => {
+        try {
+          execFileSync("/usr/bin/sandbox-exec", ["-p", profile, "/bin/zsh", "-fc", command], {
+            cwd: worktree,
+            env: { ...process.env, HOME: dir },
+            stdio: "ignore",
+          });
+          return 0;
+        } catch (error) {
+          return (error as { status?: number }).status;
+        }
+      };
+      for (const command of [
+        'cat "$HOME/private/token"',
+        `cat "\${HOME}/private/token"`,
+        'echo stolen > "$HOME/operator-token"',
+        'cp payload --target-directory="$HOME/out"',
+        "cat private-link/token",
+        `${process.execPath} -e 'require("node:fs").readFileSync(process.env.HOME + "/private/token")'`,
+      ])
+        expect(run(command), command).not.toBe(0);
+      expect(run("echo inside > result && cat result")).toBe(0);
+    },
+  );
   it.each([
     "cat ~/.local/share/mission-control/operator-token",
     "git push",

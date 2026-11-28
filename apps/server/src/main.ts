@@ -170,7 +170,8 @@ import { createSessionSidebar } from "./sessions/sidebar.ts";
 import {
   createSeatTerminal,
   type SeatTerminal,
-  terminalCommandDecision,
+  terminalCommandPolicy,
+  terminalSandboxProfile,
   terminalSuite,
 } from "./sessions/terminal.ts";
 import { createSessionWatch } from "./sessions/watch.ts";
@@ -1113,14 +1114,16 @@ export async function main(): Promise<void> {
     },
     commandGuard: ({ seatId, worktree, command }) => {
       const repoId = store.liveSeatRuns().find((live) => live.seatId === seatId)?.run.repoId;
-      const repo = config.repos.find((candidate) => candidate.id === repoId);
-      return terminalCommandDecision({
-        command,
-        worktree,
-        denyRead: config.crew?.denyRead ?? [],
-        commands: repo?.terminalCommands,
-      });
+      return repoId === undefined
+        ? "Terminal command refused: no repository is active."
+        : terminalCommandPolicy(config, repoId, worktree, command);
     },
+    sandboxProfile: (worktree) =>
+      terminalSandboxProfile({
+        worktree,
+        scratch: join(dirname(dbPath), "seat-terminal"),
+        denyRead: config.crew?.denyRead ?? [],
+      }),
     log: (m) => log(m),
   });
   const seatIds = () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];

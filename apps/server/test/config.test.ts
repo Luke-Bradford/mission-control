@@ -43,6 +43,7 @@ import {
 } from "../src/config.ts";
 import { configView } from "../src/hud/views.ts";
 import { CodexModels, codexModels, codexModelsFor } from "../src/runtime/codex-models.ts";
+import { terminalCommandPolicy } from "../src/sessions/terminal.ts";
 import { CODEX_MODELS, fakeModels, MODEL_PAGES } from "./config-codex.ts";
 
 const catalog = fakeModels();
@@ -174,6 +175,23 @@ describe("loadConfig", () => {
       verdict: "comment",
       actor: "claude[bot]",
     });
+  });
+
+  it("loads a repository terminal command allowlist", () => {
+    const path = tmpConfig((yaml) =>
+      yaml.replace(
+        "    project: 2\n",
+        "    project: 2\n    terminal_commands: [uv run, make up]\n",
+      ),
+    );
+    const config = loadConfig(path);
+    expect(config.repos[0]?.terminalCommands).toEqual(["uv run", "make up"]);
+    expect(
+      terminalCommandPolicy(config, config.repos[0]?.id ?? "", "/worktree", "make up"),
+    ).toBeNull();
+    expect(
+      terminalCommandPolicy(config, config.repos[0]?.id ?? "", "/worktree", "pnpm exec vite"),
+    ).toMatch(/allowlist/i);
   });
 
   it.each([
