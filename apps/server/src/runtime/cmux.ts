@@ -54,6 +54,8 @@ export interface CmuxWorkspaceGroup {
   id: string;
   externalId: string | null;
   name: string;
+  /** The workspace cmux created as this group's anchor. */
+  anchorWorkspaceId: string | null;
   workspaceIds: string[];
 }
 
@@ -255,6 +257,7 @@ export function parseWorkspaceGroups(text: string): CmuxWorkspaceGroup[] {
     const id = pick(o, "id", "uuid", "groupId", "group_id");
     const name = pick(o, "name", "title");
     const externalId = pick(o, "externalId", "external_id");
+    const anchor = pick(o, "anchorWorkspaceId", "anchor_workspace_id", "anchor");
     const members = pick(o, "workspaceIds", "workspace_ids", "workspaces");
     const workspaceIds = Array.isArray(members)
       ? members
@@ -272,6 +275,8 @@ export function parseWorkspaceGroups(text: string): CmuxWorkspaceGroup[] {
         id,
         externalId: typeof externalId === "string" ? externalId : null,
         name,
+        anchorWorkspaceId:
+          typeof anchor === "string" ? anchor : (workspaceIds.at(0) ?? null),
         workspaceIds,
       });
   }
@@ -481,9 +486,9 @@ export function createCmux(
         if (group === undefined) throw new CmuxError("cmux made no workspace group we could find");
       }
       for (const args of [
-        ["pin", "--group", group.id],
-        ["set-color", "--group", group.id, "--color", input.color],
-        ["set-icon", "--group", group.id, "--icon", input.icon],
+        ["pin", group.id],
+        ["set-color", group.id, "--hex", input.color],
+        ["set-icon", group.id, "--symbol", input.icon],
       ]) {
         const changed = await cmux(["workspace-group", ...args]);
         if (changed.code !== 0) throw failed(`workspace-group ${args[0]}`, changed);

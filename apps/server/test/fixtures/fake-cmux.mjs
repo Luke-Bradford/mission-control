@@ -147,11 +147,22 @@ switch (cmd) {
     if (sub === "create") {
       state.groups ??= [];
       const externalId = more[more.indexOf("--external-id") + 1];
+      const anchor = randomUUID();
+      state.workspaces ??= [];
+      state.workspaces.push({
+        id: anchor,
+        ref: `workspace:${state.nextRef ?? 1}`,
+        name: more[more.indexOf("--name") + 1],
+        cwd: process.cwd(),
+        command: "zsh",
+      });
+      state.nextRef = (state.nextRef ?? 1) + 1;
       state.groups.push({
         id: externalId,
         external_id: externalId,
         name: more[more.indexOf("--name") + 1],
-        workspace_ids: [],
+        anchor_workspace_id: anchor,
+        workspace_ids: [anchor],
       });
       ok("OK");
     }
@@ -164,7 +175,19 @@ switch (cmd) {
       if (!row.workspace_ids.includes(workspace)) row.workspace_ids.push(workspace);
       ok("OK");
     }
-    if (["pin", "set-color", "set-icon"].includes(sub)) ok("OK");
+    if (sub === "pin") {
+      if (more.length !== 1 || more[0]?.startsWith("--")) fail("pin expects a group id");
+      ok("OK");
+    }
+    if (sub === "set-color") {
+      if (more.length !== 3 || more[1] !== "--hex" || !/^#[0-9a-f]{6}$/i.test(more[2] ?? ""))
+        fail("set-color expects <group> --hex <hex>");
+      ok("OK");
+    }
+    if (sub === "set-icon") {
+      if (more.length !== 3 || more[1] !== "--symbol") fail("set-icon expects <group> --symbol <symbol>");
+      ok("OK");
+    }
     fail(`unknown workspace-group command ${sub}`);
     break;
   }
@@ -339,6 +362,8 @@ switch (cmd) {
         if (w.id === id) w.goneAt ??= Date.now() + state.linger;
       }
     else state.workspaces = state.workspaces.filter((w) => w.id !== id);
+    for (const group of state.groups ?? [])
+      group.workspace_ids = (group.workspace_ids ?? []).filter((workspace) => workspace !== id);
     state.sessions = (state.sessions ?? []).filter((r) => r.workspace_id !== id);
     ok();
     break;

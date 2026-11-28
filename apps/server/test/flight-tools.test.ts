@@ -494,6 +494,7 @@ beforeEach(() => {
       id: "group",
       externalId: "mission-control",
       name: "Mission Control",
+      anchorWorkspaceId: null,
       workspaceIds: [],
     }),
     addToWorkspaceGroup: async () => {},
