@@ -2134,6 +2134,20 @@ describe("collectGithub pull requests", () => {
       expect(ciDeciders(store, botRepo)).toEqual({ names: ["lint"], source: "protection" });
     });
 
+    it("a protection that requires only the review bot leaves no CI check to decide", async () => {
+      const botRepo = {
+        ...repo,
+        review: { kind: "repo-bot" as const, check: "review", verdict: "check" as const },
+      };
+      const { gql } = stub({ prPages: [red()], protection: rule("review") });
+      await collectGithub(botRepo, store, gql, NOW);
+      expect(prs()[0]?.ci).toBe("passing");
+      expect(ciDeciders(store, botRepo)).toEqual({ names: [], source: "protection" });
+      expect(ciDecidedByText(ciDeciders(store, botRepo))).toBe(
+        "branch protection requires only review checks",
+      );
+    });
+
     it("with no protection, every check decides, as before", async () => {
       const { gql } = stub({ prPages: [red()], protection: rule() });
       await collectGithub(repo, store, gql, NOW);

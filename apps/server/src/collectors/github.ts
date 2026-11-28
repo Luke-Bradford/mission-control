@@ -4,6 +4,7 @@ import {
   BOARD_KEEP_DONE_MS,
   type BoardItem,
   bodyDependencies,
+  type CiVerdict,
   COMMENTS_MAX_PAGES,
   COMMENTS_PAGE_SIZE,
   ciVerdict,
@@ -1338,7 +1339,7 @@ async function refreshProtectedChecks(
 
 /** Which checks decide CI on a repo's PR heads, and where that list came from. */
 export interface CiDeciders {
-  /** [] = every check (but mc/review) decides. */
+  /** [] with source "every": every check (but mc/review) decides; with "protection": none does. */
   names: string[];
   source: "config" | "protection" | "every";
 }
@@ -1350,23 +1351,46 @@ export interface CiDeciders {
 export function ciDeciders(store: Store, repo: CcConfig["repos"][number]): CiDeciders {
   const own = repo.requiredChecks ?? [];
   if (own.length > 0) return { names: [...own], source: "config" };
-  const names = (protectedChecks.get(store)?.get(repo.id) ?? []).filter(
-    (c) => c !== REVIEW_STATUS_CONTEXT && c !== repo.review?.check,
-  );
-  return names.length > 0 ? { names, source: "protection" } : { names: [], source: "every" };
+  const read = protectedChecks.get(store)?.get(repo.id) ?? [];
+  if (read.length === 0) return { names: [], source: "every" };
+  // a protection that requires only review checks leaves no CI check to decide, not every one
+  const names = read.filter((c) => c !== REVIEW_STATUS_CONTEXT && c !== repo.review?.check);
+  return { names, source: "protection" };
 }
 
 /** The deciders as one phrase for a park note. */
 export function ciDecidedByText(d: CiDeciders): string {
   if (d.source === "config") return `required_checks names ${d.names.join(", ")}`;
-  if (d.source === "protection") return `branch protection requires ${d.names.join(", ")}`;
+  if (d.source === "protection")
+    return d.names.length > 0
+      ? `branch protection requires ${d.names.join(", ")}`
+      : "branch protection requires only review checks";
   return "every check decides";
+}
+
+/**
+ * The CI verdict of a PR head's checks as the deciders judge it. The repo's review bot is its own
+ * gate, so its check never decides CI; with no deciding check left, reported checks pass.
+ */
+export function prCiVerdict(
+  repo: CcConfig["repos"][number],
+  deciders: CiDeciders,
+  checks: readonly PrCheck[],
+): CiVerdict {
+  const own =
+    repo.review === undefined ? checks : checks.filter((c) => c.name !== repo.review?.check);
+  const names = deciders.names.filter((c) => c !== repo.review?.check);
+  if (deciders.source !== "every" && names.length === 0) {
+    const reported = own.some((c) => c.name !== REVIEW_STATUS_CONTEXT);
+    return { ci: reported ? "passing" : null, failing: [], pending: [], missing: [] };
+  }
+  return ciVerdict(own, names);
 }
 
 function mapPr(
   repo: CcConfig["repos"][number],
   n: Record<string, unknown>,
-  required: readonly string[],
+  deciders: CiDeciders,
 ): PullRequestView | null {
   if (typeof n.number !== "number") return null;
   const branch = str(n.headRefName, "");
@@ -1403,12 +1427,7 @@ function mapPr(
     review: lookup(REVIEWS, n.reviewDecision),
     // A configured repository bot is its own review gate. Its failed check must reach the author
     // as review findings, rather than parking the run as an ordinary CI failure.
-    ci: ciVerdict(
-      repo.review === undefined
-        ? checks
-        : checks.filter((check) => check.name !== repo.review?.check),
-      required.filter((check) => check !== repo.review?.check),
-    ).ci,
+    ci: prCiVerdict(repo, deciders, checks).ci,
     checks,
     createdAt: ms(n.createdAt),
     updatedAt: ms(n.updatedAt),
@@ -1447,7 +1466,7 @@ async function completePrFiles(
   gql: Gql,
   store: Store,
 ): Promise<PullRequestView | null> {
-  const pr = mapPr(repo, node, ciDeciders(store, repo).names);
+  const pr = mapPr(repo, node, ciDeciders(store, repo));
   if (!pr || pr.changedFiles == null || (pr.files?.length ?? 0) >= pr.changedFiles) return pr;
   const [owner = "", name = ""] = repo.github.split("/");
   let info = path(node, "files", "pageInfo");
