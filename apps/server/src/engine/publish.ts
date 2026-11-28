@@ -499,7 +499,7 @@ export function ciLogBody(log: string, max: number): string {
     const job = m === null ? "" : (m[1] ?? "");
     const text = (m === null ? raw : (m[2] ?? "")).trim();
     if (text === "") continue;
-    const g = jobs.get(job) ?? {
+    const g: JobLines = jobs.get(job) ?? {
       entries: [],
       marks: [],
       crosses: new Map(),
