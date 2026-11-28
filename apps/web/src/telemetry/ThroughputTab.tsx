@@ -15,6 +15,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { useMetrics } from "../metrics.ts";
 import { PAGE_PATHS, ticketPath } from "../router.ts";
 import { DASH, NOT_TRACKED } from "./common.ts";
+import { RepoScoreboard } from "./RepoScoreboard.tsx";
 import { Cell, Stat, type StatSpec } from "./Stat.tsx";
 
 const HOUR_MS = 3_600_000;
@@ -602,7 +603,8 @@ export function ThroughputCharts({
   dim: boolean;
 }) {
   return (
-    <div className={`grid${dim ? " dim" : ""}`} data-view="charts" data-n="4">
+    <div className={`grid${dim ? " dim" : ""}`} data-view="charts" data-n="5">
+      <RepoScoreboard repoWeeks={t?.repoWeeks} />
       <MergedPerDay t={t} wait={wait} />
       <CycleDots t={t} wait={wait} now={now} />
       <CycleBySize t={t} wait={wait} />
@@ -632,7 +634,8 @@ export function ThroughputTable({
     .filter((k) => k.mergedAt !== null)
     .sort((a, b) => (b.mergedAt ?? 0) - (a.mergedAt ?? 0));
   return (
-    <div className={`grid${dim ? " dim" : ""}`} data-view="table" data-n="1">
+    <div className={`grid${dim ? " dim" : ""}`} data-view="table" data-n="2">
+      <RepoScoreboard repoWeeks={t?.repoWeeks} />
       <Panel
         id="tTickets"
         title="Tickets"

@@ -180,6 +180,51 @@ describe("Telemetry, Throughput tab", () => {
     expect(read("Commits per run", "14d")).toEqual(["3.4", "commits"]);
   });
 
+  it("compares four repository weeks with the configured loop baseline", async () => {
+    await open(
+      tel({
+        repoWeeks: [
+          {
+            repoId: "mission-control",
+            baseline: { mergedPrsPerWeek: 88, tokensPerWeek: 1_500_000_000 },
+            weeks: [
+              {
+                week: "2026-11-02",
+                mergedPrs: 101,
+                tokensPerMergedPr: { claude: 20_000_000, codex: 9_000_000 },
+                reviewRoundsPerPr: 1.4,
+                medianReadyToMergeHours: 6.5,
+                noSeatWorkingHours: 2,
+              },
+              {
+                week: "2026-11-09",
+                mergedPrs: 0,
+                tokensPerMergedPr: { claude: null, codex: null },
+                reviewRoundsPerPr: null,
+                medianReadyToMergeHours: null,
+                noSeatWorkingHours: null,
+              },
+            ],
+          },
+          { repoId: "unbaselined", baseline: null, weeks: [] },
+        ],
+      }),
+    );
+    const scoreboard = panel("tRepoScoreboard");
+    expect(scoreboard.textContent).toContain("Repository throughput");
+    expect(scoreboard.textContent).toContain("mission-control");
+    expect(scoreboard.textContent).toContain("101");
+    expect(scoreboard.textContent).toContain("29M total");
+    expect(scoreboard.textContent).toContain("Claude 20M");
+    expect(scoreboard.textContent).toContain("Codex 9M");
+    expect(scoreboard.textContent).toContain("1.4");
+    expect(scoreboard.textContent).toContain("6.5 h");
+    expect(scoreboard.textContent).toContain("2 h");
+    expect(scoreboard.textContent).toContain("88 PRs/wk · 1.5B tokens/wk");
+    expect(scoreboard.textContent).toContain("No merged PRs");
+    expect(scoreboard.textContent).toContain("Baseline not configured");
+  });
+
   it("builds the five panels and drops the forecast and the coming note", async () => {
     await open(tel());
     for (const id of ["tMerged", "tCycleTicket", "tCycleSize", "tWip"])

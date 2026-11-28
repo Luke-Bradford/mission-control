@@ -311,6 +311,60 @@
   grid-template-rows: repeat(2, minmax(0, 1fr));
 }
 
+/* Repository weeks answer whether each crew repo improves on its observed loop baseline. */
+.tabpanel .grid[data-view="charts"][data-n="5"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto repeat(2, minmax(0, 1fr));
+}
+
+.tabpanel .grid[data-view="charts"][data-n="5"] > .repo-scoreboard {
+  grid-column: 1 / -1;
+}
+
+.tabpanel .grid[data-view="table"][data-n="2"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(240px, 1fr);
+}
+
+.repo-scoreboard .repo-scoreboard-scroll {
+  overflow: auto;
+  max-height: min(360px, 42vh);
+  scrollbar-gutter: stable;
+}
+
+.repo-scoreboard-repo + .repo-scoreboard-repo {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+
+.repo-scoreboard-repo > header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: baseline;
+  margin-bottom: var(--sp-1);
+}
+
+.repo-scoreboard-repo > header span {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+}
+
+.repo-scoreboard table {
+  min-width: 760px;
+}
+
+.repo-scoreboard th:first-child,
+.repo-scoreboard td:first-child {
+  text-align: left;
+}
+
+.repo-scoreboard tbody th {
+  color: var(--fg-2);
+  font-weight: 400;
+}
+
 /* Throughput plots fill the panel body; the legend stays below the measured plot. */
 .tabpanel .grid[data-view="charts"][data-n="4"] > .panel > .pb {
   display: flex;
