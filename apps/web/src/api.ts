@@ -26,11 +26,15 @@ let operatorTokenLoad: Promise<void> | undefined;
 
 /** Takes the one-time page capability out of the URL before any other code can copy that URL. */
 function takeBootstrapCapability(): string | undefined {
-  const url = new URL(window.location.href);
+  const browser = globalThis as typeof globalThis & {
+    history: { replaceState(data: unknown, unused: string, url?: string | URL | null): void };
+    location: { href: string };
+  };
+  const url = new URL(browser.location.href);
   const capability = url.searchParams.get("bootstrap");
   if (capability === null) return undefined;
   url.searchParams.delete("bootstrap");
-  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  browser.history.replaceState(null, "", url.pathname + url.search + url.hash);
   return capability;
 }
 
