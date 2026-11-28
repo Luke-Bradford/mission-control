@@ -117,10 +117,11 @@ export function Sessions() {
   const [writesOverride, setWritesOverride] = useState<boolean | null>(null);
   const tz = useTz();
   useEffect(() => {
-    const timer = setInterval(() => {
-      hub.refetch(RESOURCES.sessions.path);
-      hub.refetch(RESOURCES.crewApps.path);
-    }, SESSIONS_REFRESH_MS);
+    const timer = setInterval(() => hub.refetch(RESOURCES.sessions.path), SESSIONS_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    const timer = setInterval(() => hub.refetch(RESOURCES.crewApps.path), 60_000);
     return () => clearInterval(timer);
   }, []);
   const view = res.data;
