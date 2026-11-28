@@ -168,7 +168,14 @@ import { applyCmuxSessionEvent, startCmuxEvents } from "./sessions/events.ts";
 import { createBranchPrs } from "./sessions/pr.ts";
 import { createSessions, probeLocal, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
 import { createSessionSidebar } from "./sessions/sidebar.ts";
-import { createSeatTerminal, type SeatTerminal, terminalSuite } from "./sessions/terminal.ts";
+import {
+  createSeatTerminal,
+  type SeatTerminal,
+  terminalCommandPolicy,
+  terminalSandboxProfile,
+  terminalScratchDir,
+  terminalSuite,
+} from "./sessions/terminal.ts";
 import { createSessionWatch } from "./sessions/watch.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
@@ -1096,9 +1103,10 @@ export async function main(): Promise<void> {
       set: (value) => store.setSetting(CREW_APP_STATE_SETTING, value),
     },
   });
+  const terminalDir = terminalScratchDir(dbPath);
   seatTerminal = createSeatTerminal({
     cmux,
-    dir: join(dirname(dbPath), "seat-terminal"),
+    dir: terminalDir,
     checks: checkRecorder,
     lock,
     suiteOf: ({ seatId, worktree, command }) => {
@@ -1107,6 +1115,19 @@ export async function main(): Promise<void> {
         ? null
         : terminalSuite(config, repoId, worktree, command, (c) => checkRecorder.lockedBy(c));
     },
+    commandGuard: ({ seatId, worktree, command }) => {
+      const repoId = store.liveSeatRuns().find((live) => live.seatId === seatId)?.run.repoId;
+      return repoId === undefined
+        ? "Terminal command refused: no repository is active."
+        : terminalCommandPolicy(config, repoId, worktree, command);
+    },
+    sandboxProfile: (worktree) =>
+      terminalSandboxProfile({
+        worktree,
+        scratch: terminalDir,
+        denyRead: config.crew?.denyRead ?? [],
+        denyLocalPorts: [port],
+      }),
     log: (m) => log(m),
   });
   const seatIds = () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];

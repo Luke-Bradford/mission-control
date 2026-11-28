@@ -4,10 +4,19 @@
  * tests). It runs as the operator, outside the seat sandbox. Each command's output and exit code
  * go to files the hub reads; the pane stays open for the operator to watch.
  */
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { CHECK_BASH_TIMEOUT_MS, LOCK_WAIT_MS, lockBusyText, seatCallSign } from "@mc/core";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
+import {
+  CHECK_BASH_TIMEOUT_MS,
+  guardDecision,
+  LOCK_WAIT_MS,
+  lockBusyText,
+  seatCallSign,
+  splitCommands,
+} from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import type { CallKey, CheckRecorder } from "../guard/check-runs.ts";
 import { crewGuardDecision } from "../guard/decision.ts";
@@ -35,6 +44,186 @@ export interface TerminalRun {
   timeoutMs: number;
 }
 
+export interface TerminalCommandInput {
+  command: string;
+  worktree: string;
+  /** Extra operator folders which no terminal command may read. */
+  denyRead: readonly string[];
+  /** When present, each command must start with one of these plain prefixes. */
+  commands?: readonly string[];
+}
+
+const TERMINAL_CREDENTIAL_FOLDERS = [
+  ".local/share/mission-control",
+  "Library/Application Support/eBull",
+  ".ssh",
+  ".config/gh",
+  ".git-credentials",
+  ".netrc",
+  "Library/Keychains",
+] as const;
+
+const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
+
+/** A private temporary folder for pane scripts; it must never live beside hub credentials. */
+export const terminalScratchDir = (dbPath: string) =>
+  join(
+    tmpdir(),
+    "mission-control-seat-terminal",
+    createHash("sha256").update(resolve(dbPath)).digest("hex").slice(0, 16),
+  );
+
+const sandboxPath = (path: string) => {
+  if (
+    [...path].some(
+      (character) =>
+        character === '"' ||
+        character === "\\" ||
+        character.charCodeAt(0) < 32 ||
+        character.charCodeAt(0) === 127,
+    )
+  )
+    throw new Error("Terminal sandbox path contains an unsafe character.");
+  return `"${path}"`;
+};
+
+/**
+ * Seatbelt confines every process the terminal pane starts. Unlike command inspection, this
+ * resolves shell expansions, symlinks and interpreter-controlled file access at execution time.
+ */
+export function terminalSandboxProfile(input: {
+  worktree: string;
+  scratch: string;
+  denyRead: readonly string[];
+  /** The hub's loopback port remains private while other local development services work. */
+  denyLocalPorts?: readonly number[];
+}): string {
+  const denied = [
+    ...TERMINAL_CREDENTIAL_FOLDERS.map((folder) => join(homedir(), folder)),
+    ...input.denyRead,
+  ];
+  return [
+    "(version 1)",
+    "(allow default)",
+    // A pane may use development services on the local machine, but not the hub or the internet.
+    "(deny network-outbound)",
+    '(allow network-outbound (remote ip "127.0.0.1:*"))',
+    '(allow network-outbound (remote ip "::1:*"))',
+    ...(input.denyLocalPorts ?? []).flatMap((port) => [
+      `(deny network-outbound (remote ip "127.0.0.1:${port}"))`,
+      `(deny network-outbound (remote ip "::1:${port}"))`,
+    ]),
+    // Process environments carry the operator's inherited credentials. Keychain APIs use
+    // securityd rather than the keychain files, so deny that service as well.
+    "(deny process-info*)",
+    '(deny mach-lookup (global-name "com.apple.securityd"))',
+    '(deny mach-lookup (global-name "com.apple.securityd.xpc"))',
+    '(deny mach-lookup (global-name "com.apple.launchd"))',
+    '(deny mach-lookup (global-name "com.apple.launchd.*"))',
+    '(deny process-exec (literal "/bin/launchctl"))',
+    "(deny file-write*)",
+    `(allow file-write* (subpath ${sandboxPath(resolve(input.worktree))}))`,
+    `(allow file-write* (subpath ${sandboxPath(resolve(input.scratch))}))`,
+    ...denied.map((path) => `(deny file-read* (subpath ${sandboxPath(resolve(path))}))`),
+  ].join("\n");
+}
+
+const localHost = (value: string) => {
+  try {
+    const url = new URL(value);
+    return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  } catch {
+    return /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:[/?:]|$)/.test(value);
+  }
+};
+
+const outsideWorktree = (path: string, worktree: string) => {
+  const absolute =
+    path === "~" || path.startsWith("~/")
+      ? join(homedir(), path.slice(2))
+      : resolve(worktree, path);
+  const root = resolve(worktree);
+  return !(absolute === root || absolute.startsWith(`${root}/`));
+};
+
+/**
+ * The pane runs with the operator's authority. Apply the normal writer guard to every parsed
+ * command, then reject paths and network calls which the sandbox would otherwise contain.
+ */
+export function terminalCommandDecision(input: TerminalCommandInput): string | null {
+  const denied = [
+    ...TERMINAL_CREDENTIAL_FOLDERS.map((folder) => join(homedir(), folder)),
+    ...input.denyRead,
+  ].map((path) => resolve(path));
+  const pathDecision = (arg: string) => {
+    if (!/^(?:\/|~(?:\/|$)|\.\.\/)/.test(arg)) return null;
+    const path =
+      arg === "~" || arg.startsWith("~/")
+        ? join(homedir(), arg.slice(2))
+        : resolve(input.worktree, arg);
+    if (denied.some((folder) => path === folder || path.startsWith(`${folder}/`)))
+      return "Terminal command refused: it reads an operator credential folder.";
+    if (outsideWorktree(arg, input.worktree))
+      return "Terminal command refused: paths outside the seat worktree are not available in the terminal.";
+    return null;
+  };
+  for (const redirect of input.command.matchAll(/(?:^|[^\\])(?:>>?|<)\s*([^\s;&|]+)/g)) {
+    const refused = pathDecision(redirect[1] ?? "");
+    if (refused !== null) return refused;
+  }
+  const commands = splitCommands(input.command);
+  for (const argv of commands) {
+    const command = argv.join(" ");
+    const verdict = guardDecision(
+      { tool: "Bash", input: { command } },
+      { mode: "writer", repo: "dev", flightPowers: "standard", fullSuite: [] },
+    );
+    if (verdict.kind === "deny") return `Terminal command refused: ${verdict.text}`;
+    if (
+      input.commands &&
+      !input.commands.some((prefix) => command === prefix || command.startsWith(`${prefix} `))
+    )
+      return "Terminal command refused: it is outside this repository's terminal_commands allowlist.";
+    const [program, ...args] = argv;
+    const executable = basename(program ?? "");
+    if (["ps", "pgrep", "top", "lsof", "vmmap", "sample", "leaks"].includes(executable))
+      return "Terminal command refused: process inspection can expose operator credentials.";
+    if (executable === "security")
+      return "Terminal command refused: credential-service access is not available in the terminal.";
+    if (executable === "launchctl")
+      return "Terminal command refused: session launchers are not available in the terminal.";
+    if (["curl", "wget"].includes(program ?? "")) {
+      const targets = args.filter((arg) =>
+        /^(?:https?:\/\/|localhost(?::\d+)?(?:[/?:]|$)|127\.0\.0\.1(?::\d+)?(?:[/?:]|$)|\[::1\])/.test(
+          arg,
+        ),
+      );
+      if (targets.length === 0 || targets.some((target) => !localHost(target)))
+        return "Terminal command refused: curl and wget may only reach a local host.";
+    }
+    for (const arg of args) {
+      const refused = pathDecision(arg);
+      if (refused !== null) return refused;
+    }
+  }
+  return null;
+}
+
+/** Resolve terminal policy from the live repository configuration at the command boundary. */
+export function terminalCommandPolicy(
+  config: CcConfig,
+  repoId: string,
+  worktree: string,
+  command: string,
+): string | null {
+  return terminalCommandDecision({
+    command,
+    worktree,
+    denyRead: config.crew?.denyRead ?? [],
+    commands: config.repos.find((repo) => repo.id === repoId)?.terminalCommands,
+  });
+}
+
 interface SeatTerminalDeps {
   cmux: Pick<Cmux, "workspaces" | "newPane" | "sendPane" | "closePane">;
   /** Where the hub keeps each command's script, output and exit code. */
@@ -47,6 +236,10 @@ interface SeatTerminalDeps {
   suiteOf?: (run: TerminalRun) => string | null;
   lockWaitMs?: number;
   pollMs?: number;
+  /** Refuses a command before it is typed into the operator's pane. */
+  commandGuard?: (input: TerminalRun) => string | null;
+  /** Seatbelt profile for the pane; absent only in isolated unit fixtures. */
+  sandboxProfile?: (worktree: string) => string;
   log?(message: string): void;
 }
 
@@ -56,9 +249,14 @@ export interface SeatTerminal {
   tick(liveSeatIds: readonly string[]): Promise<void>;
 }
 
-/** The pane's own shell: the operator's login shell, so PATH and tools match their terminal. */
-// biome-ignore lint/suspicious/noTemplateCurlyInString: a shell parameter, expanded by the pane's shell
-const PANE_SHELL = 'exec "${SHELL:-/bin/zsh}" -l';
+/** The pane keeps the operator's toolchain, but never the hub or provider credentials. */
+export function terminalPaneShell(profile?: string, command?: string): string {
+  const login = `unset GH_TOKEN GITHUB_TOKEN ANTHROPIC_API_KEY; for name in \${(k)parameters}; do [[ $name == MC_* ]] && unset "$name"; done; exec "\${SHELL:-/bin/zsh}" -l${command === undefined ? "" : ` -c ${shellQuote(command)}`}`;
+  const shell = `exec /bin/zsh -fc ${shellQuote(login)}`;
+  if (profile === undefined) return shell;
+  if (!existsSync(SANDBOX_EXEC)) throw new Error("Seat terminal requires macOS sandbox-exec.");
+  return `exec ${shellQuote(SANDBOX_EXEC)} -p ${shellQuote(profile)} ${shell}`;
+}
 
 const tail = (text: string) =>
   text.length <= TERMINAL_OUTPUT_MAX ? text : text.slice(-TERMINAL_OUTPUT_MAX);
@@ -91,18 +289,22 @@ export function terminalSuite(
 
 export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
   const pollMs = deps.pollMs ?? 500;
-  const panes = new Map<string, string>();
+  const panes = new Map<string, { surface: string; worktree: string }>();
   /** The command each seat has running, until it ends or its run is torn down. */
   const busy = new Map<string, { command: string; cancel: () => Promise<void> }>();
 
   const paneOf = async (seatId: string, worktree: string, fresh: boolean) => {
     const kept = panes.get(seatId);
-    if (kept !== undefined && !fresh) return kept;
-    if (kept !== undefined) await deps.cmux.closePane(kept).catch(() => {});
+    if (kept !== undefined && !fresh && kept.worktree === worktree) return kept.surface;
+    if (kept !== undefined) await deps.cmux.closePane(kept.surface).catch(() => {});
     const workspace = await seatWorkspace(deps.cmux, seatId);
     if (workspace === null) throw new Error("No live cmux workspace for this seat.");
-    const surface = await deps.cmux.newPane(workspace, worktree, PANE_SHELL);
-    panes.set(seatId, surface);
+    const surface = await deps.cmux.newPane(
+      workspace,
+      worktree,
+      terminalPaneShell(deps.sandboxProfile?.(worktree)),
+    );
+    panes.set(seatId, { surface, worktree });
     return surface;
   };
 
@@ -118,6 +320,8 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
 
   return {
     async run({ seatId, runId, worktree, command, timeoutMs }) {
+      const refused = deps.commandGuard?.({ seatId, runId, worktree, command, timeoutMs });
+      if (refused !== null && refused !== undefined) throw new Error(refused);
       const held = busy.get(seatId);
       if (held !== undefined)
         throw new Error(`A command is still running in this seat's terminal: ${held.command}`);
@@ -177,7 +381,8 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
       });
       let started = false;
       try {
-        await mkdir(deps.dir, { recursive: true });
+        await mkdir(deps.dir, { recursive: true, mode: 0o700 });
+        await chmod(deps.dir, 0o700);
         await writeFile(files.command, `cd ${shellQuote(worktree)} || exit 1\n${command}\n`);
         // bash, whatever the pane's shell: PIPESTATUS keeps the command's own exit code past tee
         await writeFile(
@@ -246,10 +451,10 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
     async tick(liveSeatIds) {
       const live = new Set(liveSeatIds);
       for (const [seatId, running] of busy) if (!live.has(seatId)) await running.cancel();
-      for (const [seatId, surface] of panes) {
+      for (const [seatId, pane] of panes) {
         if (live.has(seatId)) continue;
         panes.delete(seatId);
-        await deps.cmux.closePane(surface).catch((error) => deps.log?.(String(error)));
+        await deps.cmux.closePane(pane.surface).catch((error) => deps.log?.(String(error)));
       }
     },
   };

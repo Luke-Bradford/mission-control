@@ -1,17 +1,36 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { createServer } from "node:net";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
-import { createSeatTerminal, terminalSuite } from "../src/sessions/terminal.ts";
+import {
+  createSeatTerminal,
+  type TerminalRun,
+  terminalCommandDecision,
+  terminalPaneShell,
+  terminalSandboxProfile,
+  terminalScratchDir,
+  terminalSuite,
+} from "../src/sessions/terminal.ts";
 import { Store } from "../src/store.ts";
+import { blockedHere } from "./sandbox-gaps.ts";
 
 const SEAT = "guido-eb";
 const RUN = "run-1";
 const OTHER = "guido-ae";
 const OTHER_RUN = "run-2";
+const seatbeltBlocked = await blockedHere("seatbelt");
 /** Stands in for the guard's full-suite classification: a command naming `suite` is one. */
 const suiteOf = ({ command }: { command: string }) =>
   /suite/.test(command) ? "pnpm -s test" : null;
@@ -48,6 +67,225 @@ const terminal = (cmux: ReturnType<typeof paneCmux>, extra = {}) =>
   createSeatTerminal({ cmux, dir: join(dir, "hub"), pollMs: 20, ...extra });
 
 describe("seat terminal", () => {
+  it.skipIf(!existsSync("/bin/zsh"))(
+    "starts the final login shell without provider or hub tokens",
+    () => {
+      const output = execFileSync("/bin/zsh", ["-fc", terminalPaneShell(undefined, "env")], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GH_TOKEN: "github",
+          GITHUB_TOKEN: "github",
+          ANTHROPIC_API_KEY: "anthropic",
+          MC_OPERATOR_TOKEN: "operator",
+          MC_CONTROLLER_TOKEN: "controller",
+        },
+      });
+      expect(output).not.toMatch(/^(?:GH_TOKEN|GITHUB_TOKEN|ANTHROPIC_API_KEY|MC_[A-Z0-9_]+)=/m);
+      expect(output).toMatch(/^PATH=.+/m);
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin" || seatbeltBlocked)(
+    "enforces credentials and worktree access after shell expansion and through symlinks",
+    () => {
+      const privateDir = join(dir, "private");
+      const scratch = join(dir, "hub");
+      mkdirSync(privateDir);
+      mkdirSync(scratch);
+      writeFileSync(join(privateDir, "token"), "secret\n");
+      writeFileSync(join(worktree, "payload"), "payload\n");
+      symlinkSync(privateDir, join(worktree, "private-link"));
+      const profile = terminalSandboxProfile({
+        worktree,
+        scratch,
+        denyRead: [privateDir],
+      });
+      const run = (command: string) => {
+        try {
+          execFileSync("/usr/bin/sandbox-exec", ["-p", profile, "/bin/zsh", "-fc", command], {
+            cwd: worktree,
+            env: { ...process.env, HOME: dir },
+            stdio: "ignore",
+          });
+          return 0;
+        } catch (error) {
+          return (error as { status?: number }).status;
+        }
+      };
+      for (const command of [
+        'cat "$HOME/private/token"',
+        `cat "\${HOME}/private/token"`,
+        'echo stolen > "$HOME/operator-token"',
+        'cp payload --target-directory="$HOME/out"',
+        "cat private-link/token",
+        `${process.execPath} -e 'require("node:fs").readFileSync(process.env.HOME + "/private/token")'`,
+      ])
+        expect(run(command), command).not.toBe(0);
+      expect(run("echo inside > result && cat result")).toBe(0);
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin" || seatbeltBlocked)(
+    "runs a terminal runner outside the default hub data directory",
+    () => {
+      const dataDir = join(homedir(), ".local", "share", "mission-control");
+      const scratch = terminalScratchDir(join(dataDir, "mc.sqlite"));
+      const runner = join(scratch, `seat-terminal-probe-${process.pid}.sh`);
+      mkdirSync(scratch, { recursive: true, mode: 0o700 });
+      writeFileSync(runner, "echo app-command\n", { mode: 0o700 });
+      const profile = terminalSandboxProfile({ worktree, scratch, denyRead: [] });
+      const run = (command: string) => {
+        try {
+          execFileSync("/usr/bin/sandbox-exec", ["-p", profile, "/bin/zsh", "-fc", command], {
+            cwd: worktree,
+            stdio: "ignore",
+          });
+          return 0;
+        } catch (error) {
+          return (error as { status?: number }).status;
+        }
+      };
+      try {
+        expect(run(`bash ${JSON.stringify(runner)}`)).toBe(0);
+        expect(run(`ls ${JSON.stringify(dataDir)}`)).not.toBe(0);
+      } finally {
+        rmSync(runner, { force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin" || seatbeltBlocked)(
+    "keeps process credentials, the login keychain, the hub, and external hosts out of the pane",
+    async () => {
+      const scratch = join(dir, "hub");
+      mkdirSync(scratch);
+      const listen = () =>
+        new Promise<ReturnType<typeof createServer>>((done) => {
+          const server = createServer();
+          server.listen(0, "127.0.0.1", () => done(server));
+        });
+      const app = await listen();
+      const hub = await listen();
+      const appPort = (app.address() as { port: number }).port;
+      const hubPort = (hub.address() as { port: number }).port;
+      const profile = terminalSandboxProfile({
+        worktree,
+        scratch,
+        denyRead: [],
+        denyLocalPorts: [hubPort],
+      });
+      const sibling = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+        env: { ...process.env, GH_TOKEN: "operator-token", MC_OPERATOR_TOKEN: "hub-token" },
+        stdio: "ignore",
+      });
+      const run = (command: string) => {
+        try {
+          execFileSync("/usr/bin/sandbox-exec", ["-p", profile, "/bin/zsh", "-fc", command], {
+            cwd: worktree,
+            encoding: "utf8",
+          });
+          return { status: 0, output: "" };
+        } catch (error) {
+          return {
+            status: (error as { status?: number }).status ?? 1,
+            output: String((error as { stdout?: Buffer }).stdout ?? ""),
+          };
+        }
+      };
+      const connect = (port: number) =>
+        `${process.execPath} -e ${JSON.stringify(
+          `require("node:net").connect(${port}, "127.0.0.1").on("connect", () => process.exit(0)).on("error", () => process.exit(1))`,
+        )}`;
+      try {
+        expect(run(connect(appPort)).status).toBe(0);
+        expect(run(connect(hubPort)).status).not.toBe(0);
+        expect(run("curl --connect-timeout 1 https://example.com").status).not.toBe(0);
+        expect(run(`ps eww -p ${sibling.pid}`).status).not.toBe(0);
+        expect(run("security list-keychains").status).not.toBe(0);
+      } finally {
+        sibling.kill();
+        await Promise.all([
+          new Promise<void>((done) => app.close(() => done())),
+          new Promise<void>((done) => hub.close(() => done())),
+        ]);
+      }
+    },
+  );
+  it.each([
+    "cat ~/.local/share/mission-control/operator-token",
+    "git push",
+    "gh auth token",
+    "ps eww -ax",
+    "/bin/ps eww -ax",
+    "security find-generic-password -s mission-control",
+    "/usr/bin/security find-generic-password -s mission-control",
+    'launchctl submit -l mc.seat.escape -- zsh -fc \'cat "$HOME/.local/share/mission-control/operator-token" > "$PWD/stolen"\'',
+    "echo secret > /tmp/operator-token",
+  ])("refuses an operator credential or GitHub command: %s", (command) => {
+    expect(
+      terminalCommandDecision({
+        command,
+        worktree,
+        denyRead: [join(dir, "private")],
+      }),
+    ).toMatch(/refused/i);
+  });
+
+  it("keeps terminal runner files outside the hub data directory", () => {
+    const dataDir = join(dir, "data");
+    const dbPath = join(dataDir, "mc.sqlite");
+    const scratch = terminalScratchDir(dbPath);
+    const profile = terminalSandboxProfile({ worktree, scratch, denyRead: [dataDir] });
+    expect(scratch.startsWith(`${dataDir}/`)).toBe(false);
+    expect(profile).toContain(`(allow file-write* (subpath "${scratch}"))`);
+    expect(profile).toContain(`(deny file-read* (subpath "${dataDir}"))`);
+  });
+
+  it.each(["uv run pytest -m db", "make up", "pnpm exec vite"])(
+    "permits an app or test command: %s",
+    (command) => {
+      expect(terminalCommandDecision({ command, worktree, denyRead: [] })).toBeNull();
+    },
+  );
+
+  it("refuses before typing a protected command into the pane", async () => {
+    const cmux = paneCmux();
+    const t = terminal(cmux, {
+      commandGuard: ({ command, worktree: terminalWorktree }: TerminalRun) =>
+        terminalCommandDecision({ command, worktree: terminalWorktree, denyRead: [] }),
+    });
+    await expect(
+      t.run({
+        seatId: SEAT,
+        runId: RUN,
+        worktree,
+        command: "git push",
+        timeoutMs: 1_000,
+      }),
+    ).rejects.toThrow(/refused/i);
+    expect(cmux.sendPane).not.toHaveBeenCalled();
+  });
+
+  it("applies a repository terminal command allowlist when one is configured", () => {
+    expect(
+      terminalCommandDecision({
+        command: "make up",
+        worktree,
+        denyRead: [],
+        commands: ["make"],
+      }),
+    ).toBeNull();
+    expect(
+      terminalCommandDecision({
+        command: "uv run pytest -m db",
+        worktree,
+        denyRead: [],
+        commands: ["make"],
+      }),
+    ).toMatch(/allowlist/i);
+  });
+
   it("types a command into one pane of the seat's workspace and returns its output and exit code", async () => {
     const cmux = paneCmux();
     const t = terminal(cmux);
@@ -76,6 +314,25 @@ describe("seat terminal", () => {
     expect(cmux.newPane).toHaveBeenCalledWith("ws-eb", worktree, expect.any(String));
     expect(cmux.typed.map((x) => x.surface)).toEqual(["surface:1", "surface:1"]);
     expect(cmux.closePane).not.toHaveBeenCalled();
+  });
+
+  it("replaces a seat's pane when its active worktree changes", async () => {
+    const nextWorktree = join(dir, "next-worktree");
+    mkdirSync(nextWorktree);
+    const cmux = paneCmux();
+    const t = terminal(cmux);
+    await t.run({ seatId: SEAT, runId: RUN, worktree, command: "true", timeoutMs: 5_000 });
+    await t.run({
+      seatId: SEAT,
+      runId: "run-next",
+      worktree: nextWorktree,
+      command: "true",
+      timeoutMs: 5_000,
+    });
+    expect(cmux.closePane).toHaveBeenCalledWith("surface:1");
+    expect(cmux.newPane).toHaveBeenCalledTimes(2);
+    expect(cmux.newPane).toHaveBeenLastCalledWith("ws-eb", nextWorktree, expect.any(String));
+    expect(cmux.typed.map((entry) => entry.surface)).toEqual(["surface:1", "surface:2"]);
   });
 
   it("returns at its timeout with the pane still running, and refuses another command until it ends", async () => {

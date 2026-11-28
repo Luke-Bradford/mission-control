@@ -334,7 +334,7 @@ describe("seat terminal tools", () => {
     const trace = store.commsForCrew().at(-1);
     expect(trace).toMatchObject({ from: "guido-1", to: "crew", ticket: "mc#42" });
     expect(trace?.text).toBe(
-      "Typed in guido-1's terminal: `DB_PASSWORD=[redacted] uv run pytest -m db --dsn [redacted]`",
+      "GUIDO-1 ran: `DB_PASSWORD=[redacted] uv run pytest -m db --dsn [redacted]`",
     );
   });
 

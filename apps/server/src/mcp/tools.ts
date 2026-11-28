@@ -1736,7 +1736,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       senderKind: "seat",
       to: COMMS_CREW,
       ticket: live.run.ticket ?? null,
-      text: `Typed in ${ctx.seatId}'s terminal: \`${redactSecrets(command, known).replaceAll("`", "'")}\``,
+      text: `${seatCallSign(ctx.seatId)} ran: \`${redactSecrets(command, known).replaceAll("`", "'")}\``,
     });
     bus.emit("agents");
     try {
