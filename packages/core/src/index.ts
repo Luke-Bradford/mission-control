@@ -47,6 +47,7 @@ export * from "./review.ts";
 export * from "./roles.ts";
 export * from "./runs.ts";
 export * from "./runtime.ts";
+export * from "./seat-memory.ts";
 export * from "./session-checks.ts";
 export * from "./session-spend.ts";
 export * from "./sessions.ts";

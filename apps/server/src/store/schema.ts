@@ -361,6 +361,21 @@ CREATE TABLE IF NOT EXISTS flight_memory (
   source TEXT NOT NULL, author TEXT NOT NULL, topic_key TEXT NOT NULL,
   updated_at INTEGER NOT NULL, PRIMARY KEY (repo_id, topic_key)
 );
+-- A ticket's run notes, the seat's own part (done, next, blockers, decisions as JSON); a fresh
+-- session or a later run on the ticket starts from them (#2319).
+CREATE TABLE IF NOT EXISTS run_notes (
+  repo_id TEXT NOT NULL, ticket TEXT NOT NULL, run_id TEXT NOT NULL, seat_id TEXT NOT NULL,
+  notes TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (repo_id, ticket)
+);
+-- Lessons about a repo that seats propose and FLIGHT accepts or rejects; accepted ones go in every
+-- start brief for the repo.
+CREATE TABLE IF NOT EXISTS repo_lessons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, repo_id TEXT NOT NULL, text TEXT NOT NULL,
+  seat_id TEXT NOT NULL, run_id TEXT, at INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('proposed','accepted','rejected')),
+  decided_at INTEGER, decided_by TEXT
+);
+CREATE INDEX IF NOT EXISTS repo_lessons_repo ON repo_lessons(repo_id, state);
 CREATE TABLE IF NOT EXISTS flight_ledger (
   session_id TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
   updated_at INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY(session_id, key)

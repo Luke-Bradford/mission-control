@@ -374,6 +374,7 @@ function make(
     hubRepo?: string;
     cliHold?: CliHold;
     cliVersion?: SupervisorDeps["cliVersion"];
+    seatContextRotateTokens?: number;
     rules?: SupervisorDeps["rules"];
     login?: string | null;
     profiles?: SupervisorDeps["profiles"];
@@ -455,6 +456,9 @@ function make(
     ...(over.inbox === undefined ? {} : { inbox: over.inbox }),
     ...(over.cliHold === undefined ? {} : { cliHold: over.cliHold }),
     cliVersion: over.cliVersion ?? (async () => null),
+    ...(over.seatContextRotateTokens === undefined
+      ? {}
+      : { seatContextRotateTokens: over.seatContextRotateTokens }),
     enabled: over.enabled ?? true,
     stopGraceMs: 300,
     processStart: over.processStart,

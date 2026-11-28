@@ -20,7 +20,10 @@ import {
   EXTERNAL_TEXT_TAG,
   evidenceImageName,
   evidenceWidthOf,
+  FRESH_WHY_TEXT,
+  type FreshWhy,
   type LoopKind,
+  lessonsSection,
   MC_LINE_PREFIX,
   MC_PLAN_STEPS_HINT,
   MC_TOOL_NAMES,
@@ -30,6 +33,7 @@ import {
   REVIEW_DIFF_FILE,
   REVIEW_NOTES_MAX,
   REVIEW_SINCE_FILE,
+  RUN_NOTES_LINE,
   type RunProfile,
   type StoredFinding,
   wrapExternalText,
@@ -92,6 +96,10 @@ export interface BriefInput {
   continuation?: string | null;
   /** The note the operator sent this ticket's plan back with: a planner's brief carries it. */
   planNote?: string | null;
+  /** The lessons FLIGHT accepted for the repo, newest first. */
+  lessons?: readonly { text: string }[];
+  /** The ticket's run notes with the hub's events (`runNotesText`), or null when it has none. */
+  runNotes?: string | null;
 }
 
 /** How many of a ticket's answered questions a run's start brief lists. */
@@ -228,6 +236,8 @@ export function ticketBrief(i: BriefInput): string {
     ...(i.continuation === null || i.continuation === undefined
       ? []
       : ["## Continue the earlier run", "", wrapExternalText(i.continuation), ""]),
+    ...runNotesSection(i.runNotes),
+    ...lessonsSection(i.lessons ?? []),
     ...(i.loop === "plan" && i.planNote
       ? [
           "## The operator sent your last plan back",
@@ -244,6 +254,7 @@ export function ticketBrief(i: BriefInput): string {
         ]
       : []),
     last,
+    ...(writer && i.loop === "build" ? [RUN_NOTES_LINE] : []),
     ...((i.leftoverChanges?.length ?? 0) > 0
       ? [
           "",
@@ -259,6 +270,50 @@ export function ticketBrief(i: BriefInput): string {
             : []),
         ]
       : []),
+  ].join("\n");
+}
+
+/** The ticket's run notes as a brief section: the seat's own words, so they go in as data. */
+function runNotesSection(notes: string | null | undefined): string[] {
+  return notes == null ? [] : ["## Run notes", "", wrapExternalText(notes), ""];
+}
+
+/**
+ * The first line of a fresh session in the same run (#2319): its earlier session's context is gone,
+ * so it starts from the ticket, its run notes and the repo's lessons, and checks what is committed
+ * before it does anything.
+ */
+export function freshBrief(i: {
+  call: string;
+  here: string;
+  repo: string;
+  issue: number;
+  title: string;
+  body: string | null;
+  branch: string;
+  why: FreshWhy;
+  decisions?: readonly { question: string; answer: string }[];
+  runNotes: string | null;
+  lessons: readonly { text: string }[];
+}): string {
+  return [
+    `You are ${i.call}, the ${i.here} on ${i.repo}. Ticket ${i.repo}#${i.issue}: ${i.title}`,
+    "",
+    `Fresh session: Mission Control started a new session for this run because ${FRESH_WHY_TEXT[i.why]}. Nothing of the earlier session's context carries over. You are still on branch ${i.branch}, in the same worktree, with its commits and any uncommitted changes. Do not redo committed work: read your run notes below and the branch's git log and git status first, then carry on from the next step.`,
+    "",
+    ...(i.body === null ? [] : [i.body, ""]),
+    ...decisionsSection(i.decisions),
+    ...(i.runNotes === null
+      ? [
+          "## Run notes",
+          "",
+          "None were saved. Work out where you are from git log and git status.",
+          "",
+        ]
+      : runNotesSection(i.runNotes)),
+    ...lessonsSection(i.lessons),
+    `${WRITER_CLOSE} ${WORK_UNTIL_DONE}`,
+    RUN_NOTES_LINE,
   ].join("\n");
 }
 

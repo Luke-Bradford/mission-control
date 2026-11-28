@@ -915,6 +915,30 @@ Each refusal is recorded as a guard hit (`/api/guard/hits`, Comms › Guard).
 
 **Re-reads.** A seat may read the same file again; the guard does not refuse or count it.
 
+### Run notes, repo lessons and fresh sessions
+
+A build seat keeps **run notes** with `mc run_notes { done, next, blockers, decisions }`; each save
+replaces the last. They are kept per ticket in the hub's database (table `run_notes`), never in the
+repo. A seat **proposes a repo lesson** (an environment fix or a gotcha) with
+`mc propose_lesson { lesson }`; the proposal goes to FLIGHT in Comms with its id, and FLIGHT accepts
+or rejects it with `decide_lesson { id, accept, basis }` (table `repo_lessons`, logged as a `memory`
+decision). Both writes pass the secret scan; a refusal is a guard hit. Nothing is written to GitHub.
+
+Every build seat's start brief lists the repo's accepted lessons (newest 20) and, when the ticket
+already has notes, its run notes. An engine-driven Claude build run gets a **fresh session** in the
+same run, branch and worktree, instead of carrying on or failing, when:
+
+- its context is past 150K tokens at a turn's end;
+- the installed Claude CLI is newer than the one the run started on, at a turn's end (a CLI update
+  waits for each seat's turn to end);
+- its CLI stops mid-run on its own (a crash, or its cmux workspace closed).
+
+The fresh session starts from the role prompt, the ticket, its run notes (with the hub's own
+events on the ticket: pushes, CI, holds, merges) and the repo's lessons, and is told to check the
+branch's git log before doing anything. Its loop event reads `Fresh session: <why>`. A run gets at
+most 3 fresh sessions an hour; past that a crash fails the run as before and a large context
+carries on. Review, FLIGHT, audit, check, Codex and hand-started runs keep their old behaviour.
+
 ### A looped run, step by step
 
 Every writer run started while the engine is on (not a preview, `MC_NO_LOOP_WRITES` unset, this
@@ -1596,6 +1620,7 @@ named pause or attributes an unknown grant to FLIGHT.
 | Tool | What it does |
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat; also sends a merge-hold park back to its builder, the hold staying in force), or `second_review` |
+| `decide_lesson` | Accept or reject a lesson a seat proposed with `propose_lesson` (its id is in the seat's Comms line). An accepted lesson goes in every later build seat's start brief for that repo. Decision kind `memory`. |
 | `move_review` | Move one queued review to a named review seat. It keeps the review head, round and model rule. It refuses a target account at its usage stop. |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds. A pause exception is granted to the actual prepared run, with FLIGHT, its reason and time recorded. The original pause owner and seat coverage remain unchanged; the exception ends with that run. It never lets the engine deal the seat another ticket while the pause holds. A failed start removes only its own grant and preserves newer operator changes |
 | `resume_seat` | Resume a seat's unfinished run after a stop, a crew pause, an error or a restart; a build or plan seat in FLIGHT's session and a run in its lane. A stop can be lifted, but a crew-pause exception covers that run only. The original pause keeps its owner and seat coverage. Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), an already live unpaused session, and a machine without headroom. A failed resume removes only its own exception and restores the stop unless the operator changed it |

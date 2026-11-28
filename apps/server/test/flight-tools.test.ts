@@ -97,6 +97,8 @@ import {
   ledgerNoKeyText,
   ledgerOwnerText,
   ledgerTitleText,
+  lessonDecidedText,
+  lessonMissingText,
   liftPark,
   loopOf,
   MC_BAD_ARGS,
@@ -1540,6 +1542,7 @@ describe("tool list", () => {
       "untrack",
       "ledger",
       "remember",
+      "decide_lesson",
       "forget",
       "recall",
       "cmux_sessions",
@@ -8839,6 +8842,46 @@ describe("headline", () => {
     expect(await save("a\nb")).toEqual(refused(headlineText(3)));
     expect(store.flightBrief("s1").find((r) => r.section === FLIGHT_HEADLINE)?.text).toBe("H");
     expect(await save("")).toEqual({ text: briefClearedText(FLIGHT_HEADLINE_TITLE) });
+  });
+});
+
+describe("decide_lesson", () => {
+  const propose = () =>
+    store.seatMemory.proposeLesson({
+      repoId: "mc",
+      text: "eBull needs Homebrew Python.",
+      seatId: "guido-1",
+      runId: "guido-1:r",
+      at: NOW,
+    });
+
+  it("accepts a seat's lesson for every later brief on its repo, and logs the decision", async () => {
+    const id = propose();
+    expect(await call("decide_lesson", { id, accept: true, basis: "seen twice" })).toEqual({
+      text: lessonDecidedText(id, true),
+    });
+    expect(store.seatMemory.acceptedLessons("mc").map((l) => [l.id, l.decidedBy])).toEqual([
+      [id, "flight-1"],
+    ]);
+    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
+      kind: "memory",
+      decision: lessonDecidedText(id, true),
+      basis: "seen twice",
+    });
+  });
+
+  it("rejects one, and refuses a lesson already decided or not proposed", async () => {
+    const id = propose();
+    expect(await call("decide_lesson", { id, accept: false, basis: "one-off" })).toEqual({
+      text: lessonDecidedText(id, false),
+    });
+    expect(store.seatMemory.acceptedLessons("mc")).toEqual([]);
+    expect(await call("decide_lesson", { id, accept: true, basis: "x" })).toEqual(
+      refused(lessonMissingText(id)),
+    );
+    expect(await call("decide_lesson", { id: 999, accept: true, basis: "x" })).toEqual(
+      refused(lessonMissingText(999)),
+    );
   });
 });
 
