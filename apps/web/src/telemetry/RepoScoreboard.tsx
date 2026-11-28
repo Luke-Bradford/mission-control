@@ -20,8 +20,8 @@ function compactTokenRange(range: { min: number; max: number }): string {
   return `${compactTokens(range.min)}–${compactTokens(range.max)}`;
 }
 
-function hours(hours: number): string {
-  return `${hours.toFixed(1).replace(/\.0$/, "")} h`;
+function hours(value: number): string {
+  return `${value.toFixed(1).replace(/\.0$/, "")} h`;
 }
 
 function weekLabel(week: string): string {
@@ -43,23 +43,6 @@ function baselineTokensPerPr(baseline: RepoBaseline): string | null {
   });
 }
 
-function tokensPerPr(week: RepoWeek, baseline: RepoBaseline): string {
-  if (week.mergedPrs === 0) return "No merged PRs";
-  const { claude, codex } = week.tokensPerMergedPr;
-  const loopBaseline = baselineTokensPerPr(baseline);
-  if (claude === null && codex === null)
-    return loopBaseline === null ? DASH : `${DASH} · Loop baseline ${loopBaseline} / PR`;
-  const values = [claude, codex].filter((value): value is number => value !== null);
-  return [
-    `${compactTokens(values.reduce((sum, value) => sum + value, 0))} total`,
-    claude !== null && `Claude ${compactTokens(claude)}`,
-    codex !== null && `Codex ${compactTokens(codex)}`,
-    loopBaseline !== null && `Loop baseline ${loopBaseline} / PR`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
 function baselineLabel(baseline: RepoBaseline): string {
   const range = (
     value: { min: number; max: number },
@@ -68,16 +51,39 @@ function baselineLabel(baseline: RepoBaseline): string {
     value.min === value.max ? format(value.min) : `${format(value.min)}–${format(value.max)}`;
   return baseline === null
     ? "Baseline not configured"
-    : `${range(baseline.mergedPrsPerWeek, String)} PRs/wk · ${compactTokenRange(baseline.tokensPerWeek)} tokens/wk · ${baselineTokensPerPr(baseline)} tokens/PR`;
+    : `${range(baseline.mergedPrsPerWeek, String)} PR/wk · ${compactTokenRange(baseline.tokensPerWeek)}/wk · ${baselineTokensPerPr(baseline)}/PR`;
 }
 
-/** Four ISO weeks of delivery and capacity figures, compared with the configured loop baseline. */
+function WeekCell({ week }: { week: RepoWeek }) {
+  if (week.mergedPrs === 0) return <span className="repo-scoreboard-empty">No merged PRs</span>;
+  const { claude, codex } = week.tokensPerMergedPr;
+  const vendors = [
+    claude !== null && `Claude ${compactTokens(claude)}`,
+    codex !== null && `Codex ${compactTokens(codex)}`,
+  ].filter((vendor): vendor is string => vendor !== false);
+  const total = [claude, codex].reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  return (
+    <span className="repo-scoreboard-week">
+      <b>{`${week.mergedPrs} merged · ${compactTokens(total)}/PR`}</b>
+      <br />
+      <span>
+        {vendors.map((vendor) => vendor.replace("Claude ", "C").replace("Codex ", "X")).join(" · ")}{" "}
+        · {week.reviewRoundsPerPr === null ? DASH : `${week.reviewRoundsPerPr.toFixed(1)}r`} ·{" "}
+        {week.medianReadyToMergeHours === null ? DASH : hours(week.medianReadyToMergeHours)} ·{" "}
+        {week.noSeatWorkingHours === null ? DASH : hours(week.noSeatWorkingHours)}
+      </span>
+    </span>
+  );
+}
+
+/** Four complete seven-day periods of delivery and capacity figures, compared with the configured loop baseline. */
 export function RepoScoreboard({ repoWeeks }: { repoWeeks: Telemetry["repoWeeks"] | undefined }) {
+  const hasOverflow = (repoWeeks?.length ?? 0) > 4;
   return (
     <Panel
       id="tRepoScoreboard"
       title="Repository throughput"
-      sub="four ISO weeks · tokens per merged PR"
+      sub="four complete weeks · C Claude · X Codex · r review rounds · h Ready / idle hours"
       className="repo-scoreboard"
     >
       {!repoWeeks ? (
@@ -86,61 +92,56 @@ export function RepoScoreboard({ repoWeeks }: { repoWeeks: Telemetry["repoWeeks"
         <p className="pb s muted">No repository telemetry is configured yet.</p>
       ) : (
         <>
-          <section className="pb repo-scoreboard-scroll" aria-label="Repository throughput weeks">
-            {repoWeeks.map((repo) => (
-              <details className="repo-scoreboard-repo" key={repo.repoId} open>
-                <summary aria-label={`${repo.repoId} throughput`}>
-                  <b>{repo.repoId}</b>
-                  <span>Loop baseline: {baselineLabel(repo.baseline)}</span>
-                </summary>
-                {repo.weeks.length === 0 ? (
-                  <p className="s muted">No weekly figures collected yet.</p>
-                ) : (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Week</th>
-                        <th className="r">Merged</th>
-                        <th className="r">Tokens / PR</th>
-                        <th className="r">Review rounds / PR</th>
-                        <th className="r">Ready to merge</th>
-                        <th className="r">Ready, no seat</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {repo.weeks.map((week) => (
-                        <tr key={week.week}>
-                          <th scope="row">{weekLabel(week.week)}</th>
-                          <td className="r num">{week.mergedPrs}</td>
-                          <td className="r num">{tokensPerPr(week, repo.baseline)}</td>
-                          <td className="r num">
-                            {week.reviewRoundsPerPr === null
-                              ? DASH
-                              : week.reviewRoundsPerPr.toFixed(1)}
-                          </td>
-                          <td className="r num">
-                            {week.medianReadyToMergeHours === null
-                              ? DASH
-                              : hours(week.medianReadyToMergeHours)}
-                          </td>
-                          <td className="r num">
-                            {week.noSeatWorkingHours === null
-                              ? DASH
-                              : hours(week.noSeatWorkingHours)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </details>
-            ))}
+          <section
+            className={`pb repo-scoreboard-scroll${hasOverflow ? " has-overflow" : ""}`}
+            aria-label="Repository throughput weeks"
+            tabIndex={hasOverflow ? 0 : undefined}
+          >
+            <table>
+              <colgroup>
+                <col className="repo-scoreboard-name-column" />
+                <col className="repo-scoreboard-baseline-column" />
+                {repoWeeks[0]?.weeks.map((week) => (
+                  <col key={week.week} />
+                ))}
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Repository</th>
+                  <th>Loop baseline</th>
+                  {repoWeeks[0]?.weeks.map((week) => (
+                    <th
+                      key={week.week}
+                      title="Merged PRs · tokens per PR · Claude / Codex · review rounds · Ready hours · idle hours"
+                    >
+                      {weekLabel(week.week)}
+                      <br />
+                      PR · C/X · r · h
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {repoWeeks.map((repo) => (
+                  <tr className="repo-scoreboard-repo" key={repo.repoId}>
+                    <th scope="row">
+                      <span className="repo-scoreboard-repo-name">{repo.repoId}</span>
+                    </th>
+                    <td>{baselineLabel(repo.baseline)}</td>
+                    {repo.weeks.map((week) => (
+                      <td key={week.week}>
+                        <WeekCell week={week} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </section>
-          {repoWeeks.length > 1 && (
-            <p className="repo-scoreboard-cue">
-              {repoWeeks.length} repositories · scroll to compare all
-            </p>
-          )}
+          <p className="repo-scoreboard-cue">
+            {repoWeeks.length} repositories ·{" "}
+            {hasOverflow ? "scroll to compare all" : "all visible"}
+          </p>
         </>
       )}
     </Panel>

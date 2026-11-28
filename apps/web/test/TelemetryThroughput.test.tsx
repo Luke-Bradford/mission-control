@@ -252,24 +252,19 @@ describe("Telemetry, Throughput tab", () => {
     expect(scoreboard.textContent).toContain("Repository throughput");
     expect(scoreboard.textContent).toContain("mission-control");
     expect(scoreboard.textContent).toContain("101");
-    expect(scoreboard.textContent).toContain("29M total");
-    expect(scoreboard.textContent).toContain("Claude 20M");
-    expect(scoreboard.textContent).toContain("Codex 9M");
-    expect(scoreboard.textContent).toContain("1.4");
+    expect(scoreboard.textContent).toContain("29M/PR");
+    expect(scoreboard.textContent).toContain("C20M");
+    expect(scoreboard.textContent).toContain("X9M");
+    expect(scoreboard.textContent).toContain("1.4r");
     expect(scoreboard.textContent).toContain("6.5 h");
     expect(scoreboard.textContent).toContain("2 h");
-    expect(scoreboard.textContent).toContain("88 PRs/wk · 1.5B tokens/wk");
-    expect(scoreboard.textContent).toContain("76–100 PRs/wk · 1.3–1.7B tokens/wk");
-    expect(scoreboard.textContent).toContain("97–161 PRs/wk · 1.5–2B tokens/wk");
-    expect(scoreboard.textContent).toContain("Loop baseline 17M / PR");
-    expect(scoreboard.textContent).toContain("Loop baseline 13–22.4M / PR");
-    expect(scoreboard.textContent).toContain("Loop baseline 9.3–20.6M / PR");
-    expect(scoreboard.textContent).toContain("4 repositories · scroll to compare all");
+    expect(scoreboard.textContent).toContain("88 PR/wk · 1.5B/wk · 17M/PR");
+    expect(scoreboard.textContent).toContain("76–100 PR/wk · 1.3–1.7B/wk · 13–22.4M/PR");
+    expect(scoreboard.textContent).toContain("97–161 PR/wk · 1.5–2B/wk · 9.3–20.6M/PR");
+    expect(scoreboard.textContent).toContain("4 repositories · all visible");
     expect(scoreboard.textContent).toContain("No merged PRs");
     expect(scoreboard.textContent).toContain("Baseline not configured");
-    const summary = scoreboard.querySelector(".repo-scoreboard-repo > summary") as HTMLElement;
-    summary.focus();
-    expect(document.activeElement).toBe(summary);
+    expect(scoreboard.querySelectorAll(".repo-scoreboard-repo")).toHaveLength(4);
   });
 
   it("explains an empty repository comparison and keeps many repositories in the scroll region", async () => {
@@ -303,7 +298,7 @@ describe("Telemetry, Throughput tab", () => {
     );
     const scoreboard = panel("tRepoScoreboard");
     expect(scoreboard.querySelectorAll(".repo-scoreboard-repo")).toHaveLength(12);
-    expect(scoreboard.querySelector(".repo-scoreboard-scroll")).toBeTruthy();
+    expect(scoreboard.querySelector(".repo-scoreboard-scroll.has-overflow")).toBeTruthy();
     expect(scoreboard.textContent).toContain("crew-repo-12");
   });
 

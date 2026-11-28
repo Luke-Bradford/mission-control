@@ -65,10 +65,10 @@ function throughputApi(repoWeeks?: RepoWeeks): Record<string, unknown> {
 
 const api = (repoWeeks?: RepoWeeks) => ({ ...desktopFixture().api, ...throughputApi(repoWeeks) });
 
-function repoWeeksFixture(repositories = 3): RepoWeeks {
+function repoWeeksFixture(repositories = 3, withLongValue = true): RepoWeeks {
   return Array.from({ length: repositories }, (_, index) => {
     const zeroMerge = index === 1;
-    const longValue = index === 2;
+    const longValue = withLongValue && index === 2;
     return {
       repoId: longValue
         ? "repository-with-a-deliberately-long-name-that-must-remain-reachable-in-the-scoreboard"
@@ -77,18 +77,16 @@ function repoWeeksFixture(repositories = 3): RepoWeeks {
         mergedPrsPerWeek: { min: 76, max: 100 },
         tokensPerWeek: { min: 1_300_000_000, max: 1_700_000_000 },
       },
-      weeks: [
-        {
-          week: "2026-11-02",
-          mergedPrs: zeroMerge ? 0 : 101,
-          tokensPerMergedPr: zeroMerge
-            ? { claude: null, codex: null }
-            : { claude: 20_000_000, codex: 9_000_000 },
-          reviewRoundsPerPr: zeroMerge ? null : 1.4,
-          medianReadyToMergeHours: zeroMerge ? null : 6.5,
-          noSeatWorkingHours: zeroMerge ? null : 2,
-        },
-      ],
+      weeks: ["2026-10-29", "2026-11-05", "2026-11-12", "2026-11-19"].map((week) => ({
+        week,
+        mergedPrs: zeroMerge ? 0 : 101,
+        tokensPerMergedPr: zeroMerge
+          ? { claude: null, codex: null }
+          : { claude: 20_000_000, codex: 9_000_000 },
+        reviewRoundsPerPr: zeroMerge ? null : 1.4,
+        medianReadyToMergeHours: zeroMerge ? null : 6.5,
+        noSeatWorkingHours: zeroMerge ? null : 2,
+      })),
     };
   });
 }
@@ -334,14 +332,14 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
     [1920, 1000, "light"],
   ] as const) {
     it(
-      `keeps a long, zero-merge repository scoreboard usable at ${width}x${height}, ${scheme}`,
+      `keeps every crew repository in the first scoreboard view at ${width}x${height}, ${scheme}`,
       async () => {
         const page = await renderAt({
           page: "test/desktopBrowser.html",
           width,
           height,
           colorScheme: scheme,
-          api: api(repoWeeksFixture(12)),
+          api: api(repoWeeksFixture(3, false)),
           search: "?path=/telemetry%3Ftab%3Dthroughput%26view%3Dtable",
         });
         try {
@@ -349,48 +347,35 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
           const scoreboard = await page.evaluate(() => {
             const panel = document.querySelector("#tRepoScoreboard") as HTMLElement;
             const scroll = panel.querySelector(".repo-scoreboard-scroll") as HTMLElement;
-            const summaries = [
-              ...panel.querySelectorAll(".repo-scoreboard-repo > summary"),
-            ] as HTMLElement[];
-            const firstRepository = panel.querySelector(".repo-scoreboard-repo") as HTMLElement;
-            const headers = [...firstRepository.querySelectorAll("thead th")].map((cell) => {
+            const rows = [...panel.querySelectorAll(".repo-scoreboard-repo")] as HTMLElement[];
+            const headers = [...panel.querySelectorAll("thead th")].map((cell) => {
               const box = cell.getBoundingClientRect();
               return { left: box.left, right: box.right };
             });
-            const cells = [...firstRepository.querySelectorAll("tbody tr:first-child > *")].map(
-              (cell) => {
-                const box = cell.getBoundingClientRect();
-                return { left: box.left, right: box.right };
-              },
-            );
-            summaries[0]?.focus();
-            const summaryStyle = getComputedStyle(summaries[0]);
-            scroll.scrollTop = scroll.scrollHeight;
+            const cells = [...panel.querySelectorAll("tbody tr:first-child > *")].map((cell) => {
+              const box = cell.getBoundingClientRect();
+              return { left: box.left, right: box.right };
+            });
             const scrollBox = scroll.getBoundingClientRect();
-            const finalBox = summaries.at(-1)?.getBoundingClientRect();
             return {
-              count: summaries.length,
+              count: rows.length,
               cue: panel.querySelector(".repo-scoreboard-cue")?.textContent,
               headers,
               cells,
-              summaryHeight: summaries[0]?.getBoundingClientRect().height ?? 0,
-              focusOutline: summaryStyle.outlineStyle,
-              scrolled: scroll.scrollTop > 0,
-              finalVisible: (finalBox?.bottom ?? Infinity) <= scrollBox.bottom + 1,
+              rowsVisible: rows.every(
+                (row) => row.getBoundingClientRect().bottom <= scrollBox.bottom + 1,
+              ),
+              rowBottoms: rows.map((row) => row.getBoundingClientRect().bottom),
+              scrollBottom: scrollBox.bottom,
               text: panel.textContent,
             };
           }, undefined);
           expect(page.errors()).toEqual([]);
-          expect(scoreboard.count).toBe(12);
-          expect(scoreboard.cue).toContain("12 repositories · scroll to compare all");
-          expect(scoreboard.summaryHeight).toBeGreaterThanOrEqual(24);
-          expect(scoreboard.focusOutline).not.toBe("none");
-          expect(scoreboard.scrolled).toBe(true);
-          expect(scoreboard.finalVisible).toBe(true);
+          expect(scoreboard.count).toBe(3);
+          expect(scoreboard.cue).toContain("3 repositories · all visible");
+          expect(scoreboard.rowsVisible, JSON.stringify(scoreboard)).toBe(true);
           expect(scoreboard.text).toContain("No merged PRs");
-          expect(scoreboard.text).toContain(
-            "repository-with-a-deliberately-long-name-that-must-remain-reachable-in-the-scoreboard",
-          );
+          expect(scoreboard.text).toContain("crew-repo-3");
           expect(scoreboard.headers).toHaveLength(6);
           expect(scoreboard.cells).toHaveLength(6);
           for (const [index, header] of scoreboard.headers.entries()) {
@@ -410,4 +395,48 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
       BROWSER_TEST_TIMEOUT_MS,
     );
   }
+
+  it(
+    "keeps many repositories scrollable by keyboard without hiding their long values",
+    async () => {
+      const page = await renderAt({
+        page: "test/desktopBrowser.html",
+        width: 1280,
+        height: 600,
+        colorScheme: "dark",
+        api: api(repoWeeksFixture(12)),
+        search: "?path=/telemetry%3Ftab%3Dthroughput%26view%3Dtable",
+      });
+      try {
+        await ready(page);
+        const scoreboard = await page.evaluate(() => {
+          const panel = document.querySelector("#tRepoScoreboard") as HTMLElement;
+          const scroll = panel.querySelector(".repo-scoreboard-scroll") as HTMLElement;
+          scroll.focus();
+          const outline = getComputedStyle(scroll).outlineStyle;
+          scroll.scrollTop = scroll.scrollHeight;
+          const final = panel.querySelector(".repo-scoreboard-repo:last-child") as HTMLElement;
+          const scrollBox = scroll.getBoundingClientRect();
+          return {
+            count: panel.querySelectorAll(".repo-scoreboard-repo").length,
+            cue: panel.querySelector(".repo-scoreboard-cue")?.textContent,
+            outline,
+            finalVisible: final.getBoundingClientRect().bottom <= scrollBox.bottom + 1,
+            text: panel.textContent,
+          };
+        }, undefined);
+        expect(page.errors()).toEqual([]);
+        expect(scoreboard.count).toBe(12);
+        expect(scoreboard.cue).toContain("12 repositories · scroll to compare all");
+        expect(scoreboard.outline).not.toBe("none");
+        expect(scoreboard.finalVisible).toBe(true);
+        expect(scoreboard.text).toContain(
+          "repository-with-a-deliberately-long-name-that-must-remain-reachable-in-the-scoreboard",
+        );
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });

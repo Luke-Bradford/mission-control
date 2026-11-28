@@ -2398,7 +2398,7 @@ describe("repository weekly telemetry", () => {
     const row = tel("7d").repoWeeks?.find((value) => value.repoId === "shop-app");
     expect(row?.weeks).toContainEqual(
       expect.objectContaining({
-        week: "2026-10-12",
+        week: "2026-10-10",
         tokensPerMergedPr: { claude: 29_000_000, codex: 0 },
       }),
     );
@@ -2424,7 +2424,12 @@ describe("repository weekly telemetry", () => {
     const mergedAt = at("2026-11-20T12:00:00Z");
     store.replacePullRequests(
       "mission-control",
-      [pr(1, mergedAt, "mission-control"), pr(2, mergedAt + HOUR, "mission-control")],
+      [
+        pr(1, mergedAt, "mission-control"),
+        pr(2, mergedAt + HOUR, "mission-control"),
+        pr(3, at("2026-11-24T12:00:00Z"), "mission-control"),
+        pr(4, at("2026-11-24T13:00:00Z"), "mission-control"),
+      ],
       0,
     );
     store.upsertRun(
@@ -2435,7 +2440,7 @@ describe("repository weekly telemetry", () => {
         vendor: "claude",
         startedAt: at("2026-11-19T00:00:00Z"),
         endedAt: at("2026-11-20T00:00:00Z"),
-        tokens: tok(500_000, 500_000, 37_000_000, 2_000_000),
+        tokens: tok(0, 0, 100_000_000, 0),
       }),
     );
     store.upsertRun(
@@ -2444,9 +2449,9 @@ describe("repository weekly telemetry", () => {
         agentId: "mission-control-loop",
         repoId: "mission-control",
         vendor: "codex",
-        startedAt: at("2026-11-20T00:00:00Z"),
-        endedAt: at("2026-11-21T00:00:00Z"),
-        tokens: tok(500_000, 500_000, 16_000_000, 1_000_000),
+        startedAt: at("2026-11-24T00:00:00Z"),
+        endedAt: at("2026-11-25T00:00:00Z"),
+        tokens: tok(0, 0, 16_000_000, 0),
       }),
     );
 
@@ -2455,9 +2460,9 @@ describe("repository weekly telemetry", () => {
     );
     expect(row?.weeks).toContainEqual(
       expect.objectContaining({
-        week: "2026-11-16",
-        mergedPrs: 2,
-        tokensPerMergedPr: { claude: 20_000_000, codex: 9_000_000 },
+        week: "2026-11-19",
+        mergedPrs: 4,
+        tokensPerMergedPr: { claude: 25_000_000, codex: 4_000_000 },
       }),
     );
   });
@@ -2499,7 +2504,7 @@ describe("repository weekly telemetry", () => {
 
     const row = tel("7d").repoWeeks?.find((value) => value.repoId === "shop-app");
     expect(row?.weeks).toContainEqual(
-      expect.objectContaining({ week: "2026-10-12", medianReadyToMergeHours: 4 }),
+      expect.objectContaining({ week: "2026-10-10", medianReadyToMergeHours: 4 }),
     );
   });
 
@@ -2550,7 +2555,7 @@ describe("repository weekly telemetry", () => {
         },
         weeks: expect.arrayContaining([
           expect.objectContaining({
-            week: "2026-10-12",
+            week: "2026-10-10",
             mergedPrs: 2,
             tokensPerMergedPr: { claude: 10_000_000, codex: 19_000_000 },
           }),
@@ -2613,7 +2618,7 @@ describe("repository weekly telemetry", () => {
     ).repoWeeks.find((value) => value.repoId === "shop-app");
     expect(row?.weeks).toContainEqual(
       expect.objectContaining({
-        week: "2026-10-12",
+        week: "2026-10-10",
         reviewRoundsPerPr: 2,
         medianReadyToMergeHours: 4,
         noSeatWorkingHours: 3,

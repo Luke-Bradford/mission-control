@@ -135,18 +135,6 @@ export interface TelemetryScope {
   ticket?: string | null;
 }
 
-/** Start of the local ISO week containing `at`. */
-function startOfIsoWeek(at: number, timeZone: string): number {
-  const day = startOfLocalDay(at, timeZone);
-  const weekday = new Date(`${dayFormatter(timeZone)(day)}T12:00:00Z`).getUTCDay();
-  const daysSinceMonday = (weekday + 6) % 7;
-  return startOfLocalDay(day - daysSinceMonday * DAY_MS + 12 * HOUR_MS, timeZone);
-}
-
-function nextLocalWeek(weekStart: number, timeZone: string): number {
-  return startOfLocalDay(weekStart + WEEK_MS + 12 * HOUR_MS, timeZone);
-}
-
 /**
  * `scope` intersects ticket, agent and account for today, ticket bars, tools and totals;
  * the flow of work, quota, machine and the per-agent series stay crew-wide. Unfiltered, the page
@@ -975,9 +963,11 @@ export function telemetry(
 
   // ── repository weeks ──
   // These rows deliberately use the configured loop baseline rather than deriving a moving target.
-  const currentWeek = startOfIsoWeek(now, tz);
+  // Complete seven-day periods end at today's local midnight. This keeps the published
+  // 19–26 November comparison intact when Monday falls inside it.
+  const currentWindowEnd = startOfLocalDay(now, tz);
   const weekStarts = Array.from({ length: 4 }, (_, index) =>
-    startOfIsoWeek(currentWeek - (3 - index) * WEEK_MS + 12 * HOUR_MS, tz),
+    startOfLocalDay(currentWindowEnd - (4 - index) * WEEK_MS + 12 * HOUR_MS, tz),
   );
   const allRuns = store.runsOverlapping(0, now + 1);
   const allReviews = store.reviewsIn(["reported"]);
@@ -1033,8 +1023,8 @@ export function telemetry(
     return {
       repoId: repo.id,
       baseline: repo.loopBaseline ?? null,
-      weeks: weekStarts.map((start) => {
-        const end = nextLocalWeek(start, tz);
+      weeks: weekStarts.map((start, index) => {
+        const end = weekStarts[index + 1] ?? currentWindowEnd;
         const merged = repoPrs.filter(
           (pr) => pr.mergedAt !== null && pr.mergedAt >= start && pr.mergedAt < end,
         );

@@ -324,7 +324,7 @@ export interface AgentSeries {
  * input + output unless named otherwise.
  */
 export interface Telemetry {
-  /** Four ISO weeks of per-repository delivery and capacity figures. */
+  /** Four complete seven-day periods of per-repository delivery and capacity figures. */
   repoWeeks?: {
     repoId: RepoId;
     /** The observed loop's October weekly baseline, set in config; absent for a repo without one. */
@@ -333,7 +333,7 @@ export interface Telemetry {
       tokensPerWeek: { min: number; max: number };
     } | null;
     weeks: {
-      /** ISO week's Monday, in the operator's local calendar. */
+      /** Seven-day period's first local calendar day. */
       week: string;
       mergedPrs: number;
       /** Input plus output tokens per merged PR, by CLI vendor; null when the week has no merges. */
