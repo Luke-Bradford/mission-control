@@ -61,12 +61,26 @@ will not stop ends the run instead, so two Claudes never work one worktree.
 - **Read it** and **type into it.** What you type is a turn of its own; the seat shows Running, then
   Idle. The run stays open.
 - **`/clear` it.** The run keeps going on the new session id. The seat is not re-briefed.
-- **Permission prompts answer themselves.** A tool outside the seat's allowlist opens Claude's
-  permission dialog; the hub refuses it at once (Escape), so no seat waits for you on one. Escape
-  makes Claude stop and wait, so the hub then tells the seat that the tool was refused and to carry
-  on without it or report that it is blocked.
+- **Permission prompts answer themselves.** Before Claude opens its permission dialog, its
+  `PermissionRequest` hook asks the guard. An edit inside the seat's own rules (its area or a granted
+  path in its worktree, never a protected file) goes ahead with no dialog; anything else is refused
+  at once and the seat is told to carry on without it or report that it is blocked. The seat's
+  credential scrub forces Claude's permission mode back to `default`, so `--permission-mode` cannot
+  do this. If a dialog opens anyway, the hub refuses it on screen (Escape) and tells the seat the
+  same.
 - **Answer it.** Any other dialog (a question for you) shows on the Agents page as Waiting with
-  "Needs your input in cmux", and cmux rings.
+  "Needs your input in cmux", and cmux rings. If it is still open after 20 s, FLIGHT is called with
+  its id, its question and every option (a seat call, delivered after the watch's 20 s debounce). FLIGHT's
+  own dialog stays yours.
+- **FLIGHT answers it.** FLIGHT's `answer_dialog { seat, option, dialog, basis }` picks an option for
+  a seat at needs-input, within the seat's own rules. The hub reads the screen before every key, moves
+  the cursor with the arrow keys and presses Enter only once the cursor is on that option (the keys
+  are forced: cmux will not type into a workspace with a dialog open). It refuses when the dialog is
+  gone or has no such option, when its id no longer matches `dialog` (the id is a hash of its whole
+  question and every whole option, so a changed question with the same labels is refused), or when
+  it is Claude's tool permission dialog.
+  A protected path, a hard-rule path or a money action goes to you in a Needs-you brief instead.
+  Each answer is logged as a FLIGHT decision.
 - **Close it.** Ends the process; the hub treats it like any other exit.
 
 Do not restart the agent from cmux's own restore: a restored agent has no hub settings, so the hub
@@ -80,7 +94,9 @@ closes it and resumes the run with its own command.
 | `needsInput` | Waiting, "Needs your input in cmux" |
 | `idle` | Idle |
 
-With no cmux record, the hub reads the state itself, each second: a dialog with numbered options
+While cmux says `running` or `needsInput`, the hub also reads the screen each second: cmux's
+record can stay `running` under an open dialog, and the screen decides. With no cmux record, the
+hub reads the state itself, each second: a dialog with numbered options
 and "Esc to cancel" is Waiting; Claude's spinner ("esc to interrupt") is Running, as is a message
 sent or a turn Claude's transcript left open in the last 10 s; anything else is Idle. The run ends
 when Claude's process ends or the workspace closes. An operator's `/clear` with no record is found

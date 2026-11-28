@@ -76,6 +76,7 @@ import {
   pushReferenceText,
   pushSecretText,
   REFUSAL_TRIES,
+  RELAY_ATTACH_STUCK_MS,
   REVIEW_STATUS_BLOCKED,
   REVIEW_STATUS_PASSED,
   REVIEW_STATUS_PASSED_NOT_INSTALLED,
@@ -312,6 +313,14 @@ interface Harness {
   pushes: string[];
   prs: { title: string; note: string }[];
   excerpts: string[];
+  /** Stale states the engine had put right: a seat id for a turn, `owner:` or `attach:` before it. */
+  staleTurns: string[];
+  /** The seat's attach never finished: its lines are refused as busy until recovered. */
+  stuckAttach: boolean;
+  /** When the stuck attach began. */
+  attachStartedAt: number;
+  /** The CLI refuses (or does not answer) the stale turn's interrupt. */
+  interruptRefused: boolean;
   moves: Move[];
   ended: string[];
   endedReasons: Record<string, string | undefined>;
@@ -442,6 +451,10 @@ function harness(): Harness {
     pushes: [],
     prs: [],
     excerpts: [],
+    staleTurns: [],
+    stuckAttach: false,
+    attachStartedAt: 0,
+    interruptRefused: false,
     moves: [],
     ended: [],
     endedReasons: {},
@@ -723,6 +736,34 @@ function harness(): Harness {
             return store.seatSession(id);
           },
           seatFacts: (id) => (id === RETRO ? x.retroFacts : x.facts),
+          // like the real one, one stale state per call: the row's run, the attach, the turn
+          async recoverRelay(seatId, runId) {
+            const row = store.seatSession(seatId);
+            if (row !== null && row.runId !== runId) {
+              store.setSeatSession({ ...row, runId });
+              x.staleTurns.push(`owner:${seatId}`);
+              return "owner";
+            }
+            if (x.stuckAttach) {
+              // by how long it has gone unfinished, as the real one
+              if (clock - x.attachStartedAt < RELAY_ATTACH_STUCK_MS) return null;
+              x.stuckAttach = false;
+              x.busy = false;
+              x.staleTurns.push(`attach:${seatId}`);
+              return "attach";
+            }
+            if (x.facts?.inTurn !== true) return null;
+            if (x.interruptRefused) return null;
+            x.staleTurns.push(seatId);
+            x.facts = { ...x.facts, inTurn: false };
+            return "turn";
+          },
+          async strandedWorktree(runId) {
+            const r = store.run(runId);
+            if (r === null || store.seatSession(r.agentId)?.runId === runId) return null;
+            x.staleTurns.push(`aside:${r.agentId}`);
+            return join(dir, "wt-stranded");
+          },
           async endRunByEngine(runId, reason) {
             const r = store.run(runId);
             if (r === null || r.endedAt !== null || x.endBlocked) return;
@@ -735,7 +776,13 @@ function harness(): Harness {
             x.asides.push(runId);
             const r = store.run(runId);
             const row = r === null ? null : store.seatSession(r.agentId);
-            if (!x.asideOn || r === null || row?.runId !== runId || row.worktree === null) {
+            if (
+              !x.asideOn ||
+              x.facts?.inTurn ||
+              r === null ||
+              row?.runId !== runId ||
+              row.worktree === null
+            ) {
               return null;
             }
             store.setSeatSession({ ...row, runId: null, cliSessionId: null, worktree: null });
@@ -748,6 +795,9 @@ function harness(): Harness {
             const r = store.run(runId);
             const aside = r?.loop?.hold?.worktree;
             if (r === null || !aside) throw new SupervisorError(409, "the run is not waiting");
+            const row = store.seatSession(r.agentId);
+            if (row !== null && row.runId !== null)
+              throw new SupervisorError(409, "GUIDO-1 already has a run");
             seatIdle(runId, r.agentId);
           },
           busy: () => x.busyList,
@@ -1742,6 +1792,138 @@ describe("CI and review", () => {
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]?.text).toMatch(/^CI failed on aaaaaaa\./);
     expect(loopOf()).toMatchObject({ ciFails: 1, ciFailedSha: SHA });
+  });
+
+  describe("a failure after the re-run, held back by stale seat state from before it", () => {
+    const EXCERPT =
+      "studio:\n1) [chromium] › e2e/board.spec.ts:12:5 › shows the board\nError: expect(locator).toBeVisible() failed";
+    type Stale = "turn" | "owner" | "attach" | "busy";
+    /** Puts the seat in one stale state that holds the engine's lines back. */
+    const goStale = (state: Stale) => {
+      store.setSeatTurnStarted(SEAT, clock - MIN);
+      if (state === "turn") h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      if (state === "owner") {
+        const row = store.seatSession(SEAT);
+        if (row === null) throw new Error("no seat row");
+        store.setSeatSession({ ...row, runId: null });
+      }
+      // (busy: a line refused as the hub goes down, before any attach)
+      if (state === "attach" || state === "busy") h.busy = true;
+      if (state === "attach") {
+        h.stuckAttach = true;
+        h.attachStartedAt = clock;
+      }
+    };
+    /** Fail, re-run, fail, with the seat stale (`state`) from before the push. */
+    async function failWithStaleTurn(state: Stale = "turn"): Promise<number> {
+      await inCi();
+      goStale(state);
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      clock += 1000;
+      h.excerptTexts = [EXCERPT];
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      expect(h.reruns).toEqual([SHA]);
+      expect(loopOf()).toMatchObject({ phase: "working", ciFailedSha: SHA });
+      expect(h.sent).toEqual([]);
+      return clock;
+    }
+
+    /** Ticks a minute at a time until the seat has a line or 5 minutes have passed. */
+    async function untilSent(failedAt: number): Promise<void> {
+      while (h.sent.length === 0 && clock - failedAt < 5 * MIN) {
+        clock += MIN;
+        await h.engine.tick();
+      }
+    }
+
+    it.each([
+      ["a turn flag left on", "turn", SEAT],
+      ["its seat row naming no run", "owner", `owner:${SEAT}`],
+      ["an attach that never finished", "attach", `attach:${SEAT}`],
+    ] as const)(
+      "%s: goes back to the seat within 5 minutes with the failing test's name and error",
+      async (_what, state, put) => {
+        const failedAt = await failWithStaleTurn(state);
+        await untilSent(failedAt);
+        expect(clock - failedAt).toBeLessThan(5 * MIN);
+        expect(h.staleTurns).toEqual([put]);
+        expect(h.sent[0]?.key).toBe(`ci:${RUN}:${SHA}`);
+        expect(h.sent[0]?.text).toContain(
+          "1) [chromium] › e2e/board.spec.ts:12:5 › shows the board",
+        );
+        expect(h.sent[0]?.text).toContain("Error: expect(locator).toBeVisible() failed");
+        expect(loopOf().relayedSha).toBe(SHA);
+      },
+    );
+
+    it("a refused interrupt leaves the turn as it is and sends nothing", async () => {
+      h.interruptRefused = true;
+      const failedAt = await failWithStaleTurn();
+      await untilSent(failedAt);
+      expect(h.staleTurns).toEqual([]);
+      expect(h.sent).toEqual([]);
+      expect(h.facts?.inTurn).toBe(true);
+    });
+
+    it("a seat another live run holds: sets the run aside and wakes it, within 5 minutes", async () => {
+      const other = `${SEAT}:other`;
+      store.upsertRun(run({ id: other, seq: 2 }));
+      const failedAt = await failWithStaleTurn("owner");
+      const row = store.seatSession(SEAT);
+      if (row === null) throw new Error("no seat row");
+      store.setSeatSession({ ...row, runId: other });
+      h.asideOn = true;
+      // The holder is mid-turn when the red run is first due back. It must not be interrupted.
+      h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      clock += 2 * MIN;
+      await h.engine.tick();
+      expect(h.asides).toEqual([]);
+      h.facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+      await untilSent(failedAt);
+      expect(clock - failedAt).toBeLessThan(5 * MIN);
+      // The occupied-seat wake is refused. The holder yields between turns, then the red run wakes.
+      expect(h.staleTurns).toEqual([`aside:${SEAT}`]);
+      expect(h.asides).toEqual([other]);
+      expect(h.wakes.filter((runId) => runId === RUN)).toHaveLength(3);
+      expect(h.wakes).toContain(other);
+      expect(store.run(other)?.loop?.hold).toMatchObject({ worktree: join(dir, "wt"), wake: true });
+      expect(h.sent[0]?.key).toBe(`ci:${RUN}:${SHA}`);
+      expect(h.sent[0]?.text).toContain("1) [chromium] › e2e/board.spec.ts:12:5 › shows the board");
+      expect(loopTexts().some((t) => t.includes("set this run aside"))).toBe(true);
+    });
+
+    it("an attach begun after the failure that never finishes: within 5 minutes", async () => {
+      const failedAt = await failWithStaleTurn("busy");
+      // the hub reattaches 2 minutes after the failure and the replay never finishes
+      clock += 2 * MIN;
+      h.stuckAttach = true;
+      h.attachStartedAt = clock;
+      await untilSent(failedAt);
+      expect(clock - failedAt).toBeLessThan(5 * MIN);
+      expect(h.staleTurns).toEqual([`attach:${SEAT}`]);
+      expect(h.sent[0]?.text).toContain("Error: expect(locator).toBeVisible() failed");
+    });
+
+    it("leaves a turn begun after the failure alone", async () => {
+      const failedAt = await failWithStaleTurn();
+      store.setSeatTurnStarted(SEAT, failedAt + 1000);
+      clock += 3 * MIN;
+      await h.engine.tick();
+      expect(h.staleTurns).toEqual([]);
+      expect(h.sent).toEqual([]);
+    });
+
+    it("leaves a seat waiting on a dialog alone", async () => {
+      await failWithStaleTurn();
+      const row = store.seatSession(SEAT);
+      if (row === null) throw new Error("no seat row");
+      store.setSeatSession({ ...row, state: "needs-input" });
+      clock += 3 * MIN;
+      await h.engine.tick();
+      expect(h.staleTurns).toEqual([]);
+    });
   });
 
   it("a re-run gh refused is not tried again; the next failure is the real one", async () => {

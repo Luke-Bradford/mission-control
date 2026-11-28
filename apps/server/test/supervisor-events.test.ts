@@ -5,7 +5,14 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { clockHm, handoverKey, NEW_LOOP, type Run, type RunLoop } from "@mc/core";
+import {
+  clockHm,
+  handoverKey,
+  NEW_LOOP,
+  RELAY_ATTACH_STUCK_MS,
+  type Run,
+  type RunLoop,
+} from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { commsInboxContext } from "../src/comms/index.ts";
@@ -241,6 +248,120 @@ describe("seat states", () => {
       );
     },
   );
+
+  describe("recoverRelay on a turn begun before the owed line", () => {
+    const LATER = Number.MAX_SAFE_INTEGER;
+    /** A run on guido-1 in a long turn the CLI answers interrupts for as `mode` says. */
+    async function inLongTurn(mode = "") {
+      const { sup } = make();
+      sup.start();
+      await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.message("guido-1", `${mode} SLOW`.trim(), { interrupt: false });
+      await until(() => expect(seatState("guido-1")).toBe("running"));
+      const runId = store.seatSession("guido-1")?.runId ?? "";
+      return { sup, runId };
+    }
+
+    it("releases a stalled attach queue before delivering the CI line", async () => {
+      let at = 0;
+      const first = make({ now: () => at });
+      first.sup.start();
+      const { runId } = await first.sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await first.sup.stopAll();
+
+      const attach = sessionDriver.attachSession;
+      const stalled = vi
+        .spyOn(sessionDriver, "attachSession")
+        .mockImplementation(async (...args) => {
+          const found = await attach(...args);
+          if (found.kind !== "attached") return found;
+          return {
+            ...found,
+            session: new Proxy(found.session, {
+              get(target, key) {
+                if (key === "on") {
+                  return (listen: (event: { kind: string }) => void) =>
+                    target.on((event) => {
+                      if (event.kind !== "attached") listen(event);
+                    });
+                }
+                const value = Reflect.get(target, key);
+                return typeof value === "function" ? value.bind(target) : value;
+              },
+            }),
+          };
+        });
+      const { sup } = make({ now: () => at });
+      sup.start();
+      await until(() => expect(sup.sessionAlive?.("guido-1")).toBe(true));
+
+      at += RELAY_ATTACH_STUCK_MS;
+      expect(await sup.recoverRelay?.("guido-1", runId, 0)).toBe("attach");
+      expect(
+        await Promise.race([
+          sup.send(runId, "ci", "CI failed: e2e/board.spec.ts"),
+          new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 100)),
+        ]),
+      ).toBe("sent");
+      await until(() => expect(userLines()).toContain("CI failed: e2e/board.spec.ts"));
+      stalled.mockRestore();
+    });
+
+    it("ends it once the CLI confirms the interrupt", async () => {
+      const { sup, runId } = await inLongTurn();
+      expect(await sup.recoverRelay?.("guido-1", runId, LATER)).toBe("turn");
+      expect(sup.seatFacts("guido-1")?.inTurn).toBe(false);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+    });
+
+    it.each(["REFUSEINT", "NOCONTROL"])(
+      "keeps it running when the interrupt is %s",
+      async (mode) => {
+        const { sup, runId } = await inLongTurn(mode);
+        expect(await sup.recoverRelay?.("guido-1", runId, LATER)).toBeNull();
+        expect(sup.seatFacts("guido-1")?.inTurn).toBe(true);
+        expect(seatState("guido-1")).toBe("running");
+      },
+    );
+
+    it("leaves a turn begun after the owed line alone", async () => {
+      const { sup, runId } = await inLongTurn();
+      expect(await sup.recoverRelay?.("guido-1", runId, 0)).toBeNull();
+      expect(sup.seatFacts("guido-1")?.inTurn).toBe(true);
+    });
+
+    it("finds a run's own worktree once its seat's row is on another live run", async () => {
+      const { sup } = make();
+      sup.start();
+      await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      const row = store.seatSession("guido-1");
+      const red = row?.runId === null || row === null ? null : store.run(row.runId);
+      if (row === null || red === null || row.worktree === null) throw new Error("no run");
+      // while the run holds its seat it is not stranded
+      expect(await sup.strandedWorktree?.(red.id)).toBeNull();
+      await sup.endRun("guido-1");
+      store.upsertRun({ ...red, endedAt: null, status: "running" });
+      store.upsertRun({ ...red, id: `${red.id}:other`, branch: null });
+      store.setSeatSession({ ...row, runId: `${red.id}:other`, worktree: join(dir, "elsewhere") });
+      expect(await sup.strandedWorktree?.(red.id)).toBe(row.worktree);
+    });
+
+    it("sets a row naming no run back to the run its live process runs", async () => {
+      const { sup } = make();
+      sup.start();
+      await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      const row = store.seatSession("guido-1");
+      const runId = row?.runId ?? "";
+      if (row === null) throw new Error("no seat row");
+      store.setSeatSession({ ...row, runId: null });
+      expect(await sup.recoverRelay?.("guido-1", runId, LATER)).toBe("owner");
+      expect(store.seatSession("guido-1")?.runId).toBe(runId);
+    });
+  });
 
   it("accepts an interrupt before a result in the same stdout write", async () => {
     const { sup } = make();

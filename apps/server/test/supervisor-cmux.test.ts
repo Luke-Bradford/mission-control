@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { CMUX_NEEDS_INPUT_TEXT, type Run } from "@mc/core";
+import { CMUX_NEEDS_INPUT_TEXT, FLIGHT_SIGNALS_SETTING, type Run } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { agentViews } from "../src/hud/hud.ts";
 import {
@@ -89,9 +89,17 @@ const flight = {
   area: [],
 };
 
-async function started() {
+/**
+ * A dialog deadline longer than a few polls: each fake cmux call is a process start, so a poll can
+ * take hundreds of ms under CI load. The harness's 50 ms default would fire before a poll sees the
+ * dialog close or change.
+ */
+const DIALOG_DEADLINE_MS = 2000;
+const pastDeadline = () => new Promise((r) => setTimeout(r, DIALOG_DEADLINE_MS + 500));
+
+async function started(over: { cmuxDialogReportMs?: number } = {}) {
   fakeCmux();
-  const made = make({ cmuxState: stateFile() });
+  const made = make({ cmuxState: stateFile(), ...over });
   made.sup.start();
   const { runId } = await made.sup.startRun("guido-1", 42);
   await until(() => expect(cmuxState().sent).toHaveLength(1));
@@ -152,6 +160,118 @@ describe("a Claude run in cmux", () => {
     lifecycle("idle");
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     expect(store.seatSession("guido-1")?.reason).toBeNull();
+  });
+
+  // #2304: a dialog nobody answered left the run "working" and FLIGHT idle
+  it("a dialog left open is waiting, and FLIGHT is called with its question and options, once", async () => {
+    await started();
+    lifecycle("running");
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    // cmux's record still says running: the screen decides
+    await until(() => expect(seatState("guido-1")).toBe("needs-input"));
+    const calls = () =>
+      Object.values(
+        JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals ?? {},
+      ) as { kind: string; evidence: string }[];
+    await until(() => expect(calls()).toHaveLength(1));
+    expect(calls()[0]).toMatchObject({ kind: "seat_call" });
+    expect(calls()[0]?.evidence).toContain("Which database should I use?");
+    expect(calls()[0]?.evidence).toContain("1. Postgres");
+    expect(calls()[0]?.evidence).toContain("2. SQLite");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(calls()).toHaveLength(1);
+  });
+
+  it("does not call FLIGHT when a stale cmux needs-input record outlives its dialog", async () => {
+    await started({ cmuxDialogReportMs: DIALOG_DEADLINE_MS });
+    lifecycle("running");
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    await until(() => expect(seatState("guido-1")).toBe("needs-input"));
+    lifecycle("needsInput");
+    patch((s) => {
+      s.screen = "Claude is thinking";
+    });
+    await pastDeadline();
+    const calls = Object.values(
+      JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals ?? {},
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("does not call FLIGHT about a dialog whose turn ended before the deadline", async () => {
+    await started({ cmuxDialogReportMs: DIALOG_DEADLINE_MS });
+    lifecycle("running");
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    await until(() => expect(seatState("guido-1")).toBe("needs-input"));
+    // the turn ends with the dialog's text still on screen: cmux's idle record wins
+    lifecycle("idle");
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await pastDeadline();
+    const calls = Object.values(
+      JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals ?? {},
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("restarts the dialog deadline when cmux changes dialogs without changing lifecycle", async () => {
+    await started({ cmuxDialogReportMs: DIALOG_DEADLINE_MS });
+    lifecycle("running");
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    await until(() => expect(seatState("guido-1")).toBe("needs-input"));
+    lifecycle("needsInput");
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which cache should I use?",
+        " ❯ 1. Redis",
+        "   2. Memcached",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    const calls = () =>
+      Object.values(
+        JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals ?? {},
+      ) as { evidence: string }[];
+    await until(() => expect(calls()).toHaveLength(1));
+    expect(calls()[0]?.evidence).toContain("Which cache should I use?");
+    expect(calls()[0]?.evidence).toContain("1. Redis");
+    expect(calls()[0]?.evidence).not.toContain("Which database should I use?");
   });
 
   it("an operator's /clear keeps the run", async () => {
