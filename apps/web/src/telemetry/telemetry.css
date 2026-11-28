@@ -341,6 +341,7 @@
 .repo-scoreboard-repo > summary {
   display: flex;
   flex-wrap: wrap;
+  min-height: var(--sp-5);
   gap: var(--sp-2);
   align-items: baseline;
   margin-bottom: var(--sp-1);

@@ -225,6 +225,9 @@ describe("Telemetry, Throughput tab", () => {
     expect(scoreboard.textContent).toContain("2 repositories · scroll to compare all");
     expect(scoreboard.textContent).toContain("No merged PRs");
     expect(scoreboard.textContent).toContain("Baseline not configured");
+    const summary = scoreboard.querySelector(".repo-scoreboard-repo > summary") as HTMLElement;
+    summary.focus();
+    expect(document.activeElement).toBe(summary);
   });
 
   it("explains an empty repository comparison and keeps many repositories in the scroll region", async () => {
