@@ -6,8 +6,10 @@
 import { realpath, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  ADDED_DEPENDENCIES_HEADING,
   AWAY_WRITES_REFUSED,
   type AwayDiff,
+  addedDependenciesSection,
   CI_EXCERPT_LINES,
   CI_EXCERPT_MAX,
   type CiRerun,
@@ -63,6 +65,7 @@ import {
 } from "../mcp/tools.ts";
 import { WEB_AREA_LABEL } from "../preview/review.ts";
 import { qaReportGitSummary } from "../qa/reports.ts";
+import { addedDependencies, runDependencyAllowance } from "../repo/dependency-allowance.ts";
 import { runPathGrants } from "../repo/path-grants.ts";
 import {
   adminDirOf,
@@ -1099,14 +1102,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const own = { repo, issue: ticket.issue, known };
       const heading = `#${ticket.issue}`;
       const withTitle = `${heading} ${ticket.title}`.slice(0, MC_PR_TITLE_MAX);
+      const added = addedDependenciesSection(addedDependencies(deps.store, run.id));
       const titled = {
         title: withTitle,
-        body: runPrBody(ticket, note, null, true),
+        body: runPrBody(ticket, note, added, true),
       };
       const flagged =
         prTextProblem(titled.title, { ...own, label: "PR title" }) !== null ||
         prTextProblem(titled.body, { ...own, label: "PR body" }) !== null;
-      const pr = flagged ? { title: heading, body: runPrBody(ticket, note, null, false) } : titled;
+      const pr = flagged ? { title: heading, body: runPrBody(ticket, note, added, false) } : titled;
 
       const made = await openDraftPr(deps, run.id, pr);
       if (made.isError === true) {
@@ -1168,14 +1172,21 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const evidence = deps.prEvidenceSection?.(run) ?? null;
       const report = deps.store.qaReportForReview(review.id);
       const reportSection = report ? qaReportGitSummary(report, deps.qaReportBaseUrl) : null;
-      const sections = [section, evidence, reportSection].filter((x): x is string => x !== null);
+      const added = addedDependenciesSection(addedDependencies(deps.store, run.id));
+      const sections = [added, section, evidence, reportSection].filter(
+        (x): x is string => x !== null,
+      );
       const combined = sections.length === 0 ? null : sections.join("\n\n");
       const body = runPrBody(ticket, note, combined, withTitle);
       // a body the seat rewrote with pr_body keeps its text; only the hub's section is replaced
       const r = await editRunPrBody(deps, run.id, prNumber, (current) =>
         seatWroteBody(current, issue)
           ? withEngineSection(
-              withSection(current, EVIDENCE_HEADING, null),
+              withSection(
+                withSection(current, EVIDENCE_HEADING, null),
+                ADDED_DEPENDENCIES_HEADING,
+                null,
+              ),
               issue,
               combined,
               noteIsPartOf(note, issue),
@@ -1724,7 +1735,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               ? ["apps/web", "apps/web/**"]
               : [];
         const extra = deps.config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
-        const grants = runPathGrants(deps.store, run.id);
+        // the dependency allowance's files went through the commit tool's check of what they add
+        const grants = [
+          ...runPathGrants(deps.store, run.id),
+          ...runDependencyAllowance(deps.store, run.id).files,
+        ];
         const strays = names.filter(
           (p) =>
             !grantedPath(grants, p) && (!pathInArea(seat.area, p) || isProtectedPath(p, extra)),

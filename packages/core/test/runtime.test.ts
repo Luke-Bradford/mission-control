@@ -421,6 +421,7 @@ describe("the allowlist in phase 2b", () => {
       cmuxSend: "mcp__mc__cmux_send",
       cmuxOpen: "mcp__mc__cmux_open",
       setFlightMode: "mcp__mc__set_flight_mode",
+      allowDependency: "mcp__mc__allow_dependency",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit, MC_TOOLS.syncMain]);
   });
@@ -799,6 +800,7 @@ describe("crew constants", () => {
           "cmux_send",
           "cmux_open",
           "set_flight_mode",
+          "allow_dependency",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -963,6 +965,7 @@ describe("mc tool grants", () => {
       "cmux_send",
       "cmux_open",
       "set_flight_mode",
+      "allow_dependency",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual([
       "report_plan",

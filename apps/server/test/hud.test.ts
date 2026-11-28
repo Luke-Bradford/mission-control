@@ -2537,7 +2537,8 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         seatId: "GUIDO-1",
         repoId: "shop-app",
         text: "a note",
-        at: NOW - 20 * DAY,
+        // inside the 14 days after which any item is settled (#2285)
+        at: NOW - 10 * DAY,
       });
     const setup = (over: Partial<Run>) => {
       store.replaceBoard("shop-app", [boardItem({ issueNumber: 5, closed: true })]);
@@ -2554,7 +2555,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         agentId: "GUIDO-1",
         runId: "c1",
         text: "Lanes?",
-        at: NOW - 20 * DAY,
+        at: NOW - 10 * DAY,
       });
       raise("old-note", "c1");
       return id;
@@ -2593,6 +2594,8 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
 
     it("a live run's question and note still show", () => {
       const id = setup({});
+      // a ticket closed since they were raised settles them (#2285): this one is open
+      store.replaceBoard("shop-app", [boardItem({ issueNumber: 5 })]);
       expect(keys(withCrew())).toEqual(expect.arrayContaining([`ask:${id}`, "note:old-note"]));
     });
 
@@ -4074,7 +4077,9 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
         owner: "flight",
         flightTriage: "down",
       });
-    expect(needsYouItems(all()).map((i) => i.key)).toEqual([FLIGHT_NOT_TRIAGING_KEY]);
+    // it counts FLIGHT's own queue, so it is FLIGHT's, never the operator's (#2285)
+    expect(item?.owner).toBe("flight");
+    expect(needsYouItems(all())).toEqual([]);
     noRawAsk();
     // FLIGHT back: a fresh window, so the item clears rather than turning "late"
     flight({}, { startedAt: NOW });
@@ -4222,7 +4227,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     });
   });
 
-  it("keeps the hub's machine and CLI stops as alerts, pinned to their modules' keys (#1543)", () => {
+  it("gives the hub's machine and CLI stops to FLIGHT, pinned to their modules' keys (#1543, #2285)", () => {
     flight();
     expect(HUB_STOP_KEYS).toEqual([
       `note:${MACHINE_CAPACITY_KEY}`,
@@ -4249,19 +4254,13 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
         text: key,
         at: NOW - HOUR,
       });
+    // news about something the hub is putting right: nothing for the operator to answer
+    expect(needsYouItems(all())).toEqual([]);
     expect(
-      needsYouItems(all())
-        .map((i) => i.key)
-        .sort(),
-    ).toEqual(
-      [
-        `note:${MACHINE_CAPACITY_KEY}`,
-        `note:${FILE_SERVICE_RUNAWAY_KEY}`,
-        `note:${CLI_NOTE_KEY}`,
-        `note:${CLI_UPGRADE_NOTE_KEY}`,
-        "note:cli-auto:claude:2.0.1",
-      ].sort(),
-    );
+      all()
+        .filter((i) => i.key.startsWith("note:"))
+        .map((i) => i.owner),
+    ).toEqual(["flight", "flight", "flight", "flight", "flight"]);
   });
 
   it("holds FLIGHT to a protected item the operator already read; a read ordinary one is dealt with (#1543)", () => {
@@ -4369,7 +4368,8 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       seatId: null,
       repoId: "shop-app",
       text: "old",
-      at: NOW - 30 * DAY,
+      // older than the hub, inside the 14 days after which any item is settled (#2285)
+      at: NOW - 13 * DAY,
     });
     markHubStarted(NOW - MIN);
     try {
