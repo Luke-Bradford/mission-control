@@ -9,7 +9,7 @@ export function offSeatHold(run: Run | null): { worktree: string; wake: boolean 
 }
 
 /**
- * Whether a run set aside in CI or review is due back on its seat: the loop flagged it
+ * Whether a run set aside in CI or review is due back on its seat (never while it is parked): the loop flagged it
  * (`aside.wake`), CI is failing on its pushed sha after its one re-run while it is in `ci`, or
  * its current review (this epoch, the pushed sha) has reported blocking findings whose fix line
  * is not yet claimed. The later readings keep rework ahead of a new ticket in the gap between the
@@ -18,6 +18,9 @@ export function offSeatHold(run: Run | null): { worktree: string; wake: boolean 
 export function asideWakeDue(store: Store, run: Run): boolean {
   const aside = run.loop?.hold?.worktree ? run.loop.hold : null;
   if (!aside || run.endedAt !== null || run.loop?.phase === "done") return false;
+  // parked for FLIGHT or the operator: not due back until the park is lifted, whatever its review
+  // or CI reads, or it would hold up the seat's other runs and new tickets
+  if (aside.kind !== null) return false;
   // a run on its seat is not waiting for one: a restart between its wake and the loop clearing
   // `aside` leaves the flag set, and it must not set the seat's next run aside, over and over
   const row = store.seatSession(run.agentId);
