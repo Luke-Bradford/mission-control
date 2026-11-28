@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { LAST_TEXT_MAX, LIVE_DETAIL_MAX, NO_REPORT_REASON_MAX, NO_REPORT_TEXT_MAX } from "@mc/core";
+import {
+  LAST_TEXT_MAX,
+  LIVE_DETAIL_MAX,
+  NO_REPORT_REASON_MAX,
+  NO_REPORT_TEXT_MAX,
+  SEAT_LAST_MESSAGE_MAX,
+} from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { CMUX_CLEAR_MARK, foldTranscript } from "../src/run/streamjson.ts";
 
@@ -975,6 +981,36 @@ describe("foldTranscript live tool detail and last text", () => {
     expect(foldTranscript(f, [think], 1).digest.lastText).toBe("Tests pass now.");
     const later = frame([{ type: "text", text: "Done fixing." }], "2026-10-21T10:00:08.000Z");
     expect(foldTranscript(f, [think, later], 1).digest.lastText).toBe("Done fixing.");
+  });
+  it("lastMessage keeps the newest assistant text whole, up to its cap (#2318)", () => {
+    const text = frame([
+      { type: "text", text: "All safe work is complete. Waiting on FLIGHT to reset my branch." },
+    ]);
+    const f = foldTranscript(null, [text], 1);
+    expect(f.digest.lastText).toBe("All safe work is complete.");
+    expect(f.digest.lastMessage).toBe(
+      "All safe work is complete. Waiting on FLIGHT to reset my branch.",
+    );
+    const long = frame([{ type: "text", text: "word ".repeat(1000) }]);
+    const m = foldTranscript(null, [long], 1).digest.lastMessage as string;
+    expect(m.length).toBeLessThanOrEqual(SEAT_LAST_MESSAGE_MAX);
+    // an empty digest carries no field at all
+    expect(foldTranscript(null, [], 1).digest).not.toHaveProperty("lastMessage");
+  });
+  it("lastMessage joins every text block of the newest message, in one line or several", () => {
+    const first = { type: "text", text: "Waiting on FLIGHT to reset my branch." };
+    const second = { type: "text", text: "All safe work is complete." };
+    const joined = "Waiting on FLIGHT to reset my branch. All safe work is complete.";
+    // one line with both blocks
+    expect(foldTranscript(null, [frame([first, second])], 1).digest.lastMessage).toBe(joined);
+    // one message split over two lines (same id), across two fold chunks too
+    const a = frame([first], "2026-10-21T10:00:01.000Z").replace(/m-[^"]+/, "m-one");
+    const b = frame([second], "2026-10-21T10:00:02.000Z").replace(/m-[^"]+/, "m-one");
+    const f = foldTranscript(null, [a], 1);
+    expect(foldTranscript(f, [b], 1).digest.lastMessage).toBe(joined);
+    // a newer message starts again, even a bare "Done." that gives no lastText
+    const next = frame([{ type: "text", text: "Done." }], "2026-10-21T10:00:03.000Z");
+    expect(foldTranscript(null, [a, b, next], 1).digest.lastMessage).toBe("Done.");
   });
   it("lastText ignores a subagent's text and caps at 160 characters", () => {
     const sub = JSON.stringify({

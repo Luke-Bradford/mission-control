@@ -25,6 +25,8 @@ type Deps = {
   writes?: boolean;
   costToday?: (row: CmuxSessionRow) => number | null;
   lastCheck?: (row: CmuxSessionRow) => SessionCheckResult | null;
+  /** A crew seat's `waiting on …` line while it sits idle with its run unreported; else null. */
+  seatWaiting?: (row: CmuxSessionRow) => string | null;
   log?: (line: string) => void;
 };
 
@@ -133,6 +135,7 @@ export function createSessionSidebar(deps: Deps) {
               ? "Checks passed"
               : `Checks failed: ${(check.command ?? "").slice(0, 80)}`,
         );
+        await set(row.id, SIDEBAR_KEYS.seat, deps.seatWaiting?.(row) ?? null);
       } catch (error) {
         deps.log?.(`cmux sidebar ${row.id}: ${String(error)}`);
       }

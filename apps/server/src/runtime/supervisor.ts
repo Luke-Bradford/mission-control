@@ -3695,7 +3695,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         .finally(() => starting.delete(seatId));
       return;
     }
-    if (!l.inTurn) emit({ kind: "idle", seatId, runId: l.run.id, resumed: false });
+    if (l.inTurn) return;
+    // A turn that ended while the hub was down left the row `running` (or waiting on a dialog):
+    // its result came before the cursor and is not replayed. The CLI is at its prompt (#2318).
+    if (row.state === "running" || row.state === "needs-input") {
+      setState(l, "idle", null);
+      // its end is not known: the hub saw it no sooner than now
+      if ((row.lastTurnEndedAt ?? 0) < (row.lastTurnStartedAt ?? 0))
+        store.setSeatTurnEnded(seatId, now());
+    }
+    emit({ kind: "idle", seatId, runId: l.run.id, resumed: false });
   }
 
   /** Records where in its keeper's output the hub has got to, for the next hub to replay from. */

@@ -769,6 +769,11 @@ export interface RunDigest {
    * null; absent on a digest stored before it existed.
    */
   lastText?: string | null;
+  /**
+   * The newest top-level assistant text block whole, cut at SEAT_LAST_MESSAGE_MAX; absent while there
+   * is none and on a digest stored before it existed.
+   */
+  lastMessage?: string | null;
   /** Every frame's tool calls by name; `durationsMs` keeps the last 50. */
   tools: Record<
     string,

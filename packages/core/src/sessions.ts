@@ -99,6 +99,8 @@ export const SIDEBAR_KEYS = {
   review: "mc-review",
   cost: "mc-cost",
   check: "mc-check",
+  /** A crew seat idle at its prompt with its run unreported: `waiting on <what>` (#2318). */
+  seat: "mc-seat",
 } as const;
 export const SESSIONS_CMUX_WRITES_SETTING = "sessions.cmux_writes";
 export const SIDEBAR_CI_TEXT = {

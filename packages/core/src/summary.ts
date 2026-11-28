@@ -2,6 +2,8 @@
 export const WORK_SUMMARY_MAX = 240;
 /** Longest `RunDigest.lastText`, in characters, including the `…` of a cut one. */
 export const LAST_TEXT_MAX = 160;
+/** The newest assistant message kept whole in a run's digest, for what a waiting seat waits on (#2318). */
+export const SEAT_LAST_MESSAGE_MAX = 1000;
 /** Longest `liveTool.detail`, in characters, including the `…` of a cut one. */
 export const LIVE_DETAIL_MAX = 80;
 

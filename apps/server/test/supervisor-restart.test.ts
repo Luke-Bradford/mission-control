@@ -358,6 +358,25 @@ describe("stopAll", () => {
   });
 });
 
+describe("reattach to an idle seat (#2318)", () => {
+  it("a seat whose turn ended while the hub was down reads idle, not running", async () => {
+    const first = make();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.stopAll();
+    // the hub went down mid-turn; the turn ended before the next hub came up
+    const row = store.seatSession("guido-1");
+    if (row === null) throw new Error("no seat row");
+    store.setSeatSession({ ...row, state: "running" });
+    const { sup } = make();
+    sup.start();
+    await until(() => expect(sup.seatFacts("guido-1")?.inTurn).toBe(false));
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    expect(store.seatSession("guido-1")?.runId).toBe(runId);
+  });
+});
+
 describe("reattach after a restart", () => {
   const RESUMED = "resumed after a restart; send a message to continue";
   const starts = () => recorded().filter((l) => Array.isArray(l.argv));

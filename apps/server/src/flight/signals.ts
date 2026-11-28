@@ -18,6 +18,7 @@ import {
   FLIGHT_OLD_PARK_MS,
   FLIGHT_RED_PR_IDLE_MS,
   FLIGHT_RETIRED_SIGNAL_KINDS,
+  FLIGHT_SEAT_WAITING_MS,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
   type FlightSignal,
@@ -39,6 +40,7 @@ import {
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
+import { storedSeatWaiting } from "../hud/seat-waiting.ts";
 import { parseJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
@@ -545,6 +547,21 @@ export function flightSignals(i: {
         `${seat.id} idle since ${new Date(since).toISOString()}; eligibleToStart queued ${work.repoId}#${work.issue}`,
       );
     }
+  }
+  // a seat idle at its prompt with its run unreported: FLIGHT answers or unblocks it, told once.
+  // A run whose question is open has already reached FLIGHT: its question wakes it instead.
+  const asking = new Set(store.openQuestions().map((q) => q.runId));
+  for (const seat of session.seats) {
+    const waiting = storedSeatWaiting(store, seat.id);
+    if (waiting === null || now - waiting.since < FLIGHT_SEAT_WAITING_MS) continue;
+    if (asking.has(waiting.runId)) continue;
+    const run = store.run(waiting.runId);
+    raise(
+      "seat_waiting",
+      `${waiting.runId}:${waiting.since}`,
+      waiting.since,
+      `${seat.id} run ${waiting.runId} (${run?.ticket ?? "no ticket"}) has sat idle since ${new Date(waiting.since).toISOString()} without its report, ${waiting.text}`,
+    );
   }
   for (const seat of session.seats) {
     const row = store.seatSession(seat.id);

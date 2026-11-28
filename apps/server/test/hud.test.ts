@@ -1178,6 +1178,39 @@ describe("crew seats in the rows", () => {
     },
   );
 
+  it("a seat idle at its prompt with its run unreported says what it waits on, never working (#2318)", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun({ ticket: "shop-app#91" }));
+    store.setRunLoop("c1", { ...NEW_LOOP, phase: "working" }, NOW - HOUR);
+    // one reply in two text blocks, the target in the first (round-3 review)
+    const reply = JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "m1",
+        content: [
+          { type: "text", text: "Waiting on FLIGHT to reset my branch." },
+          { type: "text", text: "All safe work is complete." },
+        ],
+      },
+      parent_tool_use_id: null,
+      timestamp: new Date(NOW - MIN).toISOString(),
+    });
+    store.setDigest("c1", foldTranscript(null, [reply], 1).digest);
+    store.setSeatSession(seat({ state: "idle", updatedAt: NOW - 40 * MIN }));
+    store.setSeatTurnEnded("GUIDO-1", NOW - 40 * MIN);
+    const row = rowOf(c, "GUIDO-1");
+    expect(row?.hudState).toBe("idle");
+    expect(row?.note).toBe(
+      "waiting on FLIGHT: Waiting on FLIGHT to reset my branch. All safe work is complete.",
+    );
+
+    // really at work: still running, no waiting line
+    store.setSeatSession(seat({ state: "running", updatedAt: NOW - MIN }));
+    const working = rowOf(c, "GUIDO-1");
+    expect(working?.hudState).toBe("running");
+    expect(working?.note).toBeNull();
+  });
+
   it("shows a transferred run's binding without changing another seat or observed loop", () => {
     const c = withCrew();
     store.upsertRun(crewRun());

@@ -108,6 +108,7 @@ import {
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { processAlive } from "./guard/process-alive.ts";
 import { attentionItems, markHubStarted, NO_LOCK } from "./hud/hud.ts";
+import { workspaceWaitingText } from "./hud/seat-waiting.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
@@ -1162,6 +1163,7 @@ export async function main(): Promise<void> {
     store,
     costToday: (row) => row.spend?.today.costUsd ?? null,
     lastCheck: (row) => sessionChecks.lastResult(row.id),
+    seatWaiting: (row) => workspaceWaitingText(store, seatIds(), row),
     writes: process.env.MC_NO_LOOP_WRITES !== "1",
     log: (m) => log(m),
   });
