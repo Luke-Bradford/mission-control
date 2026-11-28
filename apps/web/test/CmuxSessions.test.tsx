@@ -167,6 +167,40 @@ describe("Sessions page", () => {
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
   });
 
+  it("refreshes crew app health after one minute without navigation", async () => {
+    vi.useRealTimers();
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    let requests = 0;
+    const fetch = stubFetch({
+      [PATH]: VIEW,
+      [SIDEBAR_PATH]: { on: true },
+      [APPS_PATH]: () => ({
+        status: 200,
+        body: [
+          {
+            id: "guido-ae",
+            name: "guido-ae · autonomy-engine",
+            running: true,
+            apps: [{ url: "http://127.0.0.1:5173", answers: requests++ > 0 }],
+          },
+        ],
+      }),
+    });
+    render(<Sessions />);
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(fetch).toHaveBeenCalledWith(APPS_PATH, expect.anything());
+    const row = screen
+      .getAllByText("guido-ae · autonomy-engine")
+      .at(-1)
+      ?.closest(".sess-crew-app") as HTMLElement;
+    expect(within(row).getByText("Not answering")).toBeTruthy();
+
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(fetch.mock.calls.filter(([path]) => path === APPS_PATH)).toHaveLength(2);
+    expect(within(row).getByText("Answers")).toBeTruthy();
+  });
+
   it("reports crew app read and action failures", async () => {
     const stop = vi.fn().mockResolvedValue({ status: 500, body: { error: "Could not stop app" } });
     const fetch = stubFetch({

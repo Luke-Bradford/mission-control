@@ -161,7 +161,7 @@ import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor, type Supervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
-import { CREW_APP_DEFAULTS, createCrewApps } from "./sessions/apps.ts";
+import { CREW_APP_DEFAULTS, CREW_APP_STATE_SETTING, createCrewApps } from "./sessions/apps.ts";
 import { createSessionChecks } from "./sessions/checks.ts";
 import { applyCmuxSessionEvent, startCmuxEvents } from "./sessions/events.ts";
 import { createBranchPrs } from "./sessions/pr.ts";
@@ -1090,6 +1090,10 @@ export async function main(): Promise<void> {
         ),
     probe: probeLocal,
     log: (m) => log(m),
+    state: {
+      get: () => store.getSetting(CREW_APP_STATE_SETTING),
+      set: (value) => store.setSetting(CREW_APP_STATE_SETTING, value),
+    },
   });
   seatTerminal = createSeatTerminal({
     cmux,
@@ -1381,8 +1385,7 @@ export async function main(): Promise<void> {
   if (process.env.MC_NO_LOOP_WRITES !== "1") sessionChecks.start();
   app.addHook("onClose", async () => sessionChecks.stop());
   if (process.env.MC_NO_LOOP_WRITES !== "1") {
-    for (const crewApp of crewApps.view())
-      void crewApps.start(crewApp.id).catch((error) => log(String(error)));
+    void crewApps.tick().catch((error) => log(String(error)));
     trackTimer(
       setInterval(() => {
         void crewApps?.tick();

@@ -1,5 +1,14 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { CREW_APP_DEFAULTS, createCrewApps } from "../src/sessions/apps.ts";
+import {
+  APP_RESTART_MS,
+  appCommand,
+  CREW_APP_DEFAULTS,
+  createCrewApps,
+} from "../src/sessions/apps.ts";
 
 const seat = { id: "guido-eb", repoId: "ebull", worktree: "/crew/ebull" };
 const cmux = () => ({
@@ -10,6 +19,29 @@ const cmux = () => ({
   readPane: vi.fn().mockResolvedValue("ready"),
 });
 describe("crew apps", () => {
+  it("executes an app command with its assigned eBull environment", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "mc-crew-app-command-"));
+    mkdirSync(join(cwd, "frontend"));
+    try {
+      const output = execFileSync(
+        "sh",
+        [
+          "-lc",
+          appCommand(
+            "ebull",
+            'cd frontend && printf "%s|%s|%s" "$PORT" "$BACKEND_PORT" "$VITE_API_PROXY_TARGET"',
+            5174,
+            5173,
+          ),
+        ],
+        { cwd, encoding: "utf8" },
+      );
+      expect(output).toBe("5174|5173|http://127.0.0.1:5173");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("adds eBull panes to its seat workspace on distinct ports without jobs", async () => {
     const pane = cmux();
     const apps = createCrewApps({
@@ -29,9 +61,10 @@ describe("crew apps", () => {
       "/crew/ebull",
       expect.stringContaining("PORT=5174 BACKEND_PORT=5173"),
     );
+    expect(pane.setStatus).toHaveBeenCalledWith("ws", "app", "http://127.0.0.1:5173");
     expect(pane.setStatus).toHaveBeenCalledWith(
       "ws",
-      "app",
+      "app-health",
       "http://127.0.0.1:5173 starting · http://127.0.0.1:5174 starting",
     );
   });
@@ -109,28 +142,76 @@ describe("crew apps", () => {
     expect(pane.readPane).toHaveBeenCalledWith("backend-pane", 40);
     expect(pane.readPane).toHaveBeenCalledWith("frontend-pane", 40);
   });
-  it("restarts a stopped endpoint once in five minutes and stops it when its run ends", async () => {
+  it("keeps an alive but non-answering app pane running and clears both app statuses on stop", async () => {
     let seats = [seat];
-    let at = 0;
     const pane = cmux();
     const apps = createCrewApps({
       cmux: pane,
       repos: () => [{ id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] }],
       seats: () => seats,
-      now: () => at,
       probe: vi.fn().mockResolvedValue(false),
     });
     await apps.start(seat.id);
     await apps.tick();
-    await apps.tick();
     expect(pane.newPane).toHaveBeenCalledTimes(2);
-    at = 5 * 60_000;
-    await apps.tick();
-    expect(pane.newPane).toHaveBeenCalledTimes(2);
+    expect(pane.setStatus).toHaveBeenCalledWith(
+      "ws",
+      "app-health",
+      "http://127.0.0.1:5173 not answering · http://127.0.0.1:5174 not answering",
+    );
     pane.closePane.mockClear();
     seats = [];
     await apps.tick();
     expect(pane.closePane).toHaveBeenCalledTimes(2);
+    expect(pane.setStatus).toHaveBeenCalledWith("ws", "app", "");
+    expect(pane.setStatus).toHaveBeenCalledWith("ws", "app-health", "");
+  });
+  it("restarts a stopped pane once in five minutes and logs the restart", async () => {
+    let at = 0;
+    const pane = cmux();
+    const log = vi.fn();
+    const apps = createCrewApps({
+      cmux: pane,
+      repos: () => [{ id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] }],
+      seats: () => [seat],
+      now: () => at,
+      probe: vi.fn().mockResolvedValue(false),
+      log,
+    });
+    await apps.start(seat.id);
+    pane.readPane.mockRejectedValue(new Error("pane is gone"));
+    await apps.tick();
+    expect(pane.newPane).toHaveBeenCalledTimes(4);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Restarting guido-eb's ebull app panes"),
+    );
+    at = APP_RESTART_MS - 1;
+    await apps.tick();
+    expect(pane.newPane).toHaveBeenCalledTimes(4);
+  });
+  it("adopts persisted panes after the hub restarts instead of opening duplicate ports", async () => {
+    const pane = cmux();
+    const state = {
+      value: null as string | null,
+      get: () => state.value,
+      set: (value: string) => {
+        state.value = value;
+      },
+    };
+    const deps = {
+      cmux: pane,
+      repos: () => [{ id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] }],
+      seats: () => [seat],
+      state,
+    };
+    const beforeRestart = createCrewApps(deps);
+    await beforeRestart.start(seat.id);
+    expect(pane.newPane).toHaveBeenCalledTimes(2);
+
+    const afterRestart = createCrewApps(deps);
+    await afterRestart.tick();
+    expect(afterRestart.view()[0]?.running).toBe(true);
+    expect(pane.newPane).toHaveBeenCalledTimes(2);
   });
   it("refuses eBull's launchd-owned jobs command", async () => {
     const apps = createCrewApps({

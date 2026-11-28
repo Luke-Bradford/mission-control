@@ -16,7 +16,7 @@ import {
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type AppDeps, buildApp } from "../src/api.ts";
+import { type AppDeps, buildApp, LOOP_WRITES_DISABLED } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { CmuxError } from "../src/runtime/cmux.ts";
@@ -457,6 +457,19 @@ describe("the crew app routes", () => {
     const stopped = await operator().post("/api/sessions/apps/guido-eb/stop");
     expect(stopped.statusCode).toBe(200);
     expect(crewApps.stop).toHaveBeenCalledWith("guido-eb");
+  });
+
+  it("refuses preview start and stop without touching cmux apps", async () => {
+    const crewApps = apps();
+    await app.close();
+    start({ crewApps, noLoopWrites: true });
+    for (const action of ["start", "stop"] as const) {
+      const response = await operator().post(`/api/sessions/apps/guido-eb/${action}`);
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ error: LOOP_WRITES_DISABLED });
+    }
+    expect(crewApps.start).not.toHaveBeenCalled();
+    expect(crewApps.stop).not.toHaveBeenCalled();
   });
 
   it("refuses a seat's token, a body, an unknown action and an unknown seat", async () => {

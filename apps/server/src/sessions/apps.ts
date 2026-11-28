@@ -8,6 +8,8 @@ export class CrewAppError extends Error {}
 
 export const APP_RESTART_MS = 5 * 60_000;
 export const APP_PORT_START = 5173;
+export const SESSION_APP_HEALTH_STATUS_KEY = "app-health";
+export const CREW_APP_STATE_SETTING = "crew-app-panes";
 const PORT_BLOCK = 10;
 export const CREW_APP_DEFAULTS: Readonly<Record<string, readonly CrewAppCommand[]>> = {
   "autonomy-engine": [
@@ -48,6 +50,7 @@ interface CrewAppsDeps {
   now?(): number;
   probe?(url: string): Promise<boolean>;
   log?(message: string): void;
+  state?: { get(): string | null; set(value: string): void };
 }
 export interface CrewApps {
   start(seatId: string): Promise<void>;
@@ -102,6 +105,20 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
   const repoOf = (id: string) => deps.repos().find((repo) => repo.id === id);
   const seatOf = (id: string) => deps.seats().find((seat) => seat.id === id);
   const reservedPorts = new Map<string, number>();
+  const save = () =>
+    deps.state?.set(
+      JSON.stringify(
+        [...running].map(([seat, app]) => ({
+          seat,
+          workspace: app.workspace,
+          worktree: app.worktree,
+          repo: app.repo.id,
+          portStart: app.portStart,
+          apps: app.apps,
+          restartedAt: app.restartedAt,
+        })),
+      ),
+    );
   const portStart = (seatId: string) => {
     const reserved = reservedPorts.get(seatId);
     if (reserved !== undefined) return reserved;
@@ -112,6 +129,47 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     return next;
   };
   const portOf = (seatId: string, index: number) => portStart(seatId) + index;
+  try {
+    const saved = JSON.parse(deps.state?.get() ?? "[]") as unknown;
+    if (Array.isArray(saved))
+      for (const entry of saved) {
+        if (typeof entry !== "object" || entry === null) continue;
+        const value = entry as Record<string, unknown>;
+        const repo = typeof value.repo === "string" ? repoOf(value.repo) : undefined;
+        if (
+          !repo ||
+          typeof value.seat !== "string" ||
+          typeof value.workspace !== "string" ||
+          typeof value.worktree !== "string" ||
+          typeof value.portStart !== "number" ||
+          !Array.isArray(value.apps)
+        )
+          continue;
+        const apps = value.apps.flatMap((app) => {
+          if (typeof app !== "object" || app === null) return [];
+          const pane = (app as Record<string, unknown>).pane;
+          const url = (app as Record<string, unknown>).url;
+          const answers = (app as Record<string, unknown>).answers;
+          return typeof pane === "string" &&
+            typeof url === "string" &&
+            (answers === true || answers === false || answers === null)
+            ? [{ pane, url, answers }]
+            : [];
+        });
+        if (apps.length !== repo.commands.length) continue;
+        running.set(value.seat, {
+          workspace: value.workspace,
+          worktree: value.worktree,
+          repo,
+          portStart: value.portStart,
+          apps,
+          restartedAt: typeof value.restartedAt === "number" ? value.restartedAt : undefined,
+        });
+        reservedPorts.set(value.seat, value.portStart);
+      }
+  } catch {
+    // A malformed prior record must never prevent a seat from opening its app panes.
+  }
   const checkJobs = (repo: CrewAppRepo) => {
     if (
       repo.id.toLowerCase() === "ebull" &&
@@ -124,8 +182,10 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     if (!app) return;
     await Promise.all(app.apps.map((entry) => deps.cmux.closePane(entry.pane).catch(() => {})));
     await deps.cmux.setStatus(app.workspace, SESSION_APP_STATUS_KEY, "");
+    await deps.cmux.setStatus(app.workspace, SESSION_APP_HEALTH_STATUS_KEY, "");
     running.delete(seatId);
     reservedPorts.delete(seatId);
+    save();
     deps.log?.(`Stopped ${seatId}'s ${app.repo.id} app panes.`);
   };
   const start = async (seatId: string) => {
@@ -150,8 +210,10 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
       );
       apps.push({ pane, url: urlAt(entry.url, port), answers: null });
     }
-    await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, appStatus(apps));
+    await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, apps[0]?.url ?? "");
+    await deps.cmux.setStatus(workspace, SESSION_APP_HEALTH_STATUS_KEY, appStatus(apps));
     running.set(seatId, { workspace, worktree: seat.worktree, repo, portStart: startPort, apps });
+    save();
     deps.log?.(`Started ${seatId}'s ${repo.id} app panes.`);
   };
   return {
@@ -183,7 +245,11 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
         app.apps.forEach((entry, index) => {
           entry.answers = answers[index] ?? false;
         });
-        await deps.cmux.setStatus(app.workspace, SESSION_APP_STATUS_KEY, appStatus(app.apps));
+        await deps.cmux.setStatus(
+          app.workspace,
+          SESSION_APP_HEALTH_STATUS_KEY,
+          appStatus(app.apps),
+        );
         const alive = await Promise.all(
           app.apps.map((entry) =>
             deps.cmux
