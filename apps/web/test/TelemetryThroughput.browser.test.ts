@@ -447,6 +447,8 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
               rowsVisible: rows.every(
                 (row) => row.getBoundingClientRect().bottom <= scrollBox.bottom + 1,
               ),
+              horizontalOverflow: scroll.scrollWidth > scroll.clientWidth + 1,
+              tabIndex: scroll.tabIndex,
               rowBottoms: rows.map((row) => row.getBoundingClientRect().bottom),
               scrollBottom: scrollBox.bottom,
               clipped: [...panel.querySelectorAll("tbody th, tbody td")]
@@ -461,7 +463,30 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
           }, undefined);
           expect(page.errors()).toEqual([]);
           expect(scoreboard.count).toBe(3);
-          expect(scoreboard.cue).toContain("3 repositories · all visible");
+          expect(scoreboard.cue).toContain(
+            width === 1280 ? "3 repositories · scroll to compare all" : "3 repositories · all visible",
+          );
+          if (width === 1280) {
+            expect(scoreboard.horizontalOverflow).toBe(true);
+            expect(scoreboard.tabIndex).toBe(0);
+            const final = await page.evaluate(() => {
+              const scroll = document.querySelector(".repo-scoreboard-scroll") as HTMLElement;
+              scroll.focus();
+              const outline = getComputedStyle(scroll).outlineStyle;
+              scroll.scrollLeft = scroll.scrollWidth;
+              const viewport = scroll.getBoundingClientRect();
+              const value = document.querySelector(
+                ".repo-scoreboard-repo:first-child td:last-child .repo-scoreboard-week",
+              ) as HTMLElement;
+              const box = value.getBoundingClientRect();
+              return {
+                outline,
+                fullyVisible: box.left >= viewport.left - 1 && box.right <= viewport.right + 1,
+              };
+            }, undefined);
+            expect(final.outline).not.toBe("none");
+            expect(final.fullyVisible).toBe(true);
+          }
           expect(scoreboard.rowsVisible, JSON.stringify(scoreboard)).toBe(true);
           expect(scoreboard.clipped).toEqual([]);
           expect(scoreboard.text).toContain("No merged PRs");

@@ -963,9 +963,18 @@ export function telemetry(
 
   // ── repository weeks ──
   // These rows deliberately use the configured loop baseline rather than deriving a moving target.
-  // Complete seven-day periods end at today's local midnight. This keeps the published
-  // 19–26 November comparison intact when Monday falls inside it.
-  const currentWindowEnd = startOfLocalDay(now, tz);
+  // Complete weeks close on the loop's Thursday boundary. The same completed period remains
+  // comparable throughout the following week instead of moving with every local midnight.
+  const localDayStart = startOfLocalDay(now, tz);
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz }).format(
+    new Date(localDayStart + 12 * HOUR_MS),
+  );
+  const daysSinceThursday = { Sun: 3, Mon: 4, Tue: 5, Wed: 6, Thu: 0, Fri: 1, Sat: 2 }[weekday];
+  if (daysSinceThursday === undefined) throw new Error(`Unknown local weekday: ${weekday}`);
+  const currentWindowEnd = startOfLocalDay(
+    localDayStart - daysSinceThursday * DAY_MS + 12 * HOUR_MS,
+    tz,
+  );
   const weekStarts = Array.from({ length: 4 }, (_, index) =>
     startOfLocalDay(currentWindowEnd - (4 - index) * WEEK_MS + 12 * HOUR_MS, tz),
   );

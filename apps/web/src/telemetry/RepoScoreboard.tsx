@@ -1,4 +1,5 @@
 import type { Telemetry } from "@mc/core";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Panel } from "../hud/Panel.tsx";
 import { DASH } from "./common.ts";
 
@@ -78,7 +79,21 @@ function WeekCell({ week }: { week: RepoWeek }) {
 
 /** Four complete seven-day periods of delivery and capacity figures, compared with the configured loop baseline. */
 export function RepoScoreboard({ repoWeeks }: { repoWeeks: Telemetry["repoWeeks"] | undefined }) {
-  const hasOverflow = (repoWeeks?.length ?? 0) > 4;
+  const scroll = useRef<HTMLElement>(null);
+  const [horizontalOverflow, setHorizontalOverflow] = useState(false);
+  const hasOverflow = (repoWeeks?.length ?? 0) > 4 || horizontalOverflow;
+
+  useLayoutEffect(() => {
+    const region = scroll.current;
+    if (region === null) return;
+    const measure = () => setHorizontalOverflow(region.scrollWidth > region.clientWidth + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(region);
+    return () => observer.disconnect();
+  }, [repoWeeks]);
+
   return (
     <Panel
       id="tRepoScoreboard"
@@ -93,6 +108,7 @@ export function RepoScoreboard({ repoWeeks }: { repoWeeks: Telemetry["repoWeeks"
       ) : (
         <>
           <section
+            ref={scroll}
             className={`pb repo-scoreboard-scroll${hasOverflow ? " has-overflow" : ""}`}
             aria-label="Repository throughput weeks"
             tabIndex={hasOverflow ? 0 : undefined}

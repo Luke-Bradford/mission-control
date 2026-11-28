@@ -2398,7 +2398,7 @@ describe("repository weekly telemetry", () => {
     const row = tel("7d").repoWeeks?.find((value) => value.repoId === "shop-app");
     expect(row?.weeks).toContainEqual(
       expect.objectContaining({
-        week: "2026-10-10",
+        week: "2026-10-08",
         tokensPerMergedPr: { claude: 29_000_000, codex: 0 },
       }),
     );
@@ -2465,6 +2465,21 @@ describe("repository weekly telemetry", () => {
         tokensPerMergedPr: { claude: 25_000_000, codex: 4_000_000 },
       }),
     );
+
+    const laterRow = telemetry(
+      config,
+      store,
+      "7d",
+      at("2026-11-28T12:00:00Z"),
+      ALL,
+    ).repoWeeks?.find((value) => value.repoId === "mission-control");
+    expect(laterRow?.weeks).toContainEqual(
+      expect.objectContaining({
+        week: "2026-11-19",
+        mergedPrs: 4,
+        tokensPerMergedPr: { claude: 25_000_000, codex: 4_000_000 },
+      }),
+    );
   });
 
   it("uses the linked ticket's Ready transition and excludes one after merge", () => {
@@ -2504,7 +2519,7 @@ describe("repository weekly telemetry", () => {
 
     const row = tel("7d").repoWeeks?.find((value) => value.repoId === "shop-app");
     expect(row?.weeks).toContainEqual(
-      expect.objectContaining({ week: "2026-10-10", medianReadyToMergeHours: 4 }),
+      expect.objectContaining({ week: "2026-10-08", medianReadyToMergeHours: 4 }),
     );
   });
 
@@ -2555,7 +2570,7 @@ describe("repository weekly telemetry", () => {
         },
         weeks: expect.arrayContaining([
           expect.objectContaining({
-            week: "2026-10-10",
+            week: "2026-10-08",
             mergedPrs: 2,
             tokensPerMergedPr: { claude: 10_000_000, codex: 19_000_000 },
           }),
@@ -2618,7 +2633,7 @@ describe("repository weekly telemetry", () => {
     ).repoWeeks.find((value) => value.repoId === "shop-app");
     expect(row?.weeks).toContainEqual(
       expect.objectContaining({
-        week: "2026-10-10",
+        week: "2026-10-08",
         reviewRoundsPerPr: 2,
         medianReadyToMergeHours: 4,
         noSeatWorkingHours: 3,
