@@ -8,6 +8,7 @@ import {
   needsYouItems,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { holdItem } from "../src/attention/holds.ts";
 import type { CcConfig } from "../src/config.ts";
 import { attentionItems, markHubStarted, STALE_ITEM_MS } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
@@ -162,6 +163,13 @@ describe("Needs you holds only FLIGHT's questions to the operator (#2285)", () =
     expect(STALE_ITEM_MS).toBe(14 * DAY);
     expect(all().map((i) => i.key)).not.toContain("esc:repo#1");
     expect(all().map((i) => i.key)).toContain("esc:repo#2");
+  });
+
+  it("keeps an item under a hold however old: a hold is a decision to wait", () => {
+    store.replaceEscalations("repo", [escalation(8, NOW - 20 * DAY)]);
+    holdItem(store, "esc:repo#8", "Wait for the vendor", { kind: "manual" }, "operator", NOW - DAY);
+    const held = attentionItems(config, store, NOW, undefined, undefined, null, true);
+    expect(held.find((i) => i.key === "esc:repo#8")?.hold?.reason).toBe("Wait for the vendor");
   });
 
   it("expires an operator brief 14 days old: the item goes back to FLIGHT", () => {

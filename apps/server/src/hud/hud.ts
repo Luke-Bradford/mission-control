@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import {
   type AgentView,
   ATTENTION_KINDS,
+  type AttentionHold,
   type AttentionItem,
   type AttentionOwner,
   agentState,
@@ -93,6 +94,7 @@ import {
   protectedDecisionItem,
   questionAskAt,
 } from "../attention/holds.ts";
+import { holds } from "../attention/holds-read.ts";
 import { confirmedResumeAfter, pendingRunApproval } from "../attention/subjects.ts";
 import { briefReadState, briefSourceRevision } from "../brief/source.ts";
 import { claudeVersion } from "../cli/version.ts";
@@ -1564,6 +1566,7 @@ function buildAttentionItems(
     ...(triageDueAt === undefined ? {} : { triageDueAt }),
   });
   const closures = store.closedItemKeys();
+  const held = holds(store);
   const currentBrief = (i: OwnedItem) => {
     const saved = briefs.get(i.key);
     // Retain automatic hub briefs as history, without exposing them as operator questions.
@@ -1763,7 +1766,7 @@ function buildAttentionItems(
     // the watch's FLIGHT-down notes are the not-triaging item's reason, never items of their own
     .filter((i) => !FLIGHT_DOWN_ITEMS.has(i.key))
     // stale items are settled on load (#2285): nobody can act on them now
-    .filter((i) => includeStale || !staleItem(i, store, now))
+    .filter((i) => includeStale || !staleItem(i, store, now, held))
     // A presentation refresh cannot reopen an operator-cleared ask. A new ask has its own time.
     .filter(
       (i) =>
@@ -1837,9 +1840,18 @@ const LIVE_KINDS: readonly AttentionItem["kind"][] = ["stalled", "error", "lock"
  * board has seen closed since it was raised (one raised after the close, such as a worktree to
  * remove by hand, is still work). A hub alert or a live state is never stale.
  */
-function staleItem(item: OwnedItem, store: Store, now: number): boolean {
+function staleItem(
+  item: OwnedItem,
+  store: Store,
+  now: number,
+  held: Record<string, AttentionHold>,
+): boolean {
   if (LIVE_KINDS.includes(item.kind) || needsYouAlert(item) || hubAlert(item, store)) return false;
-  if (item.at > 0 && now - item.at >= STALE_ITEM_MS) return true;
+  // a hold is a decision to wait: never stale while it stands, its age counted from its release
+  const hold = held[item.key];
+  if (hold !== undefined && hold.at >= item.at && hold.releasedAt === undefined) return false;
+  const since = Math.max(item.at, hold?.releasedAt ?? 0);
+  if (since > 0 && now - since >= STALE_ITEM_MS) return true;
   const ref = item.ticket === null ? null : parseTicket(item.ticket);
   const card = ref === null ? null : store.boardItem(ref.repoId, ref.number);
   return card?.closed === true && card.updatedAt >= item.at;

@@ -253,7 +253,8 @@ place. The web's asker line must read `asker` before `agentId`; that change is t
   shows the outage.
 - **Stale items settle on load (#2285).** An item raised 14 days ago or more, or whose ticket the
   board has seen closed since it was raised, leaves the list. Hub alerts and live states (a stall,
-  an error, the test lock, a rate limit) never go stale. An operator brief 14 days old expires, so
+  an error, the test lock, a rate limit) never go stale, nor does an item under a hold, which is a
+  decision to wait; a released hold counts its age from the release. An operator brief 14 days old expires, so
   its item goes back to FLIGHT. An item whose brief choice was applied and read leaves too.
 - **The hub's news is FLIGHT's (#2285).** Machine capacity, the file service, the CLI hold and
   rollback and a focus import are things the hub puts right itself. They ask the operator nothing,
