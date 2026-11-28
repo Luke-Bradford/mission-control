@@ -76,8 +76,8 @@ import {
   pushReferenceText,
   pushSecretText,
   REFUSAL_TRIES,
-  REVIEW_STATUS_BLOCKED,
   RELAY_ATTACH_STUCK_MS,
+  REVIEW_STATUS_BLOCKED,
   REVIEW_STATUS_PASSED,
   REVIEW_STATUS_PASSED_NOT_INSTALLED,
   REVIEW_STATUS_QUEUED,
@@ -1870,9 +1870,7 @@ describe("CI and review", () => {
       expect(h.staleTurns).toEqual([`aside:${SEAT}`]);
       expect(h.wakes).toEqual([RUN]);
       expect(h.sent[0]?.key).toBe(`ci:${RUN}:${SHA}`);
-      expect(h.sent[0]?.text).toContain(
-        "1) [chromium] › e2e/board.spec.ts:12:5 › shows the board",
-      );
+      expect(h.sent[0]?.text).toContain("1) [chromium] › e2e/board.spec.ts:12:5 › shows the board");
       expect(loopTexts().some((t) => t.includes("set this run aside"))).toBe(true);
     });
 
