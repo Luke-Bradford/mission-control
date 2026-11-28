@@ -137,7 +137,11 @@ describe("api", () => {
   });
 
   it("forwards the page bootstrap capability then removes it from the address", async () => {
-    window.history.replaceState(null, "", "/setup?keep=value&bootstrap=page-capability&bootstrap=old#top");
+    window.history.replaceState(
+      null,
+      "",
+      "/setup?keep=value&bootstrap=page-capability&bootstrap=old#top",
+    );
     const replaceState = vi.spyOn(window.history, "replaceState");
     const fetchMock = vi.fn(async () => json(200, { token: "boot-token" }));
     vi.stubGlobal("fetch", fetchMock);
