@@ -861,6 +861,8 @@ interface Live {
   spawn: string;
   /** Attached to a keeper that is still replaying the lines the hub missed: no line goes out yet. */
   attaching: boolean;
+  /** Releases the queue held until an attaching keeper finishes replaying, once only. */
+  releaseAttachBarrier: (() => void) | null;
   /** now() when the attach began; null for a session the hub started itself. */
   attachStartedAt: number | null;
   /** At an attach: the keeper's line count, below which the lines are a replay of what the last hub missed. */
@@ -2876,6 +2878,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       lastStderr: null,
       lastStderrAt: null,
       attaching: false,
+      releaseAttachBarrier: null,
       attachStartedAt: null,
       replayedBelow: 0,
       awaitingAtAttach: false,
@@ -3574,7 +3577,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } catch (e) {
       return refuse(`${CANNOT_START}: ${errText(e)}`);
     }
-    track(info, run, driver, grant(info, run), {
+    const l = track(info, run, driver, grant(info, run), {
       spawn: hello.spawn,
       attaching: true,
       attachStartedAt: now(),
@@ -3586,10 +3589,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       rateLimitedUntil: cursor?.spawn === hello.spawn ? cursor.rateLimitedUntil : null,
       chain,
     });
-    const off = driver.on((e) => {
-      if (e.kind !== "attached" && e.kind !== "exit") return;
+    let off = () => {};
+    l.releaseAttachBarrier = () => {
+      l.releaseAttachBarrier = null;
       off();
       unblock();
+    };
+    off = driver.on((e) => {
+      if (e.kind !== "attached" && e.kind !== "exit") return;
+      l.releaseAttachBarrier?.();
     });
   }
 
@@ -3597,6 +3605,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function onAttached(l: Live, awaiting: boolean): void {
     const seatId = l.info.seat.id;
     l.attaching = false;
+    l.releaseAttachBarrier?.();
     l.inTurn ||= awaiting;
     fold(l, true);
     saveCursor(l);

@@ -398,6 +398,9 @@ const DURATION_TAIL = /\s+\d+(?:\.\d+)?m?s$/;
 const ARROW_LINE = /^→\s/;
 /** A failing test as Playwright's list reporter numbers it: `1) [chromium] › e2e/a.spec.ts:12:5 › title`. */
 const PLAYWRIGHT_LINE = /^\d+\) \[[^\]]+\] › /;
+/** Playwright's reporter summary begins after a final failure's error lines. */
+const PLAYWRIGHT_SUMMARY_LINE =
+  /^(?:\d+\s+(?:failed|passed|skipped|flaky|interrupted|did not run)\b|\[[^\]]+\] › )/i;
 /** How many lines of its error follow a Playwright failure or a `×` line. */
 const TEST_ERROR_LINES = 10;
 /** A line that opens (or ends) a block of a test's console output. */
@@ -538,7 +541,12 @@ export function ciLogBody(log: string, max: number): string {
       }
       continue;
     }
-    if (open !== null && testLeft > 0 && !FAIL_LINE.test(text)) {
+    if (
+      open !== null &&
+      testLeft > 0 &&
+      !FAIL_LINE.test(text) &&
+      !PLAYWRIGHT_SUMMARY_LINE.test(text)
+    ) {
       open.push(line);
       testLeft--;
       continue;

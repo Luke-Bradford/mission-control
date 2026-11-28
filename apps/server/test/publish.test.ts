@@ -1621,6 +1621,23 @@ describe("ciExcerpt", () => {
       expect(failures).not.toContain("2 failed");
     });
 
+    it("does not treat Playwright's final summary as a test error", async () => {
+      const out = await excerpt([
+        L("  1) [chromium] › e2e/board.spec.ts:12:5 › shows the board ─────────────────", "studio"),
+        L("    Error: expect(locator).toBeVisible() failed", "studio"),
+        L("      at e2e/board.spec.ts:14:27", "studio"),
+        L("  1 failed", "studio"),
+        L("    [chromium] › e2e/board.spec.ts:12:5 › shows the board", "studio"),
+        L("  39 passed (1.2m)", "studio"),
+      ]);
+      const failures = out.slice(0, out.indexOf("[studio: last lines]"));
+      expect(failures).toContain("Error: expect(locator).toBeVisible() failed");
+      expect(failures).toContain("at e2e/board.spec.ts:14:27");
+      expect(failures).not.toContain("1 failed");
+      expect(failures).not.toContain("\n[chromium] › e2e/board.spec.ts:12:5 › shows the board");
+      expect(failures).not.toContain("39 passed");
+    });
+
     it("lists each failing vitest × test with the error lines under it", async () => {
       const out = await excerpt([
         L(" ❯ test/a.test.ts (3 tests | 2 failed) 12ms"),
