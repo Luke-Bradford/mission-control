@@ -39,6 +39,8 @@ export interface CrewAppRepo {
 }
 export interface CrewAppSeat {
   id: string;
+  /** The live run on the seat: an app and a manual stop belong to one run. */
+  runId: string;
   repoId: string;
   worktree: string;
 }
@@ -93,6 +95,8 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
   const running = new Map<
     string,
     {
+      /** The run that started it; undefined for a record an earlier hub saved (adopted as is). */
+      runId?: string;
       workspace: string;
       worktree: string;
       repo: CrewAppRepo;
@@ -104,13 +108,14 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
   const repoOf = (id: string) => deps.repos().find((repo) => repo.id === id);
   const seatOf = (id: string) => deps.seats().find((seat) => seat.id === id);
   const reservedPorts = new Map<string, number>();
-  /** Seats whose app the operator stopped: the tick leaves them stopped until the next start. */
-  const stopped = new Set<string>();
+  /** Seat to run whose app the operator stopped: left stopped until a start or the seat's next run. */
+  const stopped = new Map<string, string>();
   const save = () =>
     deps.state?.set(
       JSON.stringify({
         apps: [...running].map(([seat, app]) => ({
           seat,
+          run: app.runId,
           workspace: app.workspace,
           worktree: app.worktree,
           repo: app.repo.id,
@@ -118,7 +123,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
           apps: app.apps,
           restartedAt: app.restartedAt,
         })),
-        stopped: [...stopped],
+        stopped: [...stopped].map(([seat, run]) => ({ seat, run })),
       }),
     );
   /** The seat's port block: its reserved one, else the first free one (not reserved by a look). */
@@ -149,7 +154,10 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
         ? (record as Record<string, unknown>).stopped
         : [];
     if (Array.isArray(manual))
-      for (const seat of manual) if (typeof seat === "string") stopped.add(seat);
+      for (const entry of manual) {
+        const { seat, run } = (entry ?? {}) as Record<string, unknown>;
+        if (typeof seat === "string" && typeof run === "string") stopped.set(seat, run);
+      }
     if (Array.isArray(saved))
       for (const entry of saved) {
         if (typeof entry !== "object" || entry === null) continue;
@@ -177,6 +185,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
         });
         if (apps.length !== repo.commands.length) continue;
         running.set(value.seat, {
+          runId: typeof value.run === "string" ? value.run : undefined,
           workspace: value.workspace,
           worktree: value.worktree,
           repo,
@@ -221,6 +230,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     const startPort = portStart(seat.id);
     const backendPort = startPort;
     const apps: { pane: string; url: string; answers: boolean | null }[] = [];
+    // panes and both statuses are one start: any failure undoes all of it
     try {
       for (const [index, entry] of repo.commands.entries()) {
         const port = startPort + index;
@@ -231,16 +241,23 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
         );
         apps.push({ pane, url: urlAt(entry.url, port), answers: null });
       }
+      await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, apps[0]?.url ?? "");
+      await deps.cmux.setStatus(workspace, SESSION_APP_HEALTH_STATUS_KEY, appStatus(apps));
     } catch (error) {
-      // a half-started app holds no panes and no ports
+      // a half-started app holds no panes, no statuses and no ports; the next tick tries again
       await Promise.all(apps.map((entry) => deps.cmux.closePane(entry.pane).catch(() => {})));
+      for (const key of [SESSION_APP_STATUS_KEY, SESSION_APP_HEALTH_STATUS_KEY])
+        try {
+          await deps.cmux.setStatus(workspace, key, "");
+        } catch {
+          // the pane is gone either way; a stale status is cleared by the next start or stop
+        }
       reservedPorts.delete(seatId);
       save();
       throw error;
     }
-    await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, apps[0]?.url ?? "");
-    await deps.cmux.setStatus(workspace, SESSION_APP_HEALTH_STATUS_KEY, appStatus(apps));
     running.set(seatId, {
+      runId: seat.runId,
       workspace,
       worktree: seat.worktree,
       repo,
@@ -253,7 +270,8 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
   };
   const stop = async (seatId: string) => {
     await close(seatId);
-    stopped.add(seatId);
+    const seat = seatOf(seatId);
+    if (seat) stopped.set(seatId, seat.runId);
     save();
   };
   return {
@@ -276,9 +294,16 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
       ).join("\n\n");
     },
     async tick() {
-      for (const [seatId] of running) if (!seatOf(seatId)) await close(seatId);
+      // an app belongs to the run that started it: a seat's next run, or a new worktree, gets its own
+      for (const [seatId, app] of running) {
+        const seat = seatOf(seatId);
+        if (!seat || seat.worktree !== app.worktree) await close(seatId);
+        else if (app.runId === undefined) app.runId = seat.runId;
+        else if (app.runId !== seat.runId) await close(seatId);
+      }
       // a stop lasts for the seat's run: its next run starts its app again
-      for (const seatId of stopped) if (!seatOf(seatId)) stopped.delete(seatId);
+      for (const [seatId, runId] of stopped)
+        if (seatOf(seatId)?.runId !== runId) stopped.delete(seatId);
       // one seat's app that cannot start never holds up another's
       const tryStart = (seatId: string, restartedAt?: number) =>
         start(seatId, restartedAt).catch((error) =>

@@ -1086,7 +1086,7 @@ export async function main(): Promise<void> {
       store
         .liveSeatRuns()
         .flatMap(({ seatId, worktree, run }) =>
-          worktree === null ? [] : [{ id: seatId, repoId: run.repoId, worktree }],
+          worktree === null ? [] : [{ id: seatId, runId: run.id, repoId: run.repoId, worktree }],
         ),
     probe: probeLocal,
     log: (m) => log(m),

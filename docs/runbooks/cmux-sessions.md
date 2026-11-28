@@ -53,8 +53,11 @@ address and its current loopback reachability, and provides Start and Stop
 The hub probes app URLs each minute. A stopped app restarts no more than once every five minutes,
 including across a hub restart (the restart time is saved with the panes); the restart is logged. It stops and closes every app pane, and the terminal pane, when the seat's run
 ends, then releases that seat's port block. A Stop from the Sessions page lasts, across a hub
-restart, until the next Start, `app_start` or `app_restart`, or the seat's next run. A start that
-fails part way closes the panes it opened and frees the port block; other seats' apps carry on.
+restart, until the next Start, `app_start` or `app_restart`, or the seat's next run. An app and a
+Stop belong to the run that owns the seat: when another run takes the seat, or its worktree changes,
+the hub closes the old panes and starts the new run's app at its next tick. A start that fails part
+way (a pane or a status write) closes the panes it opened, clears the app statuses and frees the
+port block, and the next tick tries again; other seats' apps carry on.
 Preview hubs never start or restart crew apps.
 
 ### The seat's terminal pane

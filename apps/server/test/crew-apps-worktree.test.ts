@@ -103,7 +103,7 @@ describe("crew apps and the terminal in a real seat worktree", () => {
             ],
           },
         ],
-        seats: () => [{ id: SEAT, repoId: "ebull", worktree }],
+        seats: () => [{ id: SEAT, runId: RUN, repoId: "ebull", worktree }],
         probe: async () => false,
       });
       const recorder = createCheckRecorder({
