@@ -67,7 +67,7 @@ export function loadOperatorToken(): Promise<void> {
     ...(capability === undefined
       ? {}
       : { headers: { [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: capability } }),
-    })
+  })
     .then((body) => {
       if (typeof body?.token === "string") {
         operatorToken = body.token;
