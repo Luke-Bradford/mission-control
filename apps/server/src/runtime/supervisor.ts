@@ -3298,7 +3298,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (l !== undefined) {
         fold(l);
         l.off();
-        l.session.detach();
+        await l.session.detach();
         live.delete(row.seatId);
       }
       const transfer = transferState(row.runId as string);
@@ -6050,7 +6050,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         fold(l);
         saveCursor(l);
         l.off();
-        l.session.detach();
+        await l.session.detach();
       }
       live.clear();
       try {

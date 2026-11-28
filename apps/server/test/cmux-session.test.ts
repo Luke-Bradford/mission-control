@@ -509,6 +509,30 @@ describe("startCmuxSession", () => {
     await closing;
   });
 
+  it("waits for an in-flight paste before detaching", async () => {
+    const cmux = fake({ findWaitMs: 2000 });
+    let release: () => void = () => {};
+    const sent = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    cmux.send = async () => {
+      await sent;
+      return "sent";
+    };
+    const h = start({ cmux });
+    await h.session.ready;
+    h.session.send("hello there");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    let detached = false;
+    const detaching = Promise.resolve(h.session.detach()).then(() => {
+      detached = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(detached).toBe(false);
+    release();
+    await detaching;
+  });
+
   it("with a stale same-named workspace open, messages reach the new start's Claude", async () => {
     patch((s) => {
       s.claudePid = ALIVE;

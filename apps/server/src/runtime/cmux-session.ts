@@ -1241,13 +1241,16 @@ function createCmuxDriver(
       return exited;
     },
     detach() {
-      if (detached) return;
+      if (detached) return pumpingPromise ?? Promise.resolve();
       detached = true;
       alive = false;
       if (timer !== undefined) clearTimeout(timer);
       listeners.clear();
       resolveReady();
       resolveExit(null);
+      // A paste owns its cmux child until cmux has accepted it. The next hub must not race it,
+      // and shutdown must not remove its test or run folder while that child still names it.
+      return pumpingPromise ?? Promise.resolve();
     },
     on(listener) {
       listeners.add(listener);
@@ -1424,8 +1427,9 @@ export function withKeeperFallback(
     },
     detach() {
       listeners.clear();
-      current.detach();
+      const detached = current.detach();
       resolveReady();
+      return detached;
     },
     on(listener) {
       listeners.add(listener);
