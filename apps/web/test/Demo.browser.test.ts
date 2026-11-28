@@ -10,8 +10,8 @@ import {
   describeRendered,
   type RenderedPage,
 } from "./browserRunner.ts";
-import { demoSeed, overviewDensityFixture } from "./overviewDensityFixtures.ts";
 import { NOW } from "./fixtures.ts";
+import { demoSeed, overviewDensityFixture } from "./overviewDensityFixtures.ts";
 
 const { renderAt } = browserSession();
 const HARNESS = "test/demoBrowser.html";
@@ -153,9 +153,9 @@ describeRendered("Demo, rendered", () => {
       const rows = demoSeed(17).rows;
       const pattern = (row: (typeof rows)[number]) =>
         `${row.hudState}:${row.run ? NOW - row.run.startedAt : 0}:${row.run?.costUsd ?? 0}`;
-      expect(rows.map(pattern).every((value, index, all) => !index || value !== all[index - 1])).toBe(
-        true,
-      );
+      expect(
+        rows.map(pattern).every((value, index, all) => !index || value !== all[index - 1]),
+      ).toBe(true);
 
       const pages = [
         ["Overview", "/", "#agentsList .trow:not(.head)"],
@@ -165,9 +165,14 @@ describeRendered("Demo, rendered", () => {
       ] as const;
       for (const [name, at, selector] of pages) {
         const page = await openSeeded(at);
-        await eventually(page, async () => (await count(page, selector)) >= 2, `${name} work cards`);
+        await eventually(
+          page,
+          async () => (await count(page, selector)) >= 2,
+          `${name} work cards`,
+        );
         const cards = await page.evaluate(
-          (css) => [...document.querySelectorAll(css)].map((card) => card.textContent?.trim() ?? ""),
+          (css) =>
+            [...document.querySelectorAll(css)].map((card) => card.textContent?.trim() ?? ""),
           selector,
         );
         expect(cards.every((value, index) => !index || value !== cards[index - 1])).toBe(true);
