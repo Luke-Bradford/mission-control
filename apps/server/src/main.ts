@@ -1444,12 +1444,16 @@ export async function main(): Promise<void> {
       log(`crew: restored ${r.tokens} token(s) and ${r.holds} test-lock hold(s)`);
     }
   }
+  let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  // Fastify takes hooks only before it listens.
+  app.addHook("onClose", async () => {
+    if (watchdogTimer) clearInterval(watchdogTimer);
+  });
   await app.listen({ host: HOST, port });
   const watchdogTick = () => void watchdog.check();
   watchdogTick();
-  const watchdogTimer = setInterval(watchdogTick, WATCHDOG_INTERVAL_MS);
+  watchdogTimer = setInterval(watchdogTick, WATCHDOG_INTERVAL_MS);
   watchdogTimer.unref();
-  app.addHook("onClose", async () => clearInterval(watchdogTimer));
   // External service tooling can identify this hub without inspecting a process command line.
   if (!preview) {
     const pidPath = join(dirname(dbPath), "server.pid");
