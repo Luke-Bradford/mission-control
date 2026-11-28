@@ -89,6 +89,14 @@ const flight = {
   area: [],
 };
 
+/**
+ * A dialog deadline longer than a few polls: each fake cmux call is a process start, so a poll can
+ * take hundreds of ms under CI load. The harness's 50 ms default would fire before a poll sees the
+ * dialog close or change.
+ */
+const DIALOG_DEADLINE_MS = 2000;
+const pastDeadline = () => new Promise((r) => setTimeout(r, DIALOG_DEADLINE_MS + 500));
+
 async function started(over: { cmuxDialogReportMs?: number } = {}) {
   fakeCmux();
   const made = make({ cmuxState: stateFile(), ...over });
@@ -184,7 +192,7 @@ describe("a Claude run in cmux", () => {
   });
 
   it("does not call FLIGHT when a stale cmux needs-input record outlives its dialog", async () => {
-    await started();
+    await started({ cmuxDialogReportMs: DIALOG_DEADLINE_MS });
     lifecycle("running");
     await until(() => expect(seatState("guido-1")).toBe("running"));
     patch((s) => {
@@ -201,7 +209,7 @@ describe("a Claude run in cmux", () => {
     patch((s) => {
       s.screen = "Claude is thinking";
     });
-    await new Promise((r) => setTimeout(r, 150));
+    await pastDeadline();
     const calls = Object.values(
       JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals ?? {},
     );
@@ -209,7 +217,7 @@ describe("a Claude run in cmux", () => {
   });
 
   it("does not call FLIGHT about a dialog whose turn ended before the deadline", async () => {
-    await started({ cmuxDialogReportMs: 300 });
+    await started({ cmuxDialogReportMs: DIALOG_DEADLINE_MS });
     lifecycle("running");
     await until(() => expect(seatState("guido-1")).toBe("running"));
     patch((s) => {
@@ -225,7 +233,7 @@ describe("a Claude run in cmux", () => {
     // the turn ends with the dialog's text still on screen: cmux's idle record wins
     lifecycle("idle");
     await until(() => expect(seatState("guido-1")).toBe("idle"));
-    await new Promise((r) => setTimeout(r, 500));
+    await pastDeadline();
     const calls = Object.values(
       JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals ?? {},
     );
@@ -233,7 +241,7 @@ describe("a Claude run in cmux", () => {
   });
 
   it("restarts the dialog deadline when cmux changes dialogs without changing lifecycle", async () => {
-    await started();
+    await started({ cmuxDialogReportMs: DIALOG_DEADLINE_MS });
     lifecycle("running");
     await until(() => expect(seatState("guido-1")).toBe("running"));
     patch((s) => {
