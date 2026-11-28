@@ -32,23 +32,58 @@ it("rejects adjacent Done cards whose raw times differ but displayed work patter
   expect(patternsDiffer(patterns)).toBe(false);
 });
 
-it("shows the idle age for unassigned In progress and In review cards", () => {
+it.each([
+  ["Backlog", boardItem({ issueNumber: 73, status: "Backlog", state: "planned" }), "Backlog · not started"],
+  [
+    "Refinement",
+    boardItem({ issueNumber: 74, status: "Refinement", state: "planned" }),
+    "Refinement · not started",
+  ],
+  ["Ready", boardItem({ issueNumber: 75, status: "Ready", state: "planned" }), "Ready · not started"],
+  [
+    "Ready moved to Blocked",
+    boardItem({
+      issueNumber: 76,
+      status: "Ready",
+      state: "planned",
+      blockedBy: [{ ref: "shop-app#1", closed: false }],
+    }),
+    "Blocked · not started",
+  ],
+  [
+    "In progress",
+    boardItem({
+      issueNumber: 77,
+      status: "In Progress",
+      state: "in progress",
+      updatedAt: NOW - 3 * 60 * MIN,
+    }),
+    "In progress · idle 3h 0m",
+  ],
+  [
+    "In review",
+    boardItem({
+      issueNumber: 78,
+      status: "In review",
+      state: "review",
+      updatedAt: NOW - 45 * MIN,
+    }),
+    "In review · idle 45m",
+  ],
+  [
+    "Waiting",
+    boardItem({
+      issueNumber: 79,
+      status: "In review",
+      state: "review",
+      waiting: { reason: "Needs a schema", freesWhen: "shop-app#1 merges", at: NOW - 2 * 60 * MIN },
+    }),
+    "Waiting · waiting 2h 0m",
+  ],
+] as const)("renders %s from its lifecycle and displayed column", (_name, item, expected) => {
   const { container } = render(
     <Kanban
-      items={[
-        boardItem({
-          issueNumber: 73,
-          status: "In Progress",
-          state: "in progress",
-          updatedAt: NOW - 3 * 60 * MIN,
-        }),
-        boardItem({
-          issueNumber: 74,
-          status: "In review",
-          state: "review",
-          updatedAt: NOW - 45 * MIN,
-        }),
-      ]}
+      items={[item]}
       showRepo={false}
       prs={[]}
       crew={[]}
@@ -58,11 +93,7 @@ it("shows the idle age for unassigned In progress and In review cards", () => {
       todayStart={NOW - 12 * 60 * MIN}
     />,
   );
-  const patterns = [...container.querySelectorAll<HTMLElement>(".kcard [data-work-pattern]")].map(
-    (card) => ({ text: card.textContent, value: card.dataset.workPattern }),
-  );
-  expect(patterns).toEqual([
-    { text: "In progress · idle 3h 0m", value: "In progress · idle 3h 0m" },
-    { text: "In review · idle 45m", value: "In review · idle 45m" },
-  ]);
+  const pattern = container.querySelector<HTMLElement>(".kcard [data-work-pattern]");
+  expect(pattern?.textContent).toBe(expected);
+  expect(pattern?.dataset.workPattern).toBe(expected);
 });

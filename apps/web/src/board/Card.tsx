@@ -2,6 +2,7 @@ import {
   type BoardItem,
   CI_PILL,
   type CrewRow,
+  hudColumnOf,
   type PillTone,
   type PullRequestView,
   prPill,
@@ -382,12 +383,15 @@ function WorkPattern({
 }: Pick<CardProps, "item" | "agent" | "outcome" | "when"> & { col: BoardColumn }) {
   const now = useNow();
   const state = col === "Done" ? outcome : agent ? seatStatus(agent).label : col;
+  const lifecycle = hudColumnOf(item);
   const duration =
     col === "Done"
       ? when
       : agent
         ? elapsed(Math.max(0, now - (agent.run?.startedAt ?? agent.stateSince)))
-        : isNotStartedColumn(col)
+        : col === WAITING_COLUMN
+          ? `waiting ${elapsed(Math.max(0, now - (item.waiting?.at ?? item.updatedAt)))}`
+          : isNotStartedColumn(lifecycle)
           ? "not started"
           : `idle ${elapsed(Math.max(0, now - item.updatedAt))}`;
   const spend = agent?.run?.costUsd;
