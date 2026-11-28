@@ -8,6 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -123,10 +124,72 @@ describe("seat terminal", () => {
       expect(run("echo inside > result && cat result")).toBe(0);
     },
   );
+
+  it.skipIf(process.platform !== "darwin" || seatbeltBlocked)(
+    "keeps process credentials, the login keychain, the hub, and external hosts out of the pane",
+    async () => {
+      const scratch = join(dir, "hub");
+      mkdirSync(scratch);
+      const listen = () =>
+        new Promise<ReturnType<typeof createServer>>((done) => {
+          const server = createServer();
+          server.listen(0, "127.0.0.1", () => done(server));
+        });
+      const app = await listen();
+      const hub = await listen();
+      const appPort = (app.address() as { port: number }).port;
+      const hubPort = (hub.address() as { port: number }).port;
+      const profile = terminalSandboxProfile({
+        worktree,
+        scratch,
+        denyRead: [],
+        denyLocalPorts: [hubPort],
+      });
+      const sibling = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+        env: { ...process.env, GH_TOKEN: "operator-token", MC_OPERATOR_TOKEN: "hub-token" },
+        stdio: "ignore",
+      });
+      const run = (command: string) => {
+        try {
+          execFileSync("/usr/bin/sandbox-exec", ["-p", profile, "/bin/zsh", "-fc", command], {
+            cwd: worktree,
+            encoding: "utf8",
+          });
+          return { status: 0, output: "" };
+        } catch (error) {
+          return {
+            status: (error as { status?: number }).status ?? 1,
+            output: String((error as { stdout?: Buffer }).stdout ?? ""),
+          };
+        }
+      };
+      const connect = (port: number) =>
+        `${process.execPath} -e ${JSON.stringify(
+          `require("node:net").connect(${port}, "127.0.0.1").on("connect", () => process.exit(0)).on("error", () => process.exit(1))`,
+        )}`;
+      try {
+        expect(run(connect(appPort)).status).toBe(0);
+        expect(run(connect(hubPort)).status).not.toBe(0);
+        expect(run("curl --connect-timeout 1 https://example.com").status).not.toBe(0);
+        expect(run(`ps eww -p ${sibling.pid}`).status).not.toBe(0);
+        expect(run("security list-keychains").status).not.toBe(0);
+      } finally {
+        sibling.kill();
+        await Promise.all([
+          new Promise<void>((done) => app.close(() => done())),
+          new Promise<void>((done) => hub.close(() => done())),
+        ]);
+      }
+    },
+  );
   it.each([
     "cat ~/.local/share/mission-control/operator-token",
     "git push",
     "gh auth token",
+    "ps eww -ax",
+    "/bin/ps eww -ax",
+    "security find-generic-password -s mission-control",
+    "/usr/bin/security find-generic-password -s mission-control",
     "echo secret > /tmp/operator-token",
   ])("refuses an operator credential or GitHub command: %s", (command) => {
     expect(
@@ -210,6 +273,32 @@ describe("seat terminal", () => {
     expect(cmux.newPane).toHaveBeenCalledWith("ws-eb", worktree, expect.any(String));
     expect(cmux.typed.map((x) => x.surface)).toEqual(["surface:1", "surface:1"]);
     expect(cmux.closePane).not.toHaveBeenCalled();
+  });
+
+  it("replaces a seat's pane when its active worktree changes", async () => {
+    const nextWorktree = join(dir, "next-worktree");
+    mkdirSync(nextWorktree);
+    const cmux = paneCmux();
+    const t = terminal(cmux, { sandboxProfile: (path: string) => `profile:${path}` });
+    await t.run({ seatId: SEAT, runId: RUN, worktree, command: "true", timeoutMs: 5_000 });
+    await t.run({
+      seatId: SEAT,
+      runId: "run-next",
+      worktree: nextWorktree,
+      command: "true",
+      timeoutMs: 5_000,
+    });
+    expect(cmux.closePane).toHaveBeenCalledWith("surface:1");
+    expect(cmux.newPane).toHaveBeenCalledTimes(2);
+    expect(cmux.newPane).toHaveBeenLastCalledWith(
+      "ws-eb",
+      nextWorktree,
+      expect.stringContaining(`profile:${nextWorktree}`),
+    );
+    expect(
+      (cmux.newPane.mock.calls as unknown as [string, string, string][])[1]?.[2],
+    ).not.toContain(`profile:${worktree}`);
+    expect(cmux.typed.map((entry) => entry.surface)).toEqual(["surface:1", "surface:2"]);
   });
 
   it("returns at its timeout with the pane still running, and refuses another command until it ends", async () => {

@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import {
   CHECK_BASH_TIMEOUT_MS,
   guardDecision,
@@ -60,6 +60,7 @@ const TERMINAL_CREDENTIAL_FOLDERS = [
   ".config/gh",
   ".git-credentials",
   ".netrc",
+  "Library/Keychains",
 ] as const;
 
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
@@ -86,6 +87,8 @@ export function terminalSandboxProfile(input: {
   worktree: string;
   scratch: string;
   denyRead: readonly string[];
+  /** The hub's loopback port remains private while other local development services work. */
+  denyLocalPorts?: readonly number[];
 }): string {
   const denied = [
     ...TERMINAL_CREDENTIAL_FOLDERS.map((folder) => join(homedir(), folder)),
@@ -94,7 +97,19 @@ export function terminalSandboxProfile(input: {
   return [
     "(version 1)",
     "(allow default)",
+    // A pane may use development services on the local machine, but not the hub or the internet.
     "(deny network-outbound)",
+    '(allow network-outbound (remote ip "127.0.0.1:*"))',
+    '(allow network-outbound (remote ip "::1:*"))',
+    ...(input.denyLocalPorts ?? []).flatMap((port) => [
+      `(deny network-outbound (remote ip "127.0.0.1:${port}"))`,
+      `(deny network-outbound (remote ip "::1:${port}"))`,
+    ]),
+    // Process environments carry the operator's inherited credentials. Keychain APIs use
+    // securityd rather than the keychain files, so deny that service as well.
+    "(deny process-info*)",
+    '(deny mach-lookup (global-name "com.apple.securityd"))',
+    '(deny mach-lookup (global-name "com.apple.securityd.xpc"))',
     "(deny file-write*)",
     `(allow file-write* (subpath ${sandboxPath(resolve(input.worktree))}))`,
     `(allow file-write* (subpath ${sandboxPath(resolve(input.scratch))}))`,
@@ -159,6 +174,11 @@ export function terminalCommandDecision(input: TerminalCommandInput): string | n
     )
       return "Terminal command refused: it is outside this repository's terminal_commands allowlist.";
     const [program, ...args] = argv;
+    const executable = basename(program ?? "");
+    if (["ps", "pgrep", "top", "lsof", "vmmap", "sample", "leaks"].includes(executable))
+      return "Terminal command refused: process inspection can expose operator credentials.";
+    if (executable === "security")
+      return "Terminal command refused: credential-service access is not available in the terminal.";
     if (["curl", "wget"].includes(program ?? "")) {
       const targets = args.filter((arg) =>
         /^(?:https?:\/\/|localhost(?::\d+)?(?:[/?:]|$)|127\.0\.0\.1(?::\d+)?(?:[/?:]|$)|\[::1\])/.test(
@@ -256,14 +276,14 @@ export function terminalSuite(
 
 export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
   const pollMs = deps.pollMs ?? 500;
-  const panes = new Map<string, string>();
+  const panes = new Map<string, { surface: string; worktree: string }>();
   /** The command each seat has running, until it ends or its run is torn down. */
   const busy = new Map<string, { command: string; cancel: () => Promise<void> }>();
 
   const paneOf = async (seatId: string, worktree: string, fresh: boolean) => {
     const kept = panes.get(seatId);
-    if (kept !== undefined && !fresh) return kept;
-    if (kept !== undefined) await deps.cmux.closePane(kept).catch(() => {});
+    if (kept !== undefined && !fresh && kept.worktree === worktree) return kept.surface;
+    if (kept !== undefined) await deps.cmux.closePane(kept.surface).catch(() => {});
     const workspace = await seatWorkspace(deps.cmux, seatId);
     if (workspace === null) throw new Error("No live cmux workspace for this seat.");
     const surface = await deps.cmux.newPane(
@@ -271,7 +291,7 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
       worktree,
       terminalPaneShell(deps.sandboxProfile?.(worktree)),
     );
-    panes.set(seatId, surface);
+    panes.set(seatId, { surface, worktree });
     return surface;
   };
 
@@ -417,10 +437,10 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
     async tick(liveSeatIds) {
       const live = new Set(liveSeatIds);
       for (const [seatId, running] of busy) if (!live.has(seatId)) await running.cancel();
-      for (const [seatId, surface] of panes) {
+      for (const [seatId, pane] of panes) {
         if (live.has(seatId)) continue;
         panes.delete(seatId);
-        await deps.cmux.closePane(surface).catch((error) => deps.log?.(String(error)));
+        await deps.cmux.closePane(pane.surface).catch((error) => deps.log?.(String(error)));
       }
     },
   };

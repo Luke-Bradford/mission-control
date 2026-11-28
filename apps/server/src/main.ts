@@ -1123,6 +1123,7 @@ export async function main(): Promise<void> {
         worktree,
         scratch: join(dirname(dbPath), "seat-terminal"),
         denyRead: config.crew?.denyRead ?? [],
+        denyLocalPorts: [port],
       }),
     log: (m) => log(m),
   });
