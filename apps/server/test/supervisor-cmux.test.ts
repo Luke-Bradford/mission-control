@@ -1,6 +1,7 @@
 // Every Claude seat's run is a cmux workspace; a fake cmux (fixtures/fake-cmux.mjs) stands in for it.
 // The file's state is cmux's: a test sets a session's lifecycle to play the operator and Claude.
 import "./supervisor-harness.ts";
+import { spawn } from "node:child_process";
 import {
   appendFileSync,
   copyFileSync,
@@ -15,7 +16,12 @@ import { join } from "node:path";
 import { CMUX_NEEDS_INPUT_TEXT, type Run } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { agentViews } from "../src/hud/hud.ts";
-import { cmuxKeeperKey, cmuxSourceKey, cmuxWorkspaceKey } from "../src/runtime/cmux-session.ts";
+import {
+  CMUX_WORKSPACE_PREFIX,
+  cmuxKeeperKey,
+  cmuxSourceKey,
+  cmuxWorkspaceKey,
+} from "../src/runtime/cmux-session.ts";
 import { crewKeeperDir } from "../src/store/crew-paths.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
@@ -39,11 +45,12 @@ import {
 skipTestsIf(await blockedHere("crew-run"));
 
 interface FakeCmux {
-  workspaces: { id: string; name: string; cwd: string; command: string }[];
+  workspaces: { id: string; name: string; cwd: string; command: string; goneAt?: number }[];
   sessions: { session_id: string; lifecycle: string; pid: number; workspace_id: string }[];
   sent: { text: string }[];
   keys: { key: string; force: boolean }[];
   closed: string[];
+  closeAttempts?: string[];
   calls: string[][];
   [k: string]: unknown;
 }
@@ -318,6 +325,25 @@ describe("a Claude run in cmux", () => {
     await until(() => expect(copiedTs(runId)).toEqual(["1", "2", "3"]));
   });
 
+  it("a restart starts its new workspace only once cmux stops listing the closed one", async () => {
+    const { runId } = await started();
+    const first = cmuxState().workspaces[0]?.id;
+    // cmux answers the close at once but lists the workspace a second longer
+    patch((s) => {
+      s.linger = 1000;
+      for (const r of s.sessions) r.pid = process.pid + 1;
+    });
+    await until(() => expect(cmuxState().closed).toEqual([first]));
+    await until(() =>
+      expect(cmuxState().workspaces.some((w) => w.id !== first && w.goneAt === undefined)).toBe(
+        true,
+      ),
+    );
+    // no new workspace was made while the old one of its name was still listed
+    expect(cmuxState().sameName ?? []).toEqual([]);
+    expect(store.run(runId)?.endedAt).toBeNull();
+  }, 10_000);
+
   it("closes the workspace when the run ends", async () => {
     const { sup, runId } = await started();
     const ws = cmuxState().workspaces[0]?.id;
@@ -326,6 +352,105 @@ describe("a Claude run in cmux", () => {
     expect(store.getSetting(cmuxWorkspaceKey(runId))).toBeNull();
     expect(store.run(runId)?.endedAt).not.toBeNull();
   });
+
+  it("keeps a closed workspace when cmux cannot verify that it disappeared", async () => {
+    fakeCmux({ claudePid: 999_999 });
+    const { sup } = make({ cmuxState: stateFile() });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(cmuxState().sent).toHaveLength(1));
+    patch((s) => {
+      s.listWorkspacesFails = true;
+    });
+
+    await sup.endRun("guido-1");
+
+    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
+  });
+
+  it("retries closing a workspace when Claude exits", async () => {
+    const claude = spawn("sleep", ["60"], { stdio: "ignore" });
+    fakeCmux({ claudePid: claude.pid, noClose: true });
+    const { sup } = make({ cmuxState: stateFile() });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(cmuxState().sent).toHaveLength(1));
+    const workspace = cmuxState().workspaces[0]?.id;
+
+    claude.kill("SIGKILL");
+
+    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    await until(() =>
+      expect(cmuxState().closeAttempts?.filter((id) => id === workspace)).toHaveLength(2),
+    );
+    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
+  });
+
+  it("a workspace cmux will not close after Claude exits keeps the seat's next start until it closes", async () => {
+    const claude = spawn("sleep", ["60"], { stdio: "ignore" });
+    fakeCmux({ claudePid: claude.pid });
+    const { sup } = make({ cmuxState: stateFile() });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(cmuxState().sent).toHaveLength(1));
+    const name = cmuxState().workspaces[0]?.name;
+    const named = () => cmuxState().workspaces.filter((w) => w.name === name);
+    patch((s) => {
+      s.noClose = true;
+      s.claudePid = process.pid;
+    });
+    claude.kill("SIGKILL");
+    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    // Claude is dead, but cmux still lists its workspace: the hub keeps it to close
+    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
+    await expect(sup.startRun("guido-1", 42)).rejects.toThrow(/earlier cmux workspace/);
+    expect(named()).toHaveLength(1);
+    patch((s) => {
+      s.noClose = false;
+    });
+    const next = await sup.startRun("guido-1", 42);
+    await until(() => expect(cmuxState().sent).toHaveLength(2));
+    expect(named()).toHaveLength(1);
+    expect(named()[0]?.id).toBe(
+      JSON.parse(store.getSetting(cmuxWorkspaceKey(next.runId)) as string).workspace,
+    );
+    expect(store.getSetting(cmuxWorkspaceKey(runId))).toBeNull();
+  });
+
+  it("keeps an older saved workspace before opening another one", async () => {
+    const claude = spawn("sleep", ["60"], { stdio: "ignore" });
+    fakeCmux({ claudePid: claude.pid });
+    const { sup } = make({ cmuxState: stateFile() });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(cmuxState().sent).toHaveLength(1));
+    patch((s) => {
+      s.noClose = true;
+      s.claudePid = process.pid;
+    });
+    claude.kill("SIGKILL");
+    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull();
+
+    // Ten newer keeper runs must not hide the old workspace from a later cmux start.
+    patch((s) => {
+      s.down = true;
+    });
+    for (let n = 0; n < 10; n++) {
+      await sup.startRun("guido-1", 42);
+      await sup.endRun("guido-1");
+    }
+    patch((s) => {
+      s.down = false;
+    });
+
+    expect(
+      store.runsWithSettingPrefix("guido-1", CMUX_WORKSPACE_PREFIX).map((run) => run.id),
+    ).toContain(runId);
+    await expect(sup.startRun("guido-1", 42)).rejects.toThrow(/earlier cmux workspace/);
+    expect(cmuxState().workspaces).toHaveLength(1);
+    expect(cmuxState().sameName ?? []).toEqual([]);
+  }, 20_000);
 
   it.each([
     ["refuses the hub", { denied: true }],

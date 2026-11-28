@@ -41,6 +41,12 @@ const SEAT_PALETTE = 7;
 export const seatColorVar = (index: number): string =>
   `--seat-${(Math.max(0, index) % SEAT_PALETTE) + 1}`;
 
+/** The state, duration source and run cost a seat shows wherever it appears as work in the HUD. */
+export function seatWorkPattern(row: CrewRow): string {
+  const since = row.run?.startedAt ?? row.stateSince;
+  return `${seatStatus(row).label}|${since > 0 ? since : "—"}|${cost(row.run?.costUsd ?? null)}`;
+}
+
 /**
  * The attention items a seat's row shows: the seat's own, about the run it is working now. Run
  * items carry the ticket, not the run, so one about another ticket belongs to a run the seat has

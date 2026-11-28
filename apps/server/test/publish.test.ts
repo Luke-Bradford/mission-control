@@ -57,6 +57,7 @@ import {
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
+import { allowRunDependencies, markDependenciesAdded } from "../src/repo/dependency-allowance.ts";
 import { setRunPathGrants } from "../src/repo/path-grants.ts";
 import { Store } from "../src/store.ts";
 
@@ -204,6 +205,55 @@ describe("openPr", () => {
     expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
       title: "#7 Fix the thing",
       body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\nCloses #7.",
+    });
+  });
+
+  it("lists each package the run's commits added, with version and licence", async () => {
+    allowRunDependencies(
+      store,
+      "r1",
+      ["package.json", "pnpm-lock.yaml"],
+      [
+        { name: "hyparquet", version: "1.33.2", licence: "MIT" },
+        { name: "hyparquet-writer", version: "0.18.1", licence: "MIT" },
+        { name: "left-pad", version: "1.3.0", licence: "WTFPL" },
+        { name: "@scope/pkg", version: "2.0.0", licence: "Apache-2.0" },
+      ],
+    );
+    markDependenciesAdded(store, "r1", [
+      { name: "hyparquet", version: "1.33.2", licence: "MIT" },
+      { name: "hyparquet-writer", version: "0.18.1", licence: "MIT" },
+      { name: "@scope/pkg", version: "2.0.0", licence: "Apache-2.0" },
+    ]);
+    ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+    tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+    await createPublisher(deps()).openPr(run(), TICKET, "Changed it.");
+    // the scoped name is whole, in a code span, and passes the text check: the title is kept
+    expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
+      title: "#7 Fix the thing",
+      body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\n## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT\n- `hyparquet-writer` 0.18.1, licence MIT\n- `@scope/pkg` 2.0.0, licence Apache-2.0\n\nCloses #7.",
+    });
+  });
+
+  it("lists a committed package as committed, whatever a later allowance names", async () => {
+    const files = ["package.json", "pnpm-lock.yaml"];
+    allowRunDependencies(store, "r1", files, [
+      { name: "hyparquet", version: "1.33.2", licence: "MIT" },
+    ]);
+    markDependenciesAdded(store, "r1", [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }]);
+    allowRunDependencies(store, "r1", files, [
+      { name: "hyparquet", version: "1.40.0", licence: "GPL-3.0" },
+    ]);
+    // a second commit of the same name does not rewrite the record either
+    markDependenciesAdded(store, "r1", [
+      { name: "hyparquet", version: "1.40.0", licence: "GPL-3.0" },
+    ]);
+    ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+    tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+    await createPublisher(deps()).openPr(run(), TICKET, "Changed it.");
+    expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
+      title: "#7 Fix the thing",
+      body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\n## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT\n\nCloses #7.",
     });
   });
 
@@ -1546,6 +1596,89 @@ describe("ciExcerpt", () => {
       expect(out).toContain("[50 more failing lines in web-core not shown; inspect the CI log.]");
       expect(out.indexOf("× test/x")).toBeLessThan(out.indexOf("console first"));
     });
+
+    it("lists each failing Playwright test with up to 10 lines of its error", async () => {
+      const spec = (n: number, file: string, title: string) => [
+        L(`  ${n}) [chromium] › e2e/${file}:12:5 › ${title} ─────────────────`, "studio"),
+        L("    Error: expect(locator).toBeVisible() failed", "studio"),
+        ...Array.from({ length: 12 }, (_, i) => L(`    error detail ${n}.${i}`, "studio")),
+      ];
+      const out = await excerpt([
+        L("Running 40 tests using 2 workers", "studio"),
+        ...spec(1, "board.spec.ts", "shows the board"),
+        ...spec(2, "seats.spec.ts", "opens a seat"),
+        L("  2 failed", "studio"),
+        L("    [chromium] › e2e/board.spec.ts:12:5 › shows the board", "studio"),
+        L("  38 passed (1.2m)", "studio"),
+      ]);
+      expect(out).toContain("1) [chromium] › e2e/board.spec.ts:12:5 › shows the board");
+      expect(out).toContain("2) [chromium] › e2e/seats.spec.ts:12:5 › opens a seat");
+      expect(out).toContain("Error: expect(locator).toBeVisible() failed");
+      // the header and 10 lines of error under it, no more (the rest may show in the job's last lines)
+      const failures = out.slice(0, out.indexOf("[studio: last lines]"));
+      expect(failures).toContain("error detail 2.8");
+      expect(failures).not.toContain("error detail 2.9");
+      expect(failures).not.toContain("2 failed");
+    });
+
+    it("does not treat Playwright's final summary as a test error", async () => {
+      const out = await excerpt([
+        L("  1) [chromium] › e2e/board.spec.ts:12:5 › shows the board ─────────────────", "studio"),
+        L("    Error: expect(locator).toBeVisible() failed", "studio"),
+        L("      at e2e/board.spec.ts:14:27", "studio"),
+        L("  1 failed", "studio"),
+        L("    [chromium] › e2e/board.spec.ts:12:5 › shows the board", "studio"),
+        L("  39 passed (1.2m)", "studio"),
+      ]);
+      const failures = out.slice(0, out.indexOf("[studio: last lines]"));
+      expect(failures).toContain("Error: expect(locator).toBeVisible() failed");
+      expect(failures).toContain("at e2e/board.spec.ts:14:27");
+      expect(failures).not.toContain("1 failed");
+      expect(failures).not.toContain("\n[chromium] › e2e/board.spec.ts:12:5 › shows the board");
+      expect(failures).not.toContain("39 passed");
+    });
+
+    it("lists each failing vitest × test with the error lines under it", async () => {
+      const out = await excerpt([
+        L(" ❯ test/a.test.ts (3 tests | 2 failed) 12ms"),
+        L("   × a > adds 5ms"),
+        L("     → expected 1 to be 2 // Object.is equality"),
+        L("   ✓ a > keeps 1ms"),
+        L("   × a > subtracts 3ms"),
+        L("     → expected 3 to be 4 // Object.is equality"),
+        ...Array.from({ length: 20 }, (_, i) => L(`tail line ${i}`)),
+      ]);
+      expect(out).toContain("× a > adds 5ms\n→ expected 1 to be 2 // Object.is equality");
+      expect(out).toContain("× a > subtracts 3ms\n→ expected 3 to be 4 // Object.is equality");
+    });
+
+    it("keeps each vitest × test with its FAIL detail when the log prints both", async () => {
+      const out = await excerpt([
+        L(" ❯ test/a.test.ts (3 tests | 2 failed) 12ms"),
+        L("   × a > adds 5ms"),
+        L("     → expected 1 to be 2 // Object.is equality"),
+        L("   ✓ a > keeps 1ms"),
+        L("   × a > subtracts 3ms"),
+        L("     → expected 3 to be 4 // Object.is equality"),
+        L(" Failed Tests 2"),
+        L(" FAIL  test/a.test.ts > a > adds"),
+        L("AssertionError: expected 1 to be 2 // Object.is equality"),
+        L(" ❯ test/a.test.ts:4:15"),
+        L(" FAIL  test/a.test.ts > a > subtracts"),
+        L("AssertionError: expected 3 to be 4 // Object.is equality"),
+        L(" ❯ test/a.test.ts:8:15"),
+        L(" Test Files  1 failed (1)"),
+      ]);
+      // each test once: its × line and → error, then its FAIL block with the source line
+      expect(out).toContain(
+        "× a > adds 5ms\n→ expected 1 to be 2 // Object.is equality\nFAIL  test/a.test.ts > a > adds\nAssertionError: expected 1 to be 2 // Object.is equality\n❯ test/a.test.ts:4:15",
+      );
+      expect(out).toContain(
+        "× a > subtracts 3ms\n→ expected 3 to be 4 // Object.is equality\nFAIL  test/a.test.ts > a > subtracts",
+      );
+      expect(out.match(/× a > adds/g)).toHaveLength(1);
+      expect(out.match(/FAIL {2}test\/a\.test\.ts > a > adds/g)).toHaveLength(1);
+    });
   });
 
   it("asks for a 16 MiB log buffer", async () => {
@@ -2170,6 +2303,28 @@ describe("postMinorFindings", () => {
     expect(posted?.indexOf("Seat rewrite.")).toBeLessThan(posted?.indexOf(MINOR_HEADING) ?? 0);
   });
 
+  it("replaces a seat body's added dependencies section from the current allowance", async () => {
+    allowRunDependencies(
+      store,
+      R.id,
+      ["package.json"],
+      [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }],
+    );
+    markDependenciesAdded(store, R.id, [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }]);
+    answer(
+      JSON.stringify({
+        headRefName: BRANCH,
+        state: "OPEN",
+        body: "Seat rewrite.\n\n## Added dependencies\n\n- `old-package` 1.0.0, licence ISC\n\nCloses #7.\n",
+      }),
+    );
+    await createPublisher(deps()).postMinorFindings(R, review([minor("first")]));
+    expect(posted).toContain("Seat rewrite.");
+    expect(posted).toContain("- `hyparquet` 1.33.2, licence MIT");
+    expect(posted).not.toContain("old-package");
+    expect(posted?.match(/## Added dependencies/g)).toHaveLength(1);
+  });
+
   it("gives a seat's body Part of, not Closes, once a later note says Part of", async () => {
     store.addEvidence(R.id, "Part of #7: stage 2.", START + 1000);
     answer(
@@ -2600,6 +2755,27 @@ describe("merge steps", () => {
         "merge-base": `${BASE}\n`,
         "rev-list": `${SHA}\n`,
         diff: "src/a.ts\0docs/b.md\0package.json\0",
+      };
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({
+        facts: { strays: ["docs/b.md"] },
+      });
+    });
+
+    it("leaves the files of the run's dependency allowance out of the strays", async () => {
+      store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
+      allowRunDependencies(
+        store,
+        R.id,
+        ["package.json", "pnpm-lock.yaml"],
+        [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }],
+      );
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [HAVE_MAIN]: "",
+        [ANCESTOR]: "",
+        "merge-base": `${BASE}\n`,
+        "rev-list": `${SHA}\n`,
+        diff: "src/a.ts\0docs/b.md\0package.json\0pnpm-lock.yaml\0",
       };
       expect(await withArea().gateFacts(R, SHA)).toMatchObject({
         facts: { strays: ["docs/b.md"] },

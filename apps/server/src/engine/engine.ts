@@ -34,6 +34,8 @@ import {
   CI_FAILED_EVENT_PREFIX,
   CI_FAILED_TEXT,
   CI_PASSED_EVENT_PREFIX,
+  CI_RELAY_LOOKBACK_MS,
+  CI_RELAY_RECOVER_MS,
   CI_RERUN_FAILED_EVENT_PREFIX,
   CI_RERUN_FAILED_TEXT,
   COMMS_MC,
@@ -176,7 +178,8 @@ import type { Move, MoveResult } from "../github/board.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
-import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
+import { REPO_BOT_SEAT, repoBotVerdict } from "../review/repo-bot.ts";
+import { type RelayRecovery, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { wakeDueAsideRun } from "./aside.ts";
@@ -243,6 +246,13 @@ export function ciNoticeText(sha: string, excerpt: string, repo: string, again: 
 /** What `ciExcerpt` says when it has no excerpt to give: not kept, but asked for again. */
 const NOT_EXCERPTS = [NO_FAILED_RUN, CI_LOG_UNREADABLE, EMPTY_LOG];
 
+/** The loop event's opening for each stale state `recoverRelay` put right. */
+const RELAY_RECOVERED_TEXT: Record<RelayRecovery, (call: string) => string> = {
+  owner: (call) => `${call}'s seat row named another run; set it back`,
+  attach: (call) => `${call}'s attach never finished; finished it`,
+  turn: (call) => `${call}'s turn from before the failure was still open; interrupted it`,
+};
+
 /** An ended run's loop is still reconciled for this long after the end. */
 export const ENDED_RECONCILE_MS = 7 * 24 * 60 * 60_000;
 /** A pass that changed what the next one acts on runs again at once, up to this many times. */
@@ -260,6 +270,8 @@ export interface EngineDeps {
     | "resumeDeferredRuns"
     | "seat"
     | "seatFacts"
+    | "recoverRelay"
+    | "strandedWorktree"
     | "endRunByEngine"
     | "startReview"
     | "busy"
@@ -694,6 +706,106 @@ export function createEngine(deps: EngineDeps): Engine {
       }
     }
     return sent;
+  }
+
+  /**
+   * A CI failure on the run's pushed sha, owed to its seat and still unsent CI_RELAY_RECOVER_MS
+   * after it was recorded: something holds the line back. A seat another live run holds is left
+   * to it, and this run set aside with its wake due, to come back by the usual hand-back.
+   * Otherwise the supervisor puts right what is stale on the seat's live session (its row naming
+   * no run, an attach that never finished, a turn whose end was missed), so this pass plans the
+   * line as usual.
+   */
+  async function recoverCiRelay(run: Run, loop: RunLoop, at: number): Promise<void> {
+    const sha = loop.ciFailedSha;
+    if (
+      sha === null ||
+      loop.phase !== "working" ||
+      loop.hold?.worktree ||
+      loop.relayedSha === sha ||
+      store.runPush(run.id)?.sha !== sha ||
+      `ci:${run.id}:${sha}` in store.claimedKeys(run.id)
+    )
+      return;
+    const failedAt = store
+      .loopEvents(at - CI_RELAY_LOOKBACK_MS, run.repoId)
+      .filter(
+        (e) =>
+          e.runId === run.id &&
+          e.text.startsWith(`${CI_FAILED_EVENT_PREFIX}${sha.slice(0, 7)}`) &&
+          !e.key.includes(":rerun:"),
+      )
+      .reduce((n, e) => Math.max(n, e.at), 0);
+    if (failedAt === 0 || at - failedAt < CI_RELAY_RECOVER_MS) return;
+    const row = store.seatSession(run.agentId);
+    if (row === null) return;
+    // a seat another live run holds is not taken from it: this run is set aside where its own
+    // worktree is, with its wake due, and comes back by the usual hand-back
+    const holder = row.runId === null || row.runId === run.id ? null : store.run(row.runId);
+    if (holder !== null && holder.endedAt === null) {
+      const worktree = await supervisor.strandedWorktree?.(run.id).catch(() => null);
+      if (!worktree) return;
+      loop.hold = leaveSeat(loop.hold, worktree, true);
+      store.setRunLoop(run.id, loop);
+      store.addLoopEvent(
+        `${run.id}:relay-aside:${sha}`,
+        run.id,
+        `${seatCallSign(run.agentId)}'s seat is on ${holder.ticket ?? holder.id}; set this run aside to come back for the failure on ${sha.slice(0, 7)}`,
+        at,
+      );
+      return;
+    }
+    // a dialog is FLIGHT's to answer; a turn begun since the failure may be the seat's own work
+    if (row.state === "needs-input" || (row.lastTurnStartedAt ?? 0) >= failedAt) return;
+    let put: RelayRecovery | null = null;
+    try {
+      put = (await supervisor.recoverRelay?.(run.agentId, run.id, failedAt)) ?? null;
+    } catch (e) {
+      log(
+        `${run.id}: could not recover the CI line: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    if (put !== null)
+      store.addLoopEvent(
+        `${run.id}:relay-${put}:${sha}`,
+        run.id,
+        `${RELAY_RECOVERED_TEXT[put](seatCallSign(run.agentId))} to send the failure on ${sha.slice(0, 7)}`,
+        at,
+      );
+  }
+
+  /**
+   * A red PR may need its seat back while a later run holds it. The holder only leaves between
+   * turns; its own wake stays due, behind the older CI repair, so it can carry on afterwards.
+   */
+  async function yieldCiRelayHolder(holder: Run, red: Run, at: number): Promise<boolean> {
+    const loop = holder.loop;
+    const row = supervisor.seat(holder.agentId);
+    if (
+      loop === null ||
+      loop === undefined ||
+      loop.phase !== "working" ||
+      loop.hold?.worktree ||
+      row?.runId !== holder.id ||
+      row.worktree === null ||
+      supervisor.seatFacts(holder.agentId)?.inTurn
+    )
+      return false;
+    const before = loop.hold;
+    const next = { ...loop, hold: leaveSeat(before, row.worktree, true) };
+    store.setRunLoop(holder.id, next);
+    const aside = await supervisor.setAside(holder.id);
+    if (aside === null) {
+      store.setRunLoop(holder.id, loop);
+      return false;
+    }
+    store.addLoopEvent(
+      `${holder.id}:relay-yield:${red.id}:${red.loop?.ciFailedSha ?? ""}`,
+      holder.id,
+      `${seatCallSign(holder.agentId)} yielded its seat for the CI failure on ${red.ticket ?? red.id}`,
+      at,
+    );
+    return true;
   }
 
   /**
@@ -1146,6 +1258,7 @@ export function createEngine(deps: EngineDeps): Engine {
       // a question FLIGHT passed to the operator: the run waits off its seat for the answer
       operatorAsk: store.openQuestions().some((q) => q.runId === run.id && q.passedAt !== null),
       ...(run.profile ? { limits: profileLimits(run.profile.profile) } : {}),
+      repoBotReview: repo?.review !== undefined,
     };
   }
 
@@ -1766,8 +1879,6 @@ export function createEngine(deps: EngineDeps): Engine {
         );
         return;
       case "request-review": {
-        const reviewer = reviewerFor(run);
-        if (reviewer === null) return;
         if (cur.prNumber === null) {
           log(`${run.id}: no PR number to review`);
           return;
@@ -1777,6 +1888,68 @@ export function createEngine(deps: EngineDeps): Engine {
           out.parked = true;
           return;
         }
+        const repo = config.repos.find((candidate) => candidate.id === run.repoId);
+        const pr = findPr(run, cur);
+        if (repo?.review !== undefined) {
+          if (pr === null || pr.headSha !== a.sha) return;
+          const verdict = repoBotVerdict(repo.review, pr);
+          if (verdict === "pending") return;
+          const round =
+            1 +
+            store
+              .reviewsOfRun(run.id)
+              .filter((r) => r.epoch === cur.epoch && r.state === "reported" && r.blocking > 0)
+              .length;
+          const id = store.requestReview({
+            authorRunId: run.id,
+            repoId: run.repoId,
+            seatId: REPO_BOT_SEAT,
+            prNumber: cur.prNumber,
+            sha: a.sha,
+            epoch: cur.epoch,
+            attempt: a.attempt,
+            round,
+            at,
+          });
+          if (id === null) return;
+          const botRun = `${REPO_BOT_SEAT}:${run.id}:${a.sha}`;
+          store.setReviewState(id, ["queued"], "running", { at, runId: botRun });
+          const detail = pr.repoBotReview?.findings ?? [];
+          const checkUrl = (pr.checks ?? []).find(
+            (check) => check.name === repo.review?.check,
+          )?.url;
+          const changes: ReviewFinding[] =
+            detail.length > 0
+              ? detail.map((finding) => ({ ...finding, severity: "Important", category: "spec" }))
+              : [
+                  {
+                    severity: "Important",
+                    file: ".github/workflows",
+                    line: 0,
+                    summary: `The ${repo.review.check} review bot did not approve this head.`,
+                    scenario: checkUrl
+                      ? `The repository bot check failed. Details: ${checkUrl}`
+                      : "The repository's configured review bot is the review gate for this PR.",
+                    fix: "Address the bot's review, push a new commit, and report the result.",
+                    category: "spec",
+                  },
+                ];
+          store.recordFindings(id, botRun, {
+            verdict:
+              verdict === "approved"
+                ? { spec: "pass", quality: "pass" }
+                : { spec: "fail", quality: "pass" },
+            summary:
+              verdict === "approved"
+                ? `${repo.review.check} approved this head.`
+                : `${repo.review.check} requested changes on this head.`,
+            findings: verdict === "approved" ? [] : changes,
+            at,
+          });
+          return;
+        }
+        const reviewer = reviewerFor(run);
+        if (reviewer === null) return;
         // a settle starts a new epoch. Only the epoch a FLIGHT rework grant covers counts the rounds
         // across epochs (the granted review is the next round, and a fail past it parks again);
         // every other epoch counts its own
@@ -1899,8 +2072,11 @@ export function createEngine(deps: EngineDeps): Engine {
               holder !== null &&
               holder !== run.id &&
               store.run(holder)?.loop?.phase === "working"
-            )
+            ) {
+              const held = store.run(holder);
+              if (held !== null && (await yieldCiRelayHolder(held, run, at))) out.again = true;
               void reconcileRun(holder);
+            }
             return;
           }
           wakeRetries.delete(run.id);
@@ -2441,6 +2617,7 @@ export function createEngine(deps: EngineDeps): Engine {
         log(`${runId}: moving the worktree failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+    if (run.endedAt === null) await recoverCiRelay(run, input, at);
     const snap = snapshot(run, input, at, mergeAllowed);
     // a commit on top of the seat's push (a main merge, a doc edit): the PR head follows the push
     if (

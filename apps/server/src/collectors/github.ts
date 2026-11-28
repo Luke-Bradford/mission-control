@@ -215,6 +215,10 @@ export const PR_FILES_MAX = 100;
 
 /** A PR head's checks read per poll; a required check past them reads as missing. */
 export const PR_CHECKS_MAX = 50;
+/** Reviews read for each PR list entry; enough for the configured bot's current-head verdict. */
+const PR_REVIEWS_MAX = 50;
+/** Inline comments read for each review; enough to show the configured bot's findings. */
+const PR_REVIEW_COMMENTS_MAX = 20;
 /** The head commit's rollup: its state and each check run or commit status by name. */
 export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { id name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { runAttempt workflow { name } } } } ... on StatusContext { context state description targetUrl } } } }`;
 
@@ -226,6 +230,8 @@ const PR_FIELDS = `
         author { login }
         assignees(first: 10) { nodes { login } }
         closingIssuesReferences(first: 100) { nodes { number repository { nameWithOwner } } }
+        comments(first: 100) { nodes { author { login } body url } }
+        reviews(first: ${PR_REVIEWS_MAX}) { nodes { author { login } state body url commit { oid } comments(first: ${PR_REVIEW_COMMENTS_MAX}) { nodes { path line body url } } } }
         commits(last: 1) { nodes { commit { oid ${CHECK_CONTEXTS} } } }
       `;
 
@@ -1149,6 +1155,116 @@ export function parseChecks(rollup: unknown): PrCheck[] {
   return out;
 }
 
+function botFindings(
+  review: Record<string, unknown>,
+): NonNullable<PullRequestView["repoBotReview"]>["findings"] {
+  const comments = path(review, "comments", "nodes");
+  if (!Array.isArray(comments)) return [];
+  return comments.flatMap((comment) => {
+    if (!isObj(comment) || typeof comment.path !== "string" || comment.path === "") return [];
+    const body = str(comment.body, "").trim();
+    const [first = "Repository bot requested a change.", ...rest] = body.split("\n");
+    return [
+      {
+        file: comment.path,
+        line: typeof comment.line === "number" && comment.line > 0 ? comment.line : 0,
+        summary: first.slice(0, 500),
+        scenario: (rest.join("\n").trim() || body || "The repository bot found a problem.").slice(
+          0,
+          1000,
+        ),
+        fix: body.slice(0, 2000) || "Address the repository bot's comment.",
+      },
+    ];
+  });
+}
+
+function commentVerdict(body: string): "approved" | "changes" | null {
+  const text = body.toLowerCase();
+  const rejectionText = text.replaceAll("no issues found", "").replaceAll("no findings", "");
+  if (
+    /\b(not approved|changes? requested|request changes|issues? found|needs? changes)\b/.test(
+      rejectionText,
+    )
+  ) {
+    return "changes";
+  }
+  if (/\b(no issues found|no findings|approved|looks good)\b/.test(text)) return "approved";
+  return null;
+}
+
+/** The configured bot's newest exact-head review, never GitHub's aggregate review decision. */
+function repoBotReview(
+  repo: CcConfig["repos"][number],
+  n: Record<string, unknown>,
+  headSha: string | null,
+): PullRequestView["repoBotReview"] {
+  const policy = repo.review;
+  if (policy?.verdict !== "comment" || headSha === null) return null;
+  const reviews = path(n, "reviews", "nodes");
+  if (!Array.isArray(reviews)) return null;
+  const review = reviews.findLast(
+    (candidate) =>
+      isObj(candidate) &&
+      str(path(candidate, "author", "login"), "") === policy.actor &&
+      str(path(candidate, "commit", "oid"), "") === headSha &&
+      ["APPROVED", "CHANGES_REQUESTED"].includes(str(candidate.state, "")),
+  );
+  if (!isObj(review)) return null;
+  const verdict = review.state === "APPROVED" ? "approved" : "changes";
+  const findings = botFindings(review);
+  if (verdict === "changes" && findings.length === 0) {
+    const body = str(review.body, "").trim();
+    findings.push({
+      file: ".github/pull-request",
+      line: 0,
+      summary: "The repository bot requested changes.",
+      scenario: body || "The configured repository bot requested changes on this head.",
+      fix: body || "Address the repository bot's review and push a new commit.",
+    });
+  }
+  return { actor: policy.actor, sha: headSha, verdict, findings };
+}
+
+function repoBotComment(
+  repo: CcConfig["repos"][number],
+  n: Record<string, unknown>,
+  headSha: string | null,
+): PullRequestView["repoBotReview"] {
+  const policy = repo.review;
+  if (policy?.verdict !== "comment" || headSha === null) return null;
+  const comments = path(n, "comments", "nodes");
+  if (!Array.isArray(comments)) return null;
+  const comment = comments.findLast((candidate) => {
+    if (!isObj(candidate) || str(path(candidate, "author", "login"), "") !== policy.actor)
+      return false;
+    return (
+      str(candidate.body, "").includes(headSha) && commentVerdict(str(candidate.body, "")) !== null
+    );
+  });
+  if (!isObj(comment)) return null;
+  const body = str(comment.body, "").trim();
+  const verdict = commentVerdict(body);
+  if (verdict === null) return null;
+  return {
+    actor: policy.actor,
+    sha: headSha,
+    verdict,
+    findings:
+      verdict === "changes"
+        ? [
+            {
+              file: ".github/pull-request",
+              line: 0,
+              summary: "The repository bot requested changes.",
+              scenario: body,
+              fix: "Address the repository bot's review and push a new commit.",
+            },
+          ]
+        : [],
+  };
+}
+
 function mapPr(
   repo: CcConfig["repos"][number],
   n: Record<string, unknown>,
@@ -1170,6 +1286,7 @@ function mapPr(
   const rollup = path(n, "commits", "nodes");
   const last = Array.isArray(rollup) ? rollup[0] : undefined;
   const headOid = path(last, "commit", "oid");
+  const headSha = typeof headOid === "string" && headOid !== "" ? headOid : null;
   const checks = parseChecks(path(last, "commit", "statusCheckRollup"));
   return {
     repoId: repo.id,
@@ -1185,13 +1302,21 @@ function mapPr(
     state: lookup(PR_STATES, n.state) ?? "closed",
     isDraft: n.isDraft === true,
     review: lookup(REVIEWS, n.reviewDecision),
-    ci: ciVerdict(checks, repo.requiredChecks ?? []).ci,
+    // A configured repository bot is its own review gate. Its failed check must reach the author
+    // as review findings, rather than parking the run as an ordinary CI failure.
+    ci: ciVerdict(
+      repo.review === undefined
+        ? checks
+        : checks.filter((check) => check.name !== repo.review?.check),
+      (repo.requiredChecks ?? []).filter((check) => check !== repo.review?.check),
+    ).ci,
     checks,
     createdAt: ms(n.createdAt),
     updatedAt: ms(n.updatedAt),
     mergedAt: typeof n.mergedAt === "string" ? ms(n.mergedAt) : null,
     mergeCommitSha: str(path(n, "mergeCommit", "oid"), "") || null,
-    headSha: typeof headOid === "string" && headOid !== "" ? headOid : null,
+    headSha,
+    repoBotReview: repoBotReview(repo, n, headSha) ?? repoBotComment(repo, n, headSha),
     mergeable: lookup(MERGEABLE, n.mergeable),
     isCrossRepository: typeof n.isCrossRepository === "boolean" ? n.isCrossRepository : null,
     author: str(path(n, "author", "login"), "") || null,

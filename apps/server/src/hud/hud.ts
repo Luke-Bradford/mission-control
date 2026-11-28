@@ -8,9 +8,11 @@ import { createHash } from "node:crypto";
 import {
   type AgentView,
   ATTENTION_KINDS,
+  type AttentionHold,
   type AttentionItem,
   type AttentionOwner,
   agentState,
+  answeredItem,
   type BoardItem,
   CI_TRIES,
   COMMS_CAPCOM,
@@ -92,6 +94,7 @@ import {
   protectedDecisionItem,
   questionAskAt,
 } from "../attention/holds.ts";
+import { holds } from "../attention/holds-read.ts";
 import { confirmedResumeAfter, pendingRunApproval } from "../attention/subjects.ts";
 import { briefReadState, briefSourceRevision } from "../brief/source.ts";
 import { claudeVersion } from "../cli/version.ts";
@@ -1000,12 +1003,12 @@ export const FLIGHT_ASKED_AGAIN =
  * decision here (raise a spend ceiling), and its note names that decision (core `budgetDecisionText`).
  * An "account" hold is still classed with the budget one: nothing in this build creates it, so this
  * only keeps a hold stored by an older hub as the operator's until its run is resumed or ended.
+ * The hub's news about what it is putting right (`HUB_STOP_KEYS`) is not one: it asks the operator
+ * nothing, so it goes to FLIGHT like any other note (#2285).
  */
 export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
   if (sessionNote(item)) return true;
-  // hub alerts the hub puts right itself and tells the operator about: machine capacity, the CLI
-  if (HUB_STOP_KEYS.some((k) => item.key === k || item.key.startsWith(`${k}:`))) return true;
   if (item.kind !== "blocked") return false;
   const park = noteParkOf(item, store);
   return park === "budget" || park === "account";
@@ -1022,8 +1025,8 @@ const sessionNote = (item: Pick<AttentionItem, "key">): boolean =>
  * (cli/update.ts, retried on a timer), the CLI auto-rollback (cli/auto.ts: the hub rolled back and
  * keeps the bad version held until a newer one appears; a rollback that failed is retried on each
  * pass) and a seat's focus import (instructions/notices.ts, retried every
- * INSTRUCTION_FOCUS_RETRY_MS). None holds the operator's click as its only way out.
- * hud.test.ts pins them to those modules' keys.
+ * INSTRUCTION_FOCUS_RETRY_MS). None holds the operator's click as its only way out, so none is on
+ * Needs you: they are FLIGHT's (#2285). hud.test.ts pins them to those modules' keys.
  */
 export const HUB_STOP_KEYS = [
   `${NOTE_KEY}machine-capacity`,
@@ -1256,6 +1259,8 @@ export function attentionItems(
   /** The hub's own `gh` login, to tell another login's draft PRs from its own; null when unread. */
   hubLogin: string | null = null,
   includeHeld = false,
+  /** Keep stale items (#2285): the hub's question sweep closes them and tells their seats. */
+  includeStale = false,
 ): AttentionItem[] {
   // no caller's rows: the summary crew, since attention never reads the event timelines
   const given = rows ?? crew(config, store, now, lock, undefined, true).rows;
@@ -1263,8 +1268,16 @@ export function attentionItems(
   return memoised(
     store,
     now,
-    ["attention", config, lock, origin?.token ?? identityOf(given), hubLogin, includeHeld],
-    () => buildAttentionItems(config, store, now, lock, given, hubLogin, includeHeld),
+    [
+      "attention",
+      config,
+      lock,
+      origin?.token ?? identityOf(given),
+      hubLogin,
+      includeHeld,
+      includeStale,
+    ],
+    () => buildAttentionItems(config, store, now, lock, given, hubLogin, includeHeld, includeStale),
     origin,
   ).value;
 }
@@ -1277,6 +1290,7 @@ function buildAttentionItems(
   rows: CrewRow[],
   hubLogin: string | null,
   includeHeld: boolean,
+  includeStale: boolean,
 ): AttentionItem[] {
   const acks = store.acks();
   const briefs = store.briefs();
@@ -1552,12 +1566,17 @@ function buildAttentionItems(
     ...(triageDueAt === undefined ? {} : { triageDueAt }),
   });
   const closures = store.closedItemKeys();
+  const held = holds(store);
   const currentBrief = (i: OwnedItem) => {
     const saved = briefs.get(i.key);
     // Retain automatic hub briefs as history, without exposing them as operator questions.
     const legacyCommsBrief =
       i.key.startsWith(COMMS_OPEN_PREFIX) && saved?.by === "hub" && saved.for !== "flight";
+    // an operator brief expires after 14 days (#2285): FLIGHT asks again if it still matters
+    const expired =
+      saved !== undefined && saved.for !== "flight" && now - saved.at >= STALE_ITEM_MS;
     return legacyCommsBrief ||
+      expired ||
       (saved && store.choice(i.key, saved.at)) ||
       (saved && saved.at < i.at && (i.key.startsWith(NOTE_KEY) || saved.for === "flight"))
       ? undefined
@@ -1746,6 +1765,8 @@ function buildAttentionItems(
   const result: AttentionItem[] = items
     // the watch's FLIGHT-down notes are the not-triaging item's reason, never items of their own
     .filter((i) => !FLIGHT_DOWN_ITEMS.has(i.key))
+    // stale items are settled on load (#2285): nobody can act on them now
+    .filter((i) => includeStale || !staleItem(i, store, now, held))
     // A presentation refresh cannot reopen an operator-cleared ask. A new ask has its own time.
     .filter(
       (i) =>
@@ -1803,7 +1824,36 @@ function buildAttentionItems(
           config.operator.timezone,
           config.operator.locale ?? DEFAULT_LOCALE,
         );
-  return includeHeld ? [...shown, ...partition.held] : shown;
+  // an applied answer settles its item (#2285); the sweeps (`includeHeld`) still read it, so the
+  // Answered sweep can record it
+  return includeHeld ? [...shown, ...partition.held] : shown.filter((i) => !answeredItem(i));
+}
+
+/** How old an item may grow before it is settled on load (#2285). */
+export const STALE_ITEM_MS = 14 * 24 * 3_600_000;
+
+/** Live states and hub alerts: they clear when their cause does, however old they are. */
+const LIVE_KINDS: readonly AttentionItem["kind"][] = ["stalled", "error", "lock", "ratelimit"];
+
+/**
+ * Whether an item is past acting on (#2285): raised 14 days ago or more, or about a ticket the
+ * board has seen closed, whenever it closed. A hub alert or a live state is never stale.
+ */
+function staleItem(
+  item: OwnedItem,
+  store: Store,
+  now: number,
+  held: Record<string, AttentionHold>,
+): boolean {
+  if (LIVE_KINDS.includes(item.kind) || needsYouAlert(item) || hubAlert(item, store)) return false;
+  // a hold is a decision to wait: never stale while it stands, its age counted from its release
+  const hold = held[item.key];
+  if (hold !== undefined && hold.at >= item.at && hold.releasedAt === undefined) return false;
+  const since = Math.max(item.at, hold?.releasedAt ?? 0);
+  if (since > 0 && now - since >= STALE_ITEM_MS) return true;
+  const ref = item.ticket === null ? null : parseTicket(item.ticket);
+  const card = ref === null ? null : store.boardItem(ref.repoId, ref.number);
+  return card?.closed === true;
 }
 
 /**
@@ -1842,8 +1892,9 @@ function withNotTriaging(
   const item: AttentionItem = {
     key: FLIGHT_NOT_TRIAGING_KEY,
     kind: "blocked",
-    // FLIGHT live but late on a wake is its own watch's business; down or stopped is the operator's
-    owner: cause === "late" ? OWNER_FLIGHT : OWNER_OPERATOR,
+    // it counts FLIGHT's own queue, which the operator cannot answer: FLIGHT's, whatever the cause
+    // (#2285). FLIGHT's page shows when FLIGHT is down or stopped.
+    owner: OWNER_FLIGHT,
     agentId: triage.flightId,
     repoId: triage.repoId,
     text: flightNotTriagingText(

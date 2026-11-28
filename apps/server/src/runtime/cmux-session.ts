@@ -32,7 +32,8 @@ import { pidAlive } from "./keeper.ts";
 import { type CrewSession, SessionControlError } from "./session.ts";
 
 /** The hub's record of a run's workspace: `{"workspace": uuid, "pid": n | null}`. */
-export const cmuxWorkspaceKey = (runId: string) => `cmux.workspace:${runId}`;
+export const CMUX_WORKSPACE_PREFIX = "cmux.workspace:";
+export const cmuxWorkspaceKey = (runId: string) => `${CMUX_WORKSPACE_PREFIX}${runId}`;
 /** How far the hub has read Claude's transcript for a run, kept after its workspace closes (a resume needs it). */
 export const cmuxSourceKey = (runId: string) => `cmux.source:${runId}`;
 /** Set while a Claude run is on the keeper because cmux was down or refused the hub at its start. */
@@ -318,8 +319,6 @@ export interface CmuxSessionInput {
   claudeConfigDir?: string;
   /** The node that runs the hub's own tools: its folder goes first on PATH. */
   nodeDir?: string;
-  /** Workspace ids other runs hold: not this run's. */
-  taken?: () => ReadonlySet<string>;
   /** A durable seat workspace. Claude is launched in its existing terminal and it stays after exit. */
   workspace?: string;
   /** Called once the workspace exists and again once Claude's pid is known; and when it is closed (null). */
@@ -464,12 +463,26 @@ function createCmuxDriver(
     i.save?.({ workspace, pid, source: { path: source, lines: sourceLines } });
   }
 
-  /** The Claude process is gone: a per-run workspace closes; a durable seat workspace stays idle. */
-  async function gone(reason: string): Promise<void> {
-    if (workspace !== "" && i.workspace === undefined) {
-      await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
+  /**
+   * Closes a per-run workspace and forgets it; a durable seat workspace stays open and idle. One cmux
+   * will not close stays saved, so the run's end or restart closes it: a seat never leaves a bare
+   * shell behind under its name. `always` closes a durable one too (a Claude the hub did not start runs in it).
+   */
+  async function closeWorkspace(always = false): Promise<void> {
+    if (workspace !== "" && (always || i.workspace === undefined)) {
+      try {
+        await i.cmux.close(workspace);
+      } catch (e) {
+        log(`${i.name}: close failed: ${e}`);
+        return;
+      }
     }
     i.save?.(null);
+  }
+
+  /** The Claude process is gone: a per-run workspace is closed (if cmux still has it) and forgotten, then the exit. */
+  async function gone(reason: string): Promise<void> {
+    await closeWorkspace();
     end({ reason });
   }
 
@@ -732,8 +745,7 @@ function createCmuxDriver(
       if (seen !== undefined && seen.pid !== null && pid !== null && seen.pid !== pid) {
         // cmux restored the agent without the hub's settings: closed, and resumed with the hub's command
         log(`${i.name}: cmux restored Claude under a new process; closing it`);
-        await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
-        i.save?.(null);
+        await closeWorkspace(true);
         return end({ retake: true, reason: "cmux restored the agent without the hub's settings" });
       }
       if (pid !== null && !pidAlive(pid)) return await gone(CMUX_ENDED);
@@ -1011,15 +1023,12 @@ function createCmuxDriver(
     async close() {
       if (!finished && !closing) {
         closing = true;
-        if (workspace !== "" && i.workspace === undefined) {
-          await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
-        }
+        await closeWorkspace();
         // closed before Claude was up: its launcher may be mid-start, so it is stopped, then its files go
         if (!readyYet) {
           await stopLaunched();
           removeLaunchFiles();
         }
-        i.save?.(null);
         end({});
       }
       return exited;
@@ -1101,7 +1110,6 @@ export function startCmuxSession(i: CmuxSessionInput): CrewSession {
           name: i.name,
           cwd: i.cwd,
           command: quote(script),
-          ...(i.taken === undefined ? {} : { exclude: i.taken() }),
         }));
       i.save?.({ workspace, pid: null });
       if (i.workspace !== undefined)

@@ -52,7 +52,7 @@ let root: string;
 let stateFile: string;
 /** What fake-cmux.mjs keeps (see its header); a test reads a field only once the fake has made it. */
 interface FakeState {
-  workspaces: { id: string; name: string; cwd: string; command: string }[];
+  workspaces: { id: string; ref?: string; name: string; cwd?: string; command?: string }[];
   sessions: {
     session_id: string;
     lifecycle: string;
@@ -200,15 +200,36 @@ describe("createCmux", () => {
     });
     const cmux = fake();
     const first = await cmux.newWorkspace({ name: "n", cwd: root, command: "x" });
-    const second = await cmux.newWorkspace({
-      name: "n",
-      cwd: root,
-      command: "x",
-      exclude: new Set([first]),
-    });
+    const second = await cmux.newWorkspace({ name: "n", cwd: root, command: "x" });
     expect(second).not.toBe(first);
+    const ids = state().workspaces.map((w) => w.id);
+    expect([first, second]).toEqual(ids);
+  });
+
+  it("binds to the workspace new-workspace named, never a stale one of the same name", async () => {
+    patch((s) => {
+      s.autoClaude = false;
+      // the old FLIGHT workspace: still open, its Claude gone, a bare shell left
+      s.workspaces = [{ id: STALE, ref: "workspace:1", name: "flight-1 · FLIGHT" }];
+    });
+    const made = await fake().newWorkspace({ name: "flight-1 · FLIGHT", cwd: root, command: "x" });
+    expect(made).not.toBe(STALE);
+    expect(state().workspaces.find((w) => w.id === made)?.name).toBe("flight-1 · FLIGHT");
+  });
+
+  it("fails rather than guess when new-workspace names no workspace", async () => {
+    patch((s) => {
+      s.autoClaude = false;
+      s.workspaces = [{ id: STALE, ref: "workspace:1", name: "n" }];
+      s.hideWorkspaces = true;
+    });
+    await expect(
+      fake({ findWaitMs: 300 }).newWorkspace({ name: "n", cwd: root, command: "x" }),
+    ).rejects.toBeInstanceOf(CmuxError);
   });
 });
+
+const STALE = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 
 interface Harness {
   session: CrewSession;
@@ -456,6 +477,22 @@ describe("startCmuxSession", () => {
     await h.session.close();
   });
 
+  it("with a stale same-named workspace open, messages reach the new start's Claude", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.workspaces = [{ id: STALE, ref: "workspace:1", name: "writer-1 · repo#1" }];
+    });
+    const h = start();
+    await h.session.ready;
+    h.session.send("hello there");
+    await wait(() => (state().sent ?? []).length === 1);
+    const made = state().workspaces.find((w) => w.id !== STALE)?.id;
+    expect(state().sent[0]?.ws).toBe(made);
+    expect(h.saved[0]).toEqual({ workspace: made, pid: null });
+    expect((state().keys ?? []).every((k) => k.ws !== STALE)).toBe(true);
+    await h.session.close();
+  });
+
   it("holds a message while a dialog is open, and never forces it", async () => {
     patch((s) => {
       s.claudePid = ALIVE;
@@ -588,6 +625,24 @@ describe("startCmuxSession", () => {
     patch((s) => {
       s.sessions = [];
     });
+  });
+
+  it("keeps the workspace saved when Claude has exited and cmux will not close it", async () => {
+    const claude = launched();
+    patch((s) => {
+      s.claudePid = claude;
+    });
+    const h = start();
+    await h.session.ready;
+    patch((s) => {
+      s.noClose = true;
+    });
+    process.kill(claude, "SIGKILL");
+    await wait(() => h.events.some((e) => e.kind === "exit"));
+    expect(h.events.find((e) => e.kind === "exit")).toMatchObject({ reason: CMUX_ENDED });
+    // still saved: the run's end or restart closes it, so no bare shell is left behind
+    expect(h.saved.at(-1)).toEqual({ workspace: h.workspace(), pid: claude });
+    expect(state().workspaces.map((w) => w.id)).toEqual([h.workspace()]);
   });
 
   it("keeps the run when cmux drops the record while Claude runs in its open workspace", async () => {

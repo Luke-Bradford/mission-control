@@ -21,9 +21,12 @@ import { DEMO_PLAIN_KEY, demoArriving } from "../../test/demoNeeds.ts";
 import {
   boardItems,
   commsMessage,
-  DEMO_REPO,
+  DEMO_CONFIGURED_REPOS,
   DEMO_TICKETS,
   type DemoTicket,
+  demoRepoForTicket,
+  demoTicketRef,
+  demoTicketsForRepo,
   openPrs,
   pipelineStages,
   prFlowView,
@@ -94,6 +97,9 @@ const wholeMinutes = (ms: number): number => Math.round(ms / 60_000) * 60_000;
 /** Harness only: play the scene a seed names. The next scene to start uses it. */
 export function setSceneSeed(value: number | undefined): void {
   sceneSeed = value;
+  // The opening scene and its initial day share one seed. Reset both for browser tests that
+  // compare seeds and for switching a seeded Demo link without reloading the app bundle.
+  seed = undefined;
   state = undefined;
 }
 
@@ -102,8 +108,8 @@ const startingSeed = (): number =>
   sceneSeed ?? seedFromSearch((globalThis as SearchHolder).location?.search ?? "");
 
 function fresh(loops = 0): DemoState {
-  seed ??= demoSeed();
   const base = startingSeed();
+  seed ??= demoSeed(base);
   const rng = seeded(base + loops);
   // A whole number of minutes, so the per-minute token buckets still start on minute marks.
   const api = shiftTimes(seed.api, NOW, wholeMinutes(Date.now() - NOW));
@@ -337,30 +343,43 @@ function moveTicket(s: DemoState, at: number, move: (typeof TICKET_MOVES)[number
   ticket.stage = move.to;
   ticket.seat = move.seat ?? (move.to === "merged" ? null : ticket.seat);
   const shift = wholeMinutes(Date.now() - NOW);
-  summaryOf(s).pipeline = pipelineStages(s.tickets).map((stage) => ({
+  summaryOf(s).pipeline = pipelineStages(s.tickets, demoRepoForTicket).map((stage) => ({
     ...stage,
     oldestAt: stage.count ? at - 40 * 60_000 : null,
     cards: stage.cards.map((c) => ({ ...c, since: at - 60_000 })),
   }));
-  s.api[`/api/boards/${DEMO_REPO}`] = boardItems(s.tickets).map((item) => ({
-    ...item,
-    updatedAt: item.issueNumber === move.n ? at : item.updatedAt + shift,
-    createdAt: item.createdAt + shift,
-  }));
-  const prs = openPrs(s.tickets).map((pr) => ({ ...pr, updatedAt: at }));
-  s.api[`/api/repos/${DEMO_REPO}/prs?linked=1&shape=summary`] = prs;
-  s.api[`/api/repos/${DEMO_REPO}/prs`] = prs;
-  s.api["/api/prs/flow"] = shiftTimes(prFlowView(s.tickets), NOW, shift);
+  for (const repoId of DEMO_CONFIGURED_REPOS) {
+    const own = demoTicketsForRepo(repoId, s.tickets);
+    const replaceRepo = <T>(value: T): T =>
+      JSON.parse(JSON.stringify(value).replaceAll("shop-app", repoId)) as T;
+    s.api[`/api/boards/${repoId}`] = replaceRepo(boardItems(own)).map((item) => ({
+      ...item,
+      updatedAt: item.issueNumber === move.n ? at : item.updatedAt + shift,
+      createdAt: item.createdAt + shift,
+    }));
+    const prs = replaceRepo(openPrs(own)).map((pr) => ({ ...pr, updatedAt: at }));
+    s.api[`/api/repos/${repoId}/prs?linked=1&shape=summary`] = prs;
+    s.api[`/api/repos/${repoId}/prs?shape=summary`] = prs;
+    s.api[`/api/repos/${repoId}/prs`] = prs;
+    for (const ownTicket of own)
+      s.api[`/api/tickets/${repoId}/${ownTicket.n}`] = replaceRepo(
+        shiftTimes(ticketHistory(ownTicket), NOW, shift),
+      );
+  }
+  s.api["/api/prs/flow"] = shiftTimes(
+    prFlowView(s.tickets, demoRepoForTicket, DEMO_CONFIGURED_REPOS),
+    NOW,
+    shift,
+  );
   // The ticket's own page, the QA queue and the seat that took it all follow the move.
-  s.api[`/api/tickets/${DEMO_REPO}/${ticket.n}`] = shiftTimes(ticketHistory(ticket), NOW, shift);
-  s.api["/api/qa/queue"] = shiftTimes(qaQueue(s.tickets), NOW, shift);
+  s.api["/api/qa/queue"] = shiftTimes(qaQueue(s.tickets, demoRepoForTicket), NOW, shift);
   if (move.to === "building" && move.seat) {
     for (const row of [
       rowsOf(s).find((r) => r.id === move.seat),
       s.api[`/api/crew/${move.seat}`] as CrewRow | undefined,
     ])
       if (row && !s.fixed.has(row.id)) {
-        row.ticket = `${DEMO_REPO}#${ticket.n}`;
+        row.ticket = demoTicketRef(ticket);
         row.ticketTitle = ticket.title;
         row.stateSince = at;
       }
@@ -369,7 +388,7 @@ function moveTicket(s: DemoState, at: number, move: (typeof TICKET_MOVES)[number
     s,
     at,
     move.seat ?? "flight-1",
-    `${DEMO_REPO}#${move.n} moved to ${move.to}`,
+    `${demoTicketRef(ticket)} moved to ${move.to}`,
     move.to === "merged" ? "merge" : "run-start",
   );
 }
@@ -461,8 +480,11 @@ function applyPrFlags(s: DemoState) {
     if (next !== undefined) s.prFlags.set(next, flag);
   }
   const lists = [
-    s.api[`/api/repos/${DEMO_REPO}/prs?linked=1&shape=summary`],
-    s.api[`/api/repos/${DEMO_REPO}/prs`],
+    ...DEMO_CONFIGURED_REPOS.flatMap((repoId) => [
+      s.api[`/api/repos/${repoId}/prs?linked=1&shape=summary`],
+      s.api[`/api/repos/${repoId}/prs?shape=summary`],
+      s.api[`/api/repos/${repoId}/prs`],
+    ]),
     (s.api["/api/qa/queue"] as { prs?: unknown[] } | undefined)?.prs,
   ];
   for (const list of lists)

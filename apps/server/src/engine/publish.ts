@@ -6,8 +6,10 @@
 import { realpath, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  ADDED_DEPENDENCIES_HEADING,
   AWAY_WRITES_REFUSED,
   type AwayDiff,
+  addedDependenciesSection,
   CI_EXCERPT_LINES,
   CI_EXCERPT_MAX,
   type CiRerun,
@@ -63,6 +65,7 @@ import {
 } from "../mcp/tools.ts";
 import { WEB_AREA_LABEL } from "../preview/review.ts";
 import { qaReportGitSummary } from "../qa/reports.ts";
+import { addedDependencies, runDependencyAllowance } from "../repo/dependency-allowance.ts";
 import { runPathGrants } from "../repo/path-grants.ts";
 import {
   adminDirOf,
@@ -389,6 +392,17 @@ const ERROR_LINE = /AssertionError|\b\w*Error:/;
 const CHECK_ERROR = /\berror TS\d+|^\d+:\d+\s+error\s/;
 /** A failed assertion's line vitest prints before its Failed Tests section. */
 const CROSS_LINE = /^[×✗✕]\s/;
+/** The time vitest prints after a `×` line's test name. */
+const DURATION_TAIL = /\s+\d+(?:\.\d+)?m?s$/;
+/** The error message vitest prints under a `×` line. */
+const ARROW_LINE = /^→\s/;
+/** A failing test as Playwright's list reporter numbers it: `1) [chromium] › e2e/a.spec.ts:12:5 › title`. */
+const PLAYWRIGHT_LINE = /^\d+\) \[[^\]]+\] › /;
+/** Playwright's reporter summary begins after a final failure's error lines. */
+const PLAYWRIGHT_SUMMARY_LINE =
+  /^(?:\d+\s+(?:failed|passed|skipped|flaky|interrupted|did not run)\b|\[[^\]]+\] › )/i;
+/** How many lines of its error follow a Playwright failure or a `×` line. */
+const TEST_ERROR_LINES = 10;
 /** A line that opens (or ends) a block of a test's console output. */
 const STREAM_LINE = /^(?:stderr|stdout) \|/;
 const BLOCK_END = /^(?:[✓×✗✕❯↓]|FAIL\b|RUN\b|Test Files|Tests\s|Duration)/;
@@ -416,8 +430,10 @@ const BIOME_HEADER = /^\S+(?::\d+:\d+)? \S+.*━{3}/;
 type JobLines = {
   /** A FAIL line with the error lines under it, or a type or lint error alone. */
   entries: string[][];
-  /** `×` lines and Biome headers, in log order. */
-  marks: string[];
+  /** `×` lines (each with the `→` lines under it) and Biome headers, in log order. */
+  marks: string[][];
+  /** Each `×` unit by its test's name, `a > adds` of `× a > adds 5ms`. */
+  crosses: Map<string, string[]>;
   /** Bare errors and console output. */
   noise: string[];
   rest: string[];
@@ -426,7 +442,7 @@ type JobLines = {
 type Group = {
   job: string;
   entries: string[][];
-  marks: string[];
+  marks: string[][];
   noise: string[];
   rest: string[];
   /** Failing lines past FAILING_LINES_MAX, not kept at all. */
@@ -444,7 +460,8 @@ const omittedText = (n: number, job: string): string =>
 
 /**
  * The part of a failed run's log a seat is shown, at most `max` bytes. Ranked across every job:
- * first each job's first failure (a FAIL name with the error lines under it, or a type error), then
+ * first each job's first failure (a FAIL name with the error lines under it, led by the same test's
+ * `×` line and its `→` lines when the log printed them, or a type error), then
  * the rest of the failures, jobs taking turns; then (only for a job without a FAIL line) its `×`
  * lines and Biome diagnostics; then bare errors and console output; then each job's last lines. A
  * job's lines keep their log order under its `[job]` label. Failing lines left out are counted in
@@ -475,15 +492,20 @@ export function ciLogBody(log: string, max: number): string {
   let sinceOpen = 0;
   let sourced = false;
   let stream = false;
+  // lines still to keep under the open Playwright failure, and under the open `×` line
+  let testLeft = 0;
+  let mark: string[] | null = null;
+  let markLeft = 0;
   let lastJob: string | null = null;
   for (const raw of log.split("\n")) {
     const m = LOG_LINE.exec(raw);
     const job = m === null ? "" : (m[1] ?? "");
     const text = (m === null ? raw : (m[2] ?? "")).trim();
     if (text === "") continue;
-    const g = jobs.get(job) ?? {
+    const g: JobLines = jobs.get(job) ?? {
       entries: [],
       marks: [],
+      crosses: new Map(),
       noise: [],
       rest: [],
       fails: 0,
@@ -493,6 +515,8 @@ export function ciLogBody(log: string, max: number): string {
     if (job !== lastJob) {
       open = null;
       stream = false;
+      testLeft = 0;
+      mark = null;
       lastJob = job;
     }
     if (STREAM_LINE.test(text)) stream = true;
@@ -500,6 +524,34 @@ export function ciLogBody(log: string, max: number): string {
     if (NOT_A_CAUSE.test(text)) continue;
     if (UNHANDLED_LINE.test(text)) open = null;
     const line = cut(text);
+    if (mark !== null && markLeft > 0 && ARROW_LINE.test(text)) {
+      mark.push(line);
+      markLeft--;
+      continue;
+    }
+    mark = null;
+    if (PLAYWRIGHT_LINE.test(text)) {
+      stream = false;
+      // a failure Playwright numbers once: its header and the first lines of its error
+      open = once(`${job}\t${line}`) ? [line] : null;
+      testLeft = open === null ? 0 : TEST_ERROR_LINES;
+      if (open !== null) {
+        g.entries.push(open);
+        g.fails++;
+      }
+      continue;
+    }
+    if (
+      open !== null &&
+      testLeft > 0 &&
+      !FAIL_LINE.test(text) &&
+      !PLAYWRIGHT_SUMMARY_LINE.test(text)
+    ) {
+      open.push(line);
+      testLeft--;
+      continue;
+    }
+    testLeft = 0;
     if (FAIL_LINE.test(text)) {
       stream = false;
       // a name printed twice (at the failure and in the summary) keeps its first error lines
@@ -532,27 +584,56 @@ export function ciLogBody(log: string, max: number): string {
       sinceOpen++;
       if (CHECK_ERROR.test(text)) {
         if (once(`${job}\t${line}`)) g.entries.push([line]);
-      } else if (CROSS_LINE.test(text) || BIOME_HEADER.test(text)) addOnce(g.marks, line);
-      else if (stream || ERROR_LINE.test(text)) addOnce(g.noise, line);
+      } else if (CROSS_LINE.test(text) || BIOME_HEADER.test(text)) {
+        if (once(`${job}\t${line}`)) {
+          const unit = [line];
+          g.marks.push(unit);
+          if (CROSS_LINE.test(text)) {
+            mark = unit;
+            markLeft = TEST_ERROR_LINES;
+            const name = text.replace(CROSS_LINE, "").replace(DURATION_TAIL, "").trim();
+            if (!g.crosses.has(name)) g.crosses.set(name, unit);
+          }
+        }
+      } else if (stream || ERROR_LINE.test(text)) addOnce(g.noise, line);
       else g.rest.push(text);
     }
   }
   if (jobs.size > 1) jobs.delete(CI_SUMMARY_JOB);
   const groups: Group[] = [...jobs.entries()]
     .map(([job, g]) => {
+      // a job's failing units, kept whole up to FAILING_LINES_MAX lines
+      const capped = (units: string[][]): string[][] => {
+        const out: string[][] = [];
+        let kept = 0;
+        for (const u of units) {
+          kept += u.length;
+          if (kept > FAILING_LINES_MAX) break;
+          out.push(u);
+        }
+        return out;
+      };
+      // a FAIL block takes its test's `×` unit ahead of it, so the test is told once with both
+      const merged = g.entries.map((e) => {
+        const head = e[0] ?? "";
+        if (!FAIL_LINE.test(head)) return e;
+        const parts = head.replace(FAIL_LINE, "").trim().split(" > ");
+        for (let i = 0; i < parts.length; i++) {
+          const name = parts.slice(i).join(" > ");
+          const cross = g.crosses.get(name);
+          if (cross === undefined) continue;
+          g.crosses.delete(name);
+          return [...cross, ...e];
+        }
+        return e;
+      });
       const allMarks = g.fails > 0 ? [] : g.marks;
-      const marks = allMarks.slice(0, FAILING_LINES_MAX);
-      const entries: string[][] = [];
-      let kept = 0;
-      for (const e of g.entries) {
-        kept += e.length;
-        if (kept > FAILING_LINES_MAX) break;
-        entries.push(e);
-      }
+      const marks = capped(allMarks);
+      const entries = capped(merged);
       const dropped =
-        g.entries.reduce((n, e) => n + e.length, 0) -
-        entries.reduce((n, e) => n + e.length, 0) +
-        (allMarks.length - marks.length);
+        merged.flat().length -
+        entries.flat().length +
+        (allMarks.flat().length - marks.flat().length);
       const failing = g.entries.length + marks.length > 0;
       return {
         job,
@@ -588,7 +669,7 @@ export function ciLogBody(log: string, max: number): string {
     { name: "", units: (x) => x.entries, shown: groups.map(() => []) },
     {
       name: "",
-      units: (x) => x.marks.map((l) => [l]),
+      units: (x) => x.marks,
       shown: groups.map(() => []),
     },
     {
@@ -650,10 +731,10 @@ export function ciLogBody(log: string, max: number): string {
     });
   }
   groups.forEach((x, gi) => {
-    const total = x.entries.flat().length + x.marks.length + x.dropped;
+    const total = x.entries.flat().length + x.marks.flat().length + x.dropped;
     const shown =
       (tier0.shown[gi] as string[][]).flat().length +
-      ((tiers[1] as Tier).shown[gi] as string[][]).length;
+      ((tiers[1] as Tier).shown[gi] as string[][]).flat().length;
     const note = omittedText(total - shown, x.job);
     // a notice only when it fits: the body never goes past `max`
     if (total > shown && byteLength(`${out.join("\n")}\n${note}`) <= max) out.push(note);
@@ -1051,14 +1132,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const own = { repo, issue: ticket.issue, known };
       const heading = `#${ticket.issue}`;
       const withTitle = `${heading} ${ticket.title}`.slice(0, MC_PR_TITLE_MAX);
+      const added = addedDependenciesSection(addedDependencies(deps.store, run.id));
       const titled = {
         title: withTitle,
-        body: runPrBody(ticket, note, null, true),
+        body: runPrBody(ticket, note, added, true),
       };
       const flagged =
         prTextProblem(titled.title, { ...own, label: "PR title" }) !== null ||
         prTextProblem(titled.body, { ...own, label: "PR body" }) !== null;
-      const pr = flagged ? { title: heading, body: runPrBody(ticket, note, null, false) } : titled;
+      const pr = flagged ? { title: heading, body: runPrBody(ticket, note, added, false) } : titled;
 
       const made = await openDraftPr(deps, run.id, pr);
       if (made.isError === true) {
@@ -1120,14 +1202,21 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const evidence = deps.prEvidenceSection?.(run) ?? null;
       const report = deps.store.qaReportForReview(review.id);
       const reportSection = report ? qaReportGitSummary(report, deps.qaReportBaseUrl) : null;
-      const sections = [section, evidence, reportSection].filter((x): x is string => x !== null);
+      const added = addedDependenciesSection(addedDependencies(deps.store, run.id));
+      const sections = [added, section, evidence, reportSection].filter(
+        (x): x is string => x !== null,
+      );
       const combined = sections.length === 0 ? null : sections.join("\n\n");
       const body = runPrBody(ticket, note, combined, withTitle);
       // a body the seat rewrote with pr_body keeps its text; only the hub's section is replaced
       const r = await editRunPrBody(deps, run.id, prNumber, (current) =>
         seatWroteBody(current, issue)
           ? withEngineSection(
-              withSection(current, EVIDENCE_HEADING, null),
+              withSection(
+                withSection(current, EVIDENCE_HEADING, null),
+                ADDED_DEPENDENCIES_HEADING,
+                null,
+              ),
               issue,
               combined,
               noteIsPartOf(note, issue),
@@ -1676,7 +1765,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               ? ["apps/web", "apps/web/**"]
               : [];
         const extra = deps.config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
-        const grants = runPathGrants(deps.store, run.id);
+        // the dependency allowance's files went through the commit tool's check of what they add
+        const grants = [
+          ...runPathGrants(deps.store, run.id),
+          ...runDependencyAllowance(deps.store, run.id).files,
+        ];
         const strays = names.filter(
           (p) =>
             !grantedPath(grants, p) && (!pathInArea(seat.area, p) || isProtectedPath(p, extra)),

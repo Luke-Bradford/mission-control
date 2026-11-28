@@ -108,6 +108,7 @@ import {
   pathGrantProblem,
   pathsNeedingGrant,
   RATE_LIMIT_PARK_PREFIX,
+  RELAY_ATTACH_STUCK_MS,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -232,6 +233,7 @@ import {
   withoutHubConfig,
 } from "./brief.ts";
 import {
+  branchWorktree,
   cloneGitDir,
   existingCheckout,
   existingDetached,
@@ -265,6 +267,7 @@ import { type Cmux, CmuxError, type CmuxOptions, createCmux } from "./cmux.ts";
 import { cmuxSeatWorkspaceKey, reconcileCmuxSeatWorkspaces } from "./cmux-seat-workspaces.ts";
 import {
   attachCmuxSession,
+  CMUX_WORKSPACE_PREFIX,
   type CmuxSaved,
   claudeConfigDir,
   claudeTranscript,
@@ -596,6 +599,9 @@ export type SupervisorEvent =
 export type SendResult = "sent" | "busy" | "no-session" | "dup" | "gone";
 
 /** What the snapshot reads of a seat's process. */
+/** What `recoverRelay` put right: the seat row's run, an unfinished attach, or a stale open turn. */
+export type RelayRecovery = "owner" | "attach" | "turn";
+
 export interface SeatFacts {
   inTurn: boolean;
   /** `Date.now()` at the resume that spawned the process; null for a fresh start. */
@@ -665,6 +671,25 @@ export interface Supervisor {
   resumeDeferredRuns?(): Promise<void>;
   /** null when the seat has no live process. */
   seatFacts(seatId: string): SeatFacts | null;
+  /**
+   * Puts right a stale state that keeps the engine's lines from the seat's live session for
+   * `runId`, where it dates from before `before` (when the owed line was recorded). One per call,
+   * first match: `owner`, the seat's row names no run or an ended one while its live process runs
+   * `runId` (the row is set back to it); `attach`, an attach left unfinished for
+   * RELAY_ATTACH_STUCK_MS, whenever it began (it is finished, its open turn as the keeper reported
+   * it); `turn`, a turn begun before
+   * then is still counted as open (the CLI is interrupted, and only once it confirms is the turn
+   * counted as ended). Never for a seat waiting on a dialog or still starting. Null when nothing
+   * was put right, a refused or unanswered interrupt included.
+   */
+  recoverRelay?(seatId: string, runId: string, before: number): Promise<RelayRecovery | null>;
+  /**
+   * A live writer run that is neither its seat's (the seat's row and process are on another run)
+   * nor set aside: its own branch's worktree under the crew root, so the engine can set it aside
+   * and wake it through the usual hand-back. Null when the run is its seat's, has no branch, or no
+   * such worktree exists apart from the one the seat is in.
+   */
+  strandedWorktree?(runId: string): Promise<string | null>;
   /**
    * Whether the seat's CLI session is attached and alive, for the run its row holds: the process
    * the hub holds, not the run row. Null while the hub cannot tell: crew is off or stopping, the startup take-back is running,
@@ -841,6 +866,10 @@ interface Live {
   spawn: string;
   /** Attached to a keeper that is still replaying the lines the hub missed: no line goes out yet. */
   attaching: boolean;
+  /** Releases the queue held until an attaching keeper finishes replaying, once only. */
+  releaseAttachBarrier: (() => void) | null;
+  /** now() when the attach began; null for a session the hub started itself. */
+  attachStartedAt: number | null;
   /** At an attach: the keeper's line count, below which the lines are a replay of what the last hub missed. */
   replayedBelow: number;
   /** At an attach: the keeper said a turn was open. A replayed `result` is then an earlier turn's. */
@@ -919,8 +948,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /** A Claude run lives in a cmux workspace, not under a keeper. */
   const viaCmux = (run: Pick<Run, "id" | "vendor">) =>
     cmux !== null && run.vendor !== "codex" && store.getSetting(cmuxKeeperKey(run.id)) === null;
-  /** The workspaces this hub's runs hold: a same-named one is not a new run's. */
-  const claimedWorkspaces = new Set<string>();
   const savedWorkspace = (runId: string): CmuxSaved | null => {
     try {
       const v = parseJson<unknown>(store.getSetting(cmuxWorkspaceKey(runId)), null) as {
@@ -955,28 +982,26 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * read outlives the workspace until the run ends: a resume in a new workspace starts from it.
    */
   function keepWorkspace(runId: string, state: CmuxSaved | null): void {
-    const prior = savedWorkspace(runId);
-    if (prior !== null) claimedWorkspaces.delete(prior.workspace);
     if (state === null) {
       store.deleteSetting(cmuxWorkspaceKey(runId));
       return;
     }
-    claimedWorkspaces.add(state.workspace);
     store.setSetting(cmuxWorkspaceKey(runId), JSON.stringify(state));
     if (state.source !== undefined)
       store.setSetting(cmuxSourceKey(runId), JSON.stringify(state.source));
   }
   /**
-   * Closes the cmux workspace a run holds, and forgets it. False only when its Claude may still be
-   * running and cmux would not close it: with the pid gone (cmux down after a reboot, say), nothing can
-   * still run the session, so the run may resume, on the keeper when cmux stays down.
+   * Closes the cmux workspace a run holds, and forgets it. False when cmux would not close it and
+   * its Claude may still run, or cmux still lists it: a dead Claude does not close its workspace,
+   * and a start beside it would make a second one of the same name. With cmux down (after a reboot,
+   * say) and the pid gone, nothing is left to close, so the run may resume, on the keeper when cmux
+   * stays down.
    */
   async function closeWorkspace(runId: string): Promise<boolean> {
     const saved = savedWorkspace(runId);
     if (saved === null) return true;
     const durable = store.getSetting(cmuxSeatWorkspaceKey(store.run(runId)?.agentId ?? ""));
     if (durable === saved.workspace) {
-      claimedWorkspaces.delete(saved.workspace);
       store.deleteSetting(cmuxWorkspaceKey(runId));
       return true;
     }
@@ -985,9 +1010,34 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } catch (e) {
       log(`could not close the cmux workspace of ${runId}: ${errText(e)}`);
       if (saved.pid !== null && pidAlive(saved.pid)) return false;
+      // A still-active run can resume on the keeper after a reboot: cmux cannot list its old
+      // workspace and its recorded Claude pid is gone. An ended run is different: retain its
+      // workspace setting until cmux confirms closure, so a later start cannot open beside it.
+      if (
+        store.run(runId)?.endedAt === null &&
+        (await cmux?.ping().catch(() => "down")) === "down"
+      ) {
+        store.deleteSetting(cmuxWorkspaceKey(runId));
+        return true;
+      }
+      try {
+        if ((await cmux?.workspaces())?.some((w) => w.id === saved.workspace)) return false;
+      } catch {
+        // cmux's close result cannot prove removal while its workspace list is unavailable
+        return false;
+      }
     }
-    claimedWorkspaces.delete(saved.workspace);
     store.deleteSetting(cmuxWorkspaceKey(runId));
+    return true;
+  }
+  /**
+   * Closes the workspaces the seat's earlier runs left open (one cmux would not close when its run
+   * ended). False when one is still open: the seat starts nothing beside it.
+   */
+  async function closeSeatWorkspaces(seatId: string, runId: string): Promise<boolean> {
+    for (const earlier of store.runsWithSettingPrefix(seatId, CMUX_WORKSPACE_PREFIX)) {
+      if (earlier.id !== runId && !(await closeWorkspace(earlier.id))) return false;
+    }
     return true;
   }
   /** Ends a run's process: its cmux workspace and any keeper it has. */
@@ -1464,6 +1514,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       emit({ kind: "seat-free", seatId, runId: l.run.id });
       return;
     }
+    // The cmux session tries this as Claude exits. Retry from the run-end path so a refused close
+    // cannot leave a workspace behind without the supervisor recording and attempting its cleanup.
+    if (viaCmux(l.run)) void endAndRemoveKeeper(seatId, l.run.id);
     recordEnded(l.run.id, l.run.endedAt as number, l.run.status, l.endedBy ?? "exit");
     removeRunFiles(l.run.id);
     closeRunItems(l.info, l.run.id);
@@ -2050,6 +2103,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new SupervisorError(409, "could not close the run's earlier cmux workspace");
         if (priorWorkspace?.workspace === durableWorkspace)
           store.deleteSetting(cmuxWorkspaceKey(run.id));
+        if (!(await closeSeatWorkspaces(info.seat.id, run.id)))
+          throw new SupervisorError(409, "could not close the seat's earlier cmux workspace");
         store.deleteSetting(cmuxKeeperKey(run.id));
       } else {
         const old = savedWorkspace(run.id);
@@ -2546,7 +2601,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             transcriptPath: run.transcriptPath,
             cliSessionId,
             messageDir: join(tmp, "mc-messages"),
-            taken: () => claimedWorkspaces,
             source: resume ? savedSource(run.id) : null,
             ...(store.getSetting(cmuxSeatWorkspaceKey(info.seat.id)) === null
               ? {}
@@ -2876,6 +2930,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       lastStderr: null,
       lastStderrAt: null,
       attaching: false,
+      releaseAttachBarrier: null,
+      attachStartedAt: null,
       replayedBelow: 0,
       awaitingAtAttach: false,
       keeperPid: null,
@@ -3460,7 +3516,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       log(`${row.seatId}: cmux would not say what runs in its workspace: ${errText(e)}`);
       return gone;
     }
-    claimedWorkspaces.add(saved.workspace);
     let messageDir = join(seatTmp(runId), "mc-messages");
     try {
       messageDir = join(realpathSync(seatTmp(runId)), "mc-messages");
@@ -3574,9 +3629,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } catch (e) {
       return refuse(`${CANNOT_START}: ${errText(e)}`);
     }
-    track(info, run, driver, grant(info, run), {
+    const l = track(info, run, driver, grant(info, run), {
       spawn: hello.spawn,
       attaching: true,
+      attachStartedAt: now(),
       replayedBelow: hello.lines,
       awaitingAtAttach: hello.awaiting,
       keeperPid: readPidFile(crewKeeperDir(deps.dbPath, runId), KEEPER_PID_FILE),
@@ -3585,10 +3641,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       rateLimitedUntil: cursor?.spawn === hello.spawn ? cursor.rateLimitedUntil : null,
       chain,
     });
-    const off = driver.on((e) => {
-      if (e.kind !== "attached" && e.kind !== "exit") return;
+    let off = () => {};
+    l.releaseAttachBarrier = () => {
+      l.releaseAttachBarrier = null;
       off();
       unblock();
+    };
+    off = driver.on((e) => {
+      if (e.kind !== "attached" && e.kind !== "exit") return;
+      l.releaseAttachBarrier?.();
     });
   }
 
@@ -3596,6 +3657,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function onAttached(l: Live, awaiting: boolean): void {
     const seatId = l.info.seat.id;
     l.attaching = false;
+    l.releaseAttachBarrier?.();
     l.inTurn ||= awaiting;
     fold(l, true);
     saveCursor(l);
@@ -6020,6 +6082,94 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const l = live.get(seatId);
       if (!l?.session.alive) return null;
       return { inTurn: l.inTurn, resumedAt: l.resumedAt, rateLimitedUntil: l.rateLimitedUntil };
+    },
+
+    async strandedWorktree(runId) {
+      if (!mayAct() || stopping) return null;
+      const run = store.run(runId);
+      if (run === null || run.endedAt !== null || run.branch === null) return null;
+      const info = findSeat(run.agentId);
+      if (!info) return null;
+      const row = store.seatSession(run.agentId);
+      if (row?.runId === runId || live.get(run.agentId)?.run.id === runId) return null;
+      try {
+        const path = await branchWorktree(
+          {
+            checkout: info.session.checkout,
+            worktreesRoot: crew?.worktrees ?? "",
+            peers: clonePeers(deps.config, deps.hubRoot),
+          },
+          run.branch,
+        );
+        // the seat's own worktree is the other run's now
+        return path === null || path === row?.worktree ? null : path;
+      } catch (e) {
+        log(`${runId}: could not find its worktree: ${errText(e)}`);
+        return null;
+      }
+    },
+
+    async recoverRelay(seatId, runId, before) {
+      if (
+        !mayAct() ||
+        stopping ||
+        reattaching !== null ||
+        starting.has(seatId) ||
+        transfers.has(seatId)
+      )
+        return null;
+      const l = live.get(seatId);
+      // only the process that runs this run, alive and not being ended, is put right
+      const ours = (x: Live) =>
+        live.get(seatId) === x &&
+        x.session.alive &&
+        x.run.id === runId &&
+        x.ending === null &&
+        store.run(runId)?.endedAt === null;
+      if (l === undefined || !ours(l)) return null;
+      const row = store.seatSession(seatId);
+      if (row === null || row.state === "needs-input" || row.state === "starting") return null;
+      if (row.runId !== runId) {
+        // a row left naming no run, or one that has ended: the live process is the truth. A row
+        // naming another live run is that run's, not this one's to take.
+        const holder = row.runId === null ? null : store.run(row.runId);
+        if (holder !== null && holder.endedAt === null) return null;
+        setSeat(seatId, { runId, cliSessionId: l.run.sessionId ?? row.cliSessionId });
+        log(`${seatId}: its row named ${row.runId ?? "no run"}; set back to ${runId}`);
+        return "owner";
+      }
+      if (l.attaching) {
+        // by how long it has gone unfinished: an attach begun after the line was owed can stick too
+        if (l.attachStartedAt === null || now() - l.attachStartedAt < RELAY_ATTACH_STUCK_MS)
+          return null;
+        // the keeper's own word on an open turn (taken at the attach) stands
+        onAttached(l, false);
+        log(
+          `${seatId}: an attach begun ${new Date(l.attachStartedAt).toISOString()} never finished; finished it`,
+        );
+        return "attach";
+      }
+      if (!l.inTurn || (row.lastTurnStartedAt ?? 0) >= before) return null;
+      return enqueue(l, async (): Promise<RelayRecovery | null> => {
+        const now_ = store.seatSession(seatId);
+        if (!ours(l) || !l.inTurn || now_?.runId !== runId || now_.state === "needs-input")
+          return null;
+        try {
+          await sendInterrupt(l);
+        } catch (e) {
+          // refused or unanswered: the turn may well be going, so it is left as it is
+          log(`${seatId}: stale turn interrupt failed: ${errText(e)}`);
+          return null;
+        }
+        // confirmed: a turn really going ends with its own result; one whose end was missed is
+        // ended here, as that result would have
+        if (l.inTurn) {
+          l.inTurn = false;
+          setState(l, "idle", null);
+          emit({ kind: "idle", seatId, runId: l.run.id, resumed: false });
+        }
+        return "turn";
+      });
     },
 
     sessionAlive(seatId) {

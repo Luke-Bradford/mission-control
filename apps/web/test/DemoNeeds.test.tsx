@@ -47,7 +47,7 @@ it("shows the design sign-off with its before/after pictures", async () => {
 
 it("shows the ticket's plan beside the question", async () => {
   await open(DEMO_DESIGN_KEY);
-  const plan = await screen.findByRole("region", { name: "Plan of shop-app#104" });
+  const plan = await screen.findByRole("region", { name: "Plan of eBull#104" });
   expect(within(plan).getByText("Detail")).toBeTruthy();
   expect(within(plan).getByText("Cover both layouts in the component tests.")).toBeTruthy();
 });

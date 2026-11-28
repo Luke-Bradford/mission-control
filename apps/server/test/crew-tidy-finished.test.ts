@@ -175,6 +175,19 @@ it("removes the worktree of an ended run whose ticket is closed on GitHub, card 
   expect(existsSync(wt)).toBe(false);
 });
 
+it("removes a closed ticket's worktree after the recent-run window", async () => {
+  const wt = worktree("guido-1-old", "mc/old");
+  store.upsertRun({
+    ...run("rold", "mc/old"),
+    endedAt: NOW - 31 * 86_400_000,
+    ticket: "mc#99",
+  });
+  store.replaceBoard("mc", [boardItem({ repoId: "mc", issueNumber: 99, closed: true })]);
+
+  expect((await tidyOf().tidyFinished(NOW)).removed).toEqual(["rold"]);
+  expect(existsSync(wt)).toBe(false);
+});
+
 it("keeps node_modules of a run that is resuming, in the supervisor's real order", async () => {
   const wt = worktree("guido-1-9", "mc/9");
   store.upsertRun(run("r9", "mc/9"));
