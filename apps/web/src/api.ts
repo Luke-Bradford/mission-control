@@ -27,7 +27,7 @@ const OPERATOR_TOKEN_STORAGE_KEY = "mission-control:operator-token";
 
 function storedOperatorToken(): string | undefined {
   try {
-    const token = globalThis.sessionStorage.getItem(OPERATOR_TOKEN_STORAGE_KEY);
+    const token = globalThis.localStorage.getItem(OPERATOR_TOKEN_STORAGE_KEY);
     return token === null || token === "" ? undefined : token;
   } catch {
     return undefined;
@@ -36,9 +36,9 @@ function storedOperatorToken(): string | undefined {
 
 function rememberOperatorToken(token: string): void {
   try {
-    globalThis.sessionStorage.setItem(OPERATOR_TOKEN_STORAGE_KEY, token);
+    globalThis.localStorage.setItem(OPERATOR_TOKEN_STORAGE_KEY, token);
   } catch {
-    // Private browsing or browser policy may deny storage; the page still works until it reloads.
+    // Private browsing or browser policy may deny storage; the current page still works.
   }
 }
 
@@ -86,7 +86,7 @@ export function loadOperatorToken(): Promise<void> {
 export function forgetOperatorToken(): void {
   operatorToken = undefined;
   try {
-    globalThis.sessionStorage.removeItem(OPERATOR_TOKEN_STORAGE_KEY);
+    globalThis.localStorage.removeItem(OPERATOR_TOKEN_STORAGE_KEY);
   } catch {
     // Storage may be unavailable; in-memory access is still cleared.
   }

@@ -160,7 +160,7 @@ describe("api", () => {
     );
   });
 
-  it("restores the exchanged bootstrap token after a page reload", async () => {
+  it("retains the exchanged bootstrap token after a browser restart", async () => {
     window.history.replaceState(null, "", "/?bootstrap=page-capability");
     const fetchMock = vi.fn(async (path: string, init?: RequestInit) => {
       if (path === OPERATOR_BOOTSTRAP_PATH)
@@ -176,6 +176,8 @@ describe("api", () => {
 
     await loadOperatorToken();
     expect(window.location.search).toBe("");
+    expect(sessionStorage.getItem("mission-control:operator-token")).toBeNull();
+    expect(localStorage.getItem("mission-control:operator-token")).toBe("tab-token");
 
     vi.resetModules();
     const reloaded = await import("../src/api.ts");
@@ -317,6 +319,7 @@ describe("api", () => {
     vi.stubGlobal("fetch", fetchMock);
     await loadOperatorToken();
     forgetOperatorToken();
+    expect(localStorage.getItem("mission-control:operator-token")).toBeNull();
     await apiPost(ACTIONS.ack);
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
     expect(new Headers(calls[1]?.[1].headers).has(OPERATOR_HEADER)).toBe(false);
