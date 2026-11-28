@@ -887,6 +887,8 @@ const GuardCheckBody = z.strictObject({
       offset: z.number().optional(),
       limit: z.number().optional(),
       timeout: z.number().optional(),
+      /** Claude's Bash escape hatch: the guard must always refuse it. */
+      dangerouslyDisableSandbox: z.boolean().optional(),
     })
     .optional(),
 });
@@ -2703,7 +2705,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               body.data.tool_name === "Bash" &&
               worktree !== null &&
               typeof input.command === "string" &&
-              input.command !== "";
+              input.command !== "" &&
+              input.dangerouslyDisableSandbox !== true;
             return reply
               .type("application/json")
               .send(
