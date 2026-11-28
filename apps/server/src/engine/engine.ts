@@ -164,6 +164,7 @@ import {
 import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
+import { ciDecidedByText, ciDeciders } from "../collectors/github.ts";
 import { pausedSeat, reviewPausedMs } from "../config/crew-pause.ts";
 import {
   type CcConfig,
@@ -172,7 +173,6 @@ import {
   ownsHubFiles,
   seatUnavailable,
 } from "../config.ts";
-import { ciDecidedByText, ciDeciders } from "../collectors/github.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
