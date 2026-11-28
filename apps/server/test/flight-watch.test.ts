@@ -456,7 +456,10 @@ const listed = () => flightState({ config, store, busy: [], now: nowMs }).prs;
 describe("FLIGHT's PR list", () => {
   it("names a watchdog restart in FLIGHT's first wake", async () => {
     const clear = vi.fn();
-    makeWatch({ startupNotice: () => " The hub restarted itself after its watchdog found: spawn EBADF.", clearStartupNotice: clear });
+    makeWatch({
+      startupNotice: () => " The hub restarted itself after its watchdog found: spawn EBADF.",
+      clearStartupNotice: clear,
+    });
     await watch.check();
     expect(startCalls[0]?.first).toContain("watchdog found: spawn EBADF");
     expect(clear).toHaveBeenCalledOnce();

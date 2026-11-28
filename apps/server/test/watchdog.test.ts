@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createHubWatchdog,
   HUB_WATCHDOG_RESTART_SETTING,
   WATCHDOG_EXIT_GAP_MS,
   WATCHDOG_FAILURE_MS,
-  createHubWatchdog,
 } from "../src/watchdog.ts";
 
 describe("hub watchdog", () => {
@@ -14,7 +14,12 @@ describe("hub watchdog", () => {
     const exit = vi.fn();
     const watchdog = createHubWatchdog({
       now: () => now,
-      probe: async () => ({ openFiles: 12, limit: 100, folders: ["/tmp (12)"] , error: "spawn EBADF" }),
+      probe: async () => ({
+        openFiles: 12,
+        limit: 100,
+        folders: ["/tmp (12)"],
+        error: "spawn EBADF",
+      }),
       event: (text) => events.push(text),
       notice: (text) => events.push(`notice: ${text}`),
       setting: (key) => settings.get(key) ?? null,
@@ -54,6 +59,10 @@ describe("hub watchdog", () => {
       exit: () => {},
     });
     await watchdog.check();
-    expect(watchdog.health()).toMatchObject({ collector: "watchdog", ok: false, error: "spawn EBADF" });
+    expect(watchdog.health()).toMatchObject({
+      collector: "watchdog",
+      ok: false,
+      error: "spawn EBADF",
+    });
   });
 });

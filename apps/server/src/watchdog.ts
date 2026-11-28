@@ -36,7 +36,8 @@ export interface HubWatchdogDeps {
   exit: (code: number) => void;
 }
 
-const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const errorText = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 const lastExit = (read: (key: string) => string | null): number => {
   const raw = read(HUB_WATCHDOG_EXIT_SETTING);
@@ -60,17 +61,23 @@ export function createHubWatchdog(deps: HubWatchdogDeps): HubWatchdog {
   const fail = (cause: string, now: number, probe: WatchdogProbe): void => {
     failedSince ??= now;
     row = { collector: "watchdog", ok: false, error: cause, at: now, lastOkAt: row.lastOkAt };
-    const urgent = probe.limit !== null && probe.openFiles / probe.limit >= WATCHDOG_OPEN_FILE_PCT / 100;
+    const urgent =
+      probe.limit !== null && probe.openFiles / probe.limit >= WATCHDOG_OPEN_FILE_PCT / 100;
     if (!urgent && now - failedSince < WATCHDOG_FAILURE_MS) return;
     const text = `Hub watchdog: ${urgent ? "open files reached" : "spawn check failed for"} ${urgent ? `${probe.openFiles}/${probe.limit}` : "5 minutes"}: ${cause}. Open-file folders: ${probe.folders.join(", ") || "unavailable"}.`;
     if (now - lastExit(deps.setting) < WATCHDOG_EXIT_GAP_MS) {
       deps.event(text);
-      deps.notice(`Hub watchdog did not restart: it already restarted within the last hour. ${cause}`);
+      deps.notice(
+        `Hub watchdog did not restart: it already restarted within the last hour. ${cause}`,
+      );
       return;
     }
     deps.event(text);
     deps.setSetting(HUB_WATCHDOG_EXIT_SETTING, String(now));
-    deps.setSetting(HUB_WATCHDOG_RESTART_SETTING, JSON.stringify({ at: now, cause, folders: probe.folders }));
+    deps.setSetting(
+      HUB_WATCHDOG_RESTART_SETTING,
+      JSON.stringify({ at: now, cause, folders: probe.folders }),
+    );
     deps.exit(1);
   };
 
@@ -80,7 +87,8 @@ export function createHubWatchdog(deps: HubWatchdogDeps): HubWatchdog {
       try {
         const probe = await deps.probe();
         latest = probe;
-        const pressure = probe.limit !== null && probe.openFiles / probe.limit >= WATCHDOG_OPEN_FILE_PCT / 100;
+        const pressure =
+          probe.limit !== null && probe.openFiles / probe.limit >= WATCHDOG_OPEN_FILE_PCT / 100;
         if (probe.error !== null || pressure) {
           fail(probe.error ?? `open files ${probe.openFiles}/${probe.limit}`, now, probe);
           return;
@@ -88,12 +96,16 @@ export function createHubWatchdog(deps: HubWatchdogDeps): HubWatchdog {
         failedSince = null;
         row = { collector: "watchdog", ok: true, error: null, at: now, lastOkAt: now };
       } catch (error) {
-        fail(`watchdog probe: ${errorText(error)}`, now, { openFiles: 0, limit: null, folders: [], error: null });
+        fail(`watchdog probe: ${errorText(error)}`, now, {
+          openFiles: 0,
+          limit: null,
+          folders: [],
+          error: null,
+        });
       }
     },
     health: () => row,
-    files: () =>
-      latest === null ? null : { openFiles: latest.openFiles, limit: latest.limit },
+    files: () => (latest === null ? null : { openFiles: latest.openFiles, limit: latest.limit }),
   };
 }
 

@@ -174,12 +174,6 @@ import { hubFileServiceRestart } from "./telemetry/file-service-restart.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import {
-  createHubWatchdog,
-  HUB_WATCHDOG_RESTART_SETTING,
-  realWatchdogProbe,
-  WATCHDOG_INTERVAL_MS,
-} from "./watchdog.ts";
-import {
   commitsOf,
   createAutoUpdate,
   createHeldUpdateNote,
@@ -191,6 +185,12 @@ import {
   UPDATE_EXIT_DELAY_MS,
   UPDATE_LOG,
 } from "./update.ts";
+import {
+  createHubWatchdog,
+  HUB_WATCHDOG_RESTART_SETTING,
+  realWatchdogProbe,
+  WATCHDOG_INTERVAL_MS,
+} from "./watchdog.ts";
 
 export const HOST = LOOPBACK_HOST;
 /** `pnpm build` output of apps/web, served by this process. */
