@@ -835,6 +835,22 @@ describe("commit", () => {
       expect((await commit("feat: add hyparquet")).text).toMatch(/^Committed /);
     });
 
+    it("refuses a new package record with an unverified resolution", async () => {
+      baseLock();
+      allowRunDependencies(store, RUN, ["package.json", "pnpm-lock.yaml"], [HYP]);
+      write("package.json", manifest({ hyparquet: "1.33.2" }));
+      write(
+        "pnpm-lock.yaml",
+        `${LOCK_AFTER.replace(
+          "resolution: {integrity: sha512-x}",
+          "resolution: {tarball: https://evil.example/h.tgz}",
+        )}\nsnapshots:\n\n  hyparquet@1.33.2:\n    dependencies:\n      evil: 6.6.6\n`,
+      );
+      const r = await commit("feat: add hyparquet");
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("pnpm-lock.yaml adds packages hyparquet@1.33.2 with an unsafe resolution");
+    });
+
     it("still refuses a file the allowance does not name, and another run's allowance", async () => {
       allowRunDependencies(store, RUN, ["package.json"], [HYP]);
       write("apps/package.json", manifest({ hyparquet: "1.33.2" }));

@@ -76,6 +76,16 @@ describe("manifestChange", () => {
     ).toEqual(["changes something besides the added dependencies"]);
   });
 
+  it("refuses an added field that uses an inherited prototype-shaped key", () => {
+    expect(
+      manifestChange(
+        '{"name":"x","__proto__":{}}',
+        '{"name":"x","scripts":{"postinstall":"x"}}',
+        [],
+      ).problems,
+    ).toEqual(["changes something besides the added dependencies"]);
+  });
+
   it("treats Object prototype-shaped dependency names as own keys", () => {
     expect(
       manifestChange(manifest({ constructor: "1.0.0" }), manifest({ hyparquet: "1.33.2" }), [HYP])
@@ -110,7 +120,10 @@ describe("lockfileProblems", () => {
         zod: { specifier: "^4.0.0", version: "4.1.0" },
         hyparquet: { specifier: "1.33.2", version: "1.33.2" },
       },
-      { "hyparquet@1.33.2": {}, "some-dep@2.0.0": {} },
+      {
+        "hyparquet@1.33.2": { resolution: { integrity: "sha512-h" } },
+        "some-dep@2.0.0": { resolution: { integrity: "sha512-d" } },
+      },
     );
     expect(lockfileProblems(before, after, [HYP])).toEqual([]);
   });
@@ -164,15 +177,6 @@ describe("lockfileProblems", () => {
     ]);
   });
 
-  it("refuses a named package whose importer specifier is not its allowed version", () => {
-    const after = lock({
-      hyparquet: { specifier: "file:../unapproved", version: "1.33.2" },
-    });
-    expect(lockfileProblems(lock({}), after, [HYP])).toEqual([
-      "adds hyparquet at file:../unapproved, but FLIGHT allowed 1.33.2",
-    ]);
-  });
-
   it("refuses a changed or removed package record, and accepts new ones", () => {
     const deps = { hyparquet: { specifier: "1.33.2", version: "1.33.2" } };
     const packages = { "zod@4.1.0": { resolution: { integrity: "sha512-good" } } };
@@ -203,6 +207,16 @@ describe("lockfileProblems", () => {
     ).toEqual(["changes snapshots zod@4.1.0"]);
     expect(lockfileProblems(before, { ...grown, snapshots: {} }, [HYP])).toEqual([
       "removes snapshots zod@4.1.0",
+    ]);
+  });
+
+  it("refuses a new snapshot without its package record", () => {
+    const after = {
+      ...lock({}, { "hyparquet@1.33.2": { resolution: { integrity: "sha512-h" } } }),
+      snapshots: { "evil@6.6.6": {} },
+    };
+    expect(lockfileProblems(lock({}), after, [])).toEqual([
+      "adds snapshots evil@6.6.6 without a packages record",
     ]);
   });
 

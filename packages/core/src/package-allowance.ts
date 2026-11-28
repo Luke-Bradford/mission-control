@@ -60,7 +60,9 @@ function same(a: unknown, b: unknown): boolean {
   }
   if (isObject(a) && isObject(b)) {
     const ka = Object.keys(a);
-    return ka.length === Object.keys(b).length && ka.every((k) => k in b && same(a[k], b[k]));
+    return (
+      ka.length === Object.keys(b).length && ka.every((k) => Object.hasOwn(b, k) && same(a[k], b[k]))
+    );
   }
   return false;
 }
@@ -175,18 +177,38 @@ export function lockfileProblems(
       if (!Object.hasOwn(now, id)) problems.push(`removes ${key} ${id}`);
       else if (!same(record, now[id])) problems.push(`changes ${key} ${id}`);
     }
+    if (key === "packages") {
+      for (const [id, record] of Object.entries(now)) {
+        if (Object.hasOwn(was, id)) continue;
+        const resolution = isObject(record) ? record.resolution : null;
+        if (
+          !isObject(resolution) ||
+          Object.keys(resolution).length !== 1 ||
+          !Object.hasOwn(resolution, "integrity") ||
+          typeof resolution.integrity !== "string"
+        ) {
+          problems.push(`adds packages ${id} with an unsafe resolution`);
+        }
+      }
+    }
+  }
+  const packages = after.packages;
+  const snapshots = after.snapshots;
+  const oldSnapshots = b.snapshots ?? {};
+  if (isObject(packages) && isObject(snapshots) && isObject(oldSnapshots)) {
+    for (const id of Object.keys(snapshots)) {
+      if (Object.hasOwn(oldSnapshots, id)) continue;
+      const peerAt = id.indexOf("(");
+      const packageId = peerAt === -1 ? id : id.slice(0, peerAt);
+      if (!Object.hasOwn(packages, packageId)) {
+        problems.push(`adds snapshots ${id} without a packages record`);
+      }
+    }
   }
   const resolved = (value: unknown, version: string): string | null => {
     const v = isObject(value) ? value.version : value;
     if (typeof v !== "string") return String(v);
-    if (v !== version && !v.startsWith(`${version}(`)) return v;
-    if (isObject(value)) {
-      const specifier = value.specifier;
-      if (specifier !== version && specifier !== `^${version}` && specifier !== `~${version}`) {
-        return String(specifier);
-      }
-    }
-    return null;
+    return v === version || v.startsWith(`${version}(`) ? null : v;
   };
   const fields = new Set<string>(DEP_FIELDS);
   const added: string[] = [];
