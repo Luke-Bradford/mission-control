@@ -1635,9 +1635,13 @@ describe("Machine panel", () => {
     stub({ machine: null });
     const { container } = render(<MachinePanel />);
     const mach = container.querySelector("#machP") as HTMLElement;
-    await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(4));
+    await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(5));
     expect(mach.querySelectorAll(".stack i").length).toBe(0);
-    for (const row of mach.querySelectorAll(".resrow")) expect(row.textContent).toContain("—");
+    for (const row of [...mach.querySelectorAll(".resrow")].slice(0, 4))
+      expect(row.textContent).toContain("—");
+    expect(mach.querySelector("[data-testid=hub-open-files]")?.textContent).toContain(
+      "open-file reading unknown",
+    );
     expect(mach.querySelector(".res")?.getAttribute("title")).toContain(
       "Claude/Codex processes (—)",
     );

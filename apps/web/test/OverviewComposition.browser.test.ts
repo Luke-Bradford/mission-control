@@ -84,6 +84,7 @@ describeRendered("Overview composition", () => {
         },
       });
       await settled(page);
+      await page.boxes("[data-testid=hub-open-files]");
       const reading = await page.evaluate(() => {
         const row = document.querySelector("[data-testid=hub-open-files]") as HTMLElement;
         const panel = document.querySelector("#machP") as HTMLElement;
