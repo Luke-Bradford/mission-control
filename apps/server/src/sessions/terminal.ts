@@ -6,8 +6,16 @@
  */
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { CHECK_BASH_TIMEOUT_MS, LOCK_WAIT_MS, lockBusyText, seatCallSign } from "@mc/core";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import {
+  CHECK_BASH_TIMEOUT_MS,
+  guardDecision,
+  LOCK_WAIT_MS,
+  lockBusyText,
+  seatCallSign,
+  splitCommands,
+} from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import type { CallKey, CheckRecorder } from "../guard/check-runs.ts";
 import { crewGuardDecision } from "../guard/decision.ts";
@@ -35,6 +43,98 @@ export interface TerminalRun {
   timeoutMs: number;
 }
 
+export interface TerminalCommandInput {
+  command: string;
+  worktree: string;
+  /** Extra operator folders which no terminal command may read. */
+  denyRead: readonly string[];
+  /** When present, each command must start with one of these plain prefixes. */
+  commands?: readonly string[];
+}
+
+const TERMINAL_CREDENTIAL_FOLDERS = [
+  ".local/share/mission-control",
+  "Library/Application Support/eBull",
+  ".ssh",
+  ".config/gh",
+  ".git-credentials",
+  ".netrc",
+] as const;
+
+const localHost = (value: string) => {
+  try {
+    const url = new URL(value);
+    return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  } catch {
+    return /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:[/?:]|$)/.test(value);
+  }
+};
+
+const outsideWorktree = (path: string, worktree: string) => {
+  const absolute =
+    path === "~" || path.startsWith("~/")
+      ? join(homedir(), path.slice(2))
+      : resolve(worktree, path);
+  const root = resolve(worktree);
+  return !(absolute === root || absolute.startsWith(`${root}/`));
+};
+
+/**
+ * The pane runs with the operator's authority. Apply the normal writer guard to every parsed
+ * command, then reject paths and network calls which the sandbox would otherwise contain.
+ */
+export function terminalCommandDecision(input: TerminalCommandInput): string | null {
+  const denied = [
+    ...TERMINAL_CREDENTIAL_FOLDERS.map((folder) => join(homedir(), folder)),
+    ...input.denyRead,
+  ].map((path) => resolve(path));
+  const pathDecision = (arg: string) => {
+    if (!/^(?:\/|~(?:\/|$)|\.\.\/)/.test(arg)) return null;
+    const path =
+      arg === "~" || arg.startsWith("~/")
+        ? join(homedir(), arg.slice(2))
+        : resolve(input.worktree, arg);
+    if (denied.some((folder) => path === folder || path.startsWith(`${folder}/`)))
+      return "Terminal command refused: it reads an operator credential folder.";
+    if (outsideWorktree(arg, input.worktree))
+      return "Terminal command refused: paths outside the seat worktree are not available in the terminal.";
+    return null;
+  };
+  for (const redirect of input.command.matchAll(/(?:^|[^\\])(?:>>?|<)\s*([^\s;&|]+)/g)) {
+    const refused = pathDecision(redirect[1] ?? "");
+    if (refused !== null) return refused;
+  }
+  const commands = splitCommands(input.command);
+  for (const argv of commands) {
+    const command = argv.join(" ");
+    const verdict = guardDecision(
+      { tool: "Bash", input: { command } },
+      { mode: "writer", repo: "dev", flightPowers: "standard", fullSuite: [] },
+    );
+    if (verdict.kind === "deny") return `Terminal command refused: ${verdict.text}`;
+    if (
+      input.commands &&
+      !input.commands.some((prefix) => command === prefix || command.startsWith(`${prefix} `))
+    )
+      return "Terminal command refused: it is outside this repository's terminal_commands allowlist.";
+    const [program, ...args] = argv;
+    if (["curl", "wget"].includes(program ?? "")) {
+      const targets = args.filter((arg) =>
+        /^(?:https?:\/\/|localhost(?::\d+)?(?:[/?:]|$)|127\.0\.0\.1(?::\d+)?(?:[/?:]|$)|\[::1\])/.test(
+          arg,
+        ),
+      );
+      if (targets.length === 0 || targets.some((target) => !localHost(target)))
+        return "Terminal command refused: curl and wget may only reach a local host.";
+    }
+    for (const arg of args) {
+      const refused = pathDecision(arg);
+      if (refused !== null) return refused;
+    }
+  }
+  return null;
+}
+
 interface SeatTerminalDeps {
   cmux: Pick<Cmux, "workspaces" | "newPane" | "sendPane" | "closePane">;
   /** Where the hub keeps each command's script, output and exit code. */
@@ -47,6 +147,8 @@ interface SeatTerminalDeps {
   suiteOf?: (run: TerminalRun) => string | null;
   lockWaitMs?: number;
   pollMs?: number;
+  /** Refuses a command before it is typed into the operator's pane. */
+  commandGuard?: (input: TerminalRun) => string | null;
   log?(message: string): void;
 }
 
@@ -56,9 +158,8 @@ export interface SeatTerminal {
   tick(liveSeatIds: readonly string[]): Promise<void>;
 }
 
-/** The pane's own shell: the operator's login shell, so PATH and tools match their terminal. */
-// biome-ignore lint/suspicious/noTemplateCurlyInString: a shell parameter, expanded by the pane's shell
-const PANE_SHELL = 'exec "${SHELL:-/bin/zsh}" -l';
+/** The pane keeps the operator's toolchain, but never the hub or provider credentials. */
+const PANE_SHELL = `exec /bin/zsh -fc 'unset GH_TOKEN GITHUB_TOKEN ANTHROPIC_API_KEY; for name in \${(k)parameters}; do [[ $name == MC_* ]] && unset "$name"; done; exec "\${SHELL:-/bin/zsh}" -l'`;
 
 const tail = (text: string) =>
   text.length <= TERMINAL_OUTPUT_MAX ? text : text.slice(-TERMINAL_OUTPUT_MAX);
@@ -118,6 +219,8 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
 
   return {
     async run({ seatId, runId, worktree, command, timeoutMs }) {
+      const refused = deps.commandGuard?.({ seatId, runId, worktree, command, timeoutMs });
+      if (refused !== null && refused !== undefined) throw new Error(refused);
       const held = busy.get(seatId);
       if (held !== undefined)
         throw new Error(`A command is still running in this seat's terminal: ${held.command}`);

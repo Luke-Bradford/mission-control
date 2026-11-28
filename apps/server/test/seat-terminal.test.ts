@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
-import { createSeatTerminal, terminalSuite } from "../src/sessions/terminal.ts";
+import {
+  createSeatTerminal,
+  type TerminalRun,
+  terminalCommandDecision,
+  terminalSuite,
+} from "../src/sessions/terminal.ts";
 import { Store } from "../src/store.ts";
 
 const SEAT = "guido-eb";
@@ -48,6 +53,65 @@ const terminal = (cmux: ReturnType<typeof paneCmux>, extra = {}) =>
   createSeatTerminal({ cmux, dir: join(dir, "hub"), pollMs: 20, ...extra });
 
 describe("seat terminal", () => {
+  it.each([
+    "cat ~/.local/share/mission-control/operator-token",
+    "git push",
+    "gh auth token",
+    "echo secret > /tmp/operator-token",
+  ])("refuses an operator credential or GitHub command: %s", (command) => {
+    expect(
+      terminalCommandDecision({
+        command,
+        worktree,
+        denyRead: [join(dir, "private")],
+      }),
+    ).toMatch(/refused/i);
+  });
+
+  it.each(["uv run pytest -m db", "make up", "pnpm exec vite"])(
+    "permits an app or test command: %s",
+    (command) => {
+      expect(terminalCommandDecision({ command, worktree, denyRead: [] })).toBeNull();
+    },
+  );
+
+  it("refuses before typing a protected command into the pane", async () => {
+    const cmux = paneCmux();
+    const t = terminal(cmux, {
+      commandGuard: ({ command, worktree: terminalWorktree }: TerminalRun) =>
+        terminalCommandDecision({ command, worktree: terminalWorktree, denyRead: [] }),
+    });
+    await expect(
+      t.run({
+        seatId: SEAT,
+        runId: RUN,
+        worktree,
+        command: "git push",
+        timeoutMs: 1_000,
+      }),
+    ).rejects.toThrow(/refused/i);
+    expect(cmux.sendPane).not.toHaveBeenCalled();
+  });
+
+  it("applies a repository terminal command allowlist when one is configured", () => {
+    expect(
+      terminalCommandDecision({
+        command: "make up",
+        worktree,
+        denyRead: [],
+        commands: ["make"],
+      }),
+    ).toBeNull();
+    expect(
+      terminalCommandDecision({
+        command: "uv run pytest -m db",
+        worktree,
+        denyRead: [],
+        commands: ["make"],
+      }),
+    ).toMatch(/allowlist/i);
+  });
+
   it("types a command into one pane of the seat's workspace and returns its output and exit code", async () => {
     const cmux = paneCmux();
     const t = terminal(cmux);

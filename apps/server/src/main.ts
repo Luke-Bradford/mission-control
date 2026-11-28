@@ -167,7 +167,12 @@ import { applyCmuxSessionEvent, startCmuxEvents } from "./sessions/events.ts";
 import { createBranchPrs } from "./sessions/pr.ts";
 import { createSessions, probeLocal, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
 import { createSessionSidebar } from "./sessions/sidebar.ts";
-import { createSeatTerminal, type SeatTerminal, terminalSuite } from "./sessions/terminal.ts";
+import {
+  createSeatTerminal,
+  type SeatTerminal,
+  terminalCommandDecision,
+  terminalSuite,
+} from "./sessions/terminal.ts";
 import { createSessionWatch } from "./sessions/watch.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
@@ -1105,6 +1110,16 @@ export async function main(): Promise<void> {
       return repoId === undefined
         ? null
         : terminalSuite(config, repoId, worktree, command, (c) => checkRecorder.lockedBy(c));
+    },
+    commandGuard: ({ seatId, worktree, command }) => {
+      const repoId = store.liveSeatRuns().find((live) => live.seatId === seatId)?.run.repoId;
+      const repo = config.repos.find((candidate) => candidate.id === repoId);
+      return terminalCommandDecision({
+        command,
+        worktree,
+        denyRead: config.crew?.denyRead ?? [],
+        commands: repo?.terminalCommands,
+      });
     },
     log: (m) => log(m),
   });

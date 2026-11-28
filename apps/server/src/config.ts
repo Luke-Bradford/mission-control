@@ -274,6 +274,8 @@ export interface CcConfig {
     runCommand?: string;
     /** Development processes the hub keeps in a dedicated cmux app workspace. */
     appCommands?: { command: string; url: string }[];
+    /** Optional prefixes the operator permits in a seat terminal pane. */
+    terminalCommands?: string[];
     /** The checks that decide CI on a PR head, by name. [] = every check but mc/review. Loaded: always set. */
     requiredChecks?: string[];
     /** A repository-owned bot whose verdict replaces the crew review. */
@@ -638,6 +640,7 @@ const fileSchema = z
             }),
           )
           .default([]),
+        terminal_commands: z.array(nonEmpty).optional(),
         required_checks: z
           .array(
             nonEmpty.refine(
@@ -864,6 +867,7 @@ const fileSchema = z
         fullSuite: r.full_suite,
         ...(r.run_command === undefined ? {} : { runCommand: r.run_command }),
         ...(r.app_commands.length === 0 ? {} : { appCommands: r.app_commands }),
+        ...(r.terminal_commands === undefined ? {} : { terminalCommands: r.terminal_commands }),
         requiredChecks: r.required_checks,
         ...(r.review === undefined
           ? {}
