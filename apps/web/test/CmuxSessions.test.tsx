@@ -125,8 +125,9 @@ describe("Sessions page", () => {
     expect(screen.getAllByText("Answers").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Not answering").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Not checked").length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: "Stop" }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Start" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop guido-eb · ebull app" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^Stop .+ app$/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /^Start .+ app$/ }).length).toBe(1);
   });
 
   it("shows each crew app address, health word and start or stop action", async () => {
@@ -137,13 +138,13 @@ describe("Sessions page", () => {
       [APPS_PATH]: [
         {
           id: "autonomy-engine",
-          name: "autonomy-engine · app",
+          name: "guido-ae · autonomy-engine",
           running: true,
           apps: [{ url: "http://127.0.0.1:5173", answers: true }],
         },
         {
           id: "ebull",
-          name: "ebull · app",
+          name: "guido-eb · ebull",
           running: false,
           apps: [
             { url: "http://127.0.0.1:5174", answers: false },
@@ -163,7 +164,8 @@ describe("Sessions page", () => {
     expect(screen.getAllByText("Not answering").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Not checked").length).toBeGreaterThan(0);
     expect(screen.getByText("Stopped")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect(screen.getByRole("button", { name: "Stop guido-ae · autonomy-engine app" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Start guido-eb · ebull app" }));
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
   });
 
@@ -237,7 +239,7 @@ describe("Sessions page", () => {
     const fetch = stubFetch({
       [PATH]: VIEW,
       [SIDEBAR_PATH]: { on: true },
-      [APPS_PATH]: [{ id: "studio", name: "studio · app", running: true, apps: [] }],
+      [APPS_PATH]: [{ id: "studio", name: "guido-st · studio", running: true, apps: [] }],
       [`POST ${APPS_PATH}/studio/stop`]: stop,
     });
     render(
@@ -247,7 +249,7 @@ describe("Sessions page", () => {
       </>,
     );
     await settled(fetch, APPS_PATH);
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop guido-st · studio app" }));
     expect(await screen.findByText("Could not stop app")).toBeTruthy();
 
     hub.clear();

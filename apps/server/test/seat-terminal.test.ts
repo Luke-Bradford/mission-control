@@ -4,11 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
-import { createSeatTerminal } from "../src/sessions/terminal.ts";
+import { TestLock } from "../src/guard/lock.ts";
+import { createSeatTerminal, terminalSuite } from "../src/sessions/terminal.ts";
 import { Store } from "../src/store.ts";
 
 const SEAT = "guido-eb";
 const RUN = "run-1";
+const OTHER = "guido-ae";
+const OTHER_RUN = "run-2";
+/** Stands in for the guard's full-suite classification: a command naming `suite` is one. */
+const suiteOf = ({ command }: { command: string }) =>
+  /suite/.test(command) ? "pnpm -s test" : null;
 
 let dir = "";
 let worktree = "";
@@ -25,7 +31,10 @@ function paneCmux() {
   let made = 0;
   return {
     typed,
-    workspaces: vi.fn().mockResolvedValue([{ id: "ws-eb", name: `${SEAT} · #1`, cwd: worktree }]),
+    workspaces: vi.fn().mockResolvedValue([
+      { id: "ws-eb", name: `${SEAT} · #1`, cwd: worktree },
+      { id: "ws-ae", name: `${OTHER} · #2`, cwd: worktree },
+    ]),
     newPane: vi.fn(async () => `surface:${++made}`),
     closePane: vi.fn(async () => {}),
     sendPane: vi.fn(async (surface: string, text: string) => {
@@ -184,5 +193,97 @@ describe("seat terminal", () => {
     ).rejects.toThrow(/pnpm -s test is still running/);
     expect(cmux.sendPane).not.toHaveBeenCalled();
     expect(recorder.begin).not.toHaveBeenCalled();
+  });
+  it("takes the shared test lock for a full suite, so two seats never run one at once", async () => {
+    const lock = new TestLock();
+    const t = terminal(paneCmux(), { lock, suiteOf, lockWaitMs: 50 });
+    const first = await t.run({
+      seatId: SEAT,
+      runId: RUN,
+      worktree,
+      command: "echo suite-a && sleep 1",
+      timeoutMs: 200,
+    });
+    expect(first.timedOut).toBe(true);
+    expect(lock.state().holder).toMatchObject({
+      runId: RUN,
+      seatId: SEAT,
+      command: "pnpm -s test",
+    });
+
+    await expect(
+      t.run({
+        seatId: OTHER,
+        runId: OTHER_RUN,
+        worktree,
+        command: "echo suite-b",
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toThrow(/test lock is busy: GUIDO-EB is running pnpm -s test/);
+    const plain = await t.run({
+      seatId: OTHER,
+      runId: OTHER_RUN,
+      worktree,
+      command: "echo one-file",
+      timeoutMs: 5_000,
+    });
+    expect(plain.exitCode).toBe(0);
+
+    await vi.waitFor(() => expect(lock.state().holder).toBeNull(), { timeout: 3_000 });
+    const second = await t.run({
+      seatId: OTHER,
+      runId: OTHER_RUN,
+      worktree,
+      command: "echo suite-b",
+      timeoutMs: 5_000,
+    });
+    expect(second).toMatchObject({ exitCode: 0, output: "suite-b\n" });
+    expect(lock.state().holder).toBeNull();
+  });
+
+  it("on run teardown stops watching the command, frees the seat, ends its check record and releases the lock", async () => {
+    const lock = new TestLock();
+    const checks = { admit: vi.fn(), release: vi.fn(), begin: vi.fn(), end: vi.fn() };
+    const cmux = paneCmux();
+    const t = terminal(cmux, { lock, suiteOf, checks });
+    const slow = await t.run({
+      seatId: SEAT,
+      runId: RUN,
+      worktree,
+      command: "echo suite && sleep 2",
+      timeoutMs: 100,
+    });
+    expect(slow.timedOut).toBe(true);
+    expect(lock.state().holder?.runId).toBe(RUN);
+
+    await t.tick([]);
+    expect(lock.state().holder).toBeNull();
+    expect(checks.end).toHaveBeenCalledTimes(1);
+    expect(checks.end).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN }), false, null);
+    expect(cmux.closePane).toHaveBeenCalledWith("surface:1");
+    const next = await t.run({
+      seatId: SEAT,
+      runId: "run-3",
+      worktree,
+      command: "echo next",
+      timeoutMs: 5_000,
+    });
+    expect(next.exitCode).toBe(0);
+    await new Promise((r) => setTimeout(r, 2_300));
+    expect(checks.end).toHaveBeenCalledTimes(2);
+  });
+
+  it("classifies a terminal command as a full suite the way the guard does", () => {
+    const config = {
+      repos: [{ id: "r", github: "o/r", fullSuite: ["pnpm -s test"] }],
+    } as unknown as Parameters<typeof terminalSuite>[0];
+    const related = (command: string) => (command === "pnpm -s test:related" ? command : null);
+    const suite = (command: string) => terminalSuite(config, "r", worktree, command, related);
+    expect(suite("pnpm -s test")).toBe("pnpm -s test");
+    expect(suite("echo start && pnpm -s test")).toBe("pnpm -s test");
+    expect(suite("pnpm -s test apps/server/test/x.test.ts")).toBeNull();
+    expect(suite("pnpm -s test:related")).toBe("pnpm -s test:related");
+    expect(suite("git push origin HEAD && pnpm -s test")).toBe("pnpm -s test");
+    expect(suite("uv run pytest -m db")).toBeNull();
   });
 });

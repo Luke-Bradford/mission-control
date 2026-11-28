@@ -7,8 +7,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { CHECK_BASH_TIMEOUT_MS } from "@mc/core";
+import { CHECK_BASH_TIMEOUT_MS, LOCK_WAIT_MS, lockBusyText, seatCallSign } from "@mc/core";
+import type { CcConfig } from "../config.ts";
 import type { CallKey, CheckRecorder } from "../guard/check-runs.ts";
+import { crewGuardDecision } from "../guard/decision.ts";
+import type { TestLock } from "../guard/lock.ts";
 import { type Cmux, shellQuote } from "../runtime/cmux.ts";
 import { seatWorkspace } from "./apps.ts";
 
@@ -38,13 +41,18 @@ interface SeatTerminalDeps {
   dir: string;
   /** The push gate's recorder: a configured check that passes here counts at push. */
   checks?: Pick<CheckRecorder, "admit" | "release" | "begin" | "end">;
+  /** The shared test lock: a full suite typed here waits its turn like one run in the sandbox. */
+  lock?: Pick<TestLock, "acquire" | "release" | "state">;
+  /** The full suite `command` runs, by the guard's classification, or null when it runs none. */
+  suiteOf?: (run: TerminalRun) => string | null;
+  lockWaitMs?: number;
   pollMs?: number;
   log?(message: string): void;
 }
 
 export interface SeatTerminal {
   run(input: TerminalRun): Promise<TerminalResult>;
-  /** Closes the panes of seats whose run has ended. */
+  /** Closes the panes of seats whose run has ended, and ends any command they left running. */
   tick(liveSeatIds: readonly string[]): Promise<void>;
 }
 
@@ -55,11 +63,37 @@ const PANE_SHELL = 'exec "${SHELL:-/bin/zsh}" -l';
 const tail = (text: string) =>
   text.length <= TERMINAL_OUTPUT_MAX ? text : text.slice(-TERMINAL_OUTPUT_MAX);
 
+/**
+ * The full suite a terminal command runs, by the same classification as a guarded shell call (the
+ * guard's verdict, then the related-tests check), or null. A line the writer guard would refuse
+ * still runs here, outside the sandbox, so each of its commands is classified on its own.
+ */
+export function terminalSuite(
+  config: CcConfig,
+  repoId: string,
+  worktree: string,
+  command: string,
+  lockedBy: (command: string) => string | null,
+): string | null {
+  const suite = (line: string) => {
+    const event = { tool: "Bash", input: { command: line } };
+    const verdict = crewGuardDecision(config, repoId, "writer", event, undefined, [], worktree);
+    return verdict.kind === "lock" ? verdict.command : lockedBy(line);
+  };
+  const whole = suite(command);
+  if (whole !== null) return whole;
+  for (const part of command.split(/&&|\|\||[;|\n]/)) {
+    const found = part.trim() === "" ? null : suite(part.trim());
+    if (found !== null) return found;
+  }
+  return null;
+}
+
 export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
   const pollMs = deps.pollMs ?? 500;
   const panes = new Map<string, string>();
-  /** The command each seat has running, until it ends. */
-  const busy = new Map<string, string>();
+  /** The command each seat has running, until it ends or its run is torn down. */
+  const busy = new Map<string, { command: string; cancel: () => Promise<void> }>();
 
   const paneOf = async (seatId: string, worktree: string, fresh: boolean) => {
     const kept = panes.get(seatId);
@@ -86,10 +120,38 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
     async run({ seatId, runId, worktree, command, timeoutMs }) {
       const held = busy.get(seatId);
       if (held !== undefined)
-        throw new Error(`A command is still running in this seat's terminal: ${held}`);
+        throw new Error(`A command is still running in this seat's terminal: ${held.command}`);
       const key: CallKey = { runId, toolUseId: `terminal-${randomUUID()}` };
       const holder = await deps.checks?.admit?.(key, command);
       if (holder) throw new Error(`${holder} is still running in this seat's checkout.`);
+      const suite = deps.lock
+        ? (deps.suiteOf?.({ seatId, runId, worktree, command, timeoutMs }) ?? null)
+        : null;
+      if (suite !== null && deps.lock) {
+        let granted = false;
+        try {
+          granted = await deps.lock.acquire(
+            key,
+            seatId,
+            suite,
+            deps.lockWaitMs ?? LOCK_WAIT_MS,
+            new AbortController().signal,
+          );
+        } catch (error) {
+          deps.checks?.release?.(key);
+          throw error;
+        }
+        if (!granted) {
+          deps.checks?.release?.(key);
+          const h = deps.lock.state().holder;
+          throw new Error(
+            lockBusyText(h === null ? "another seat" : seatCallSign(h.seatId), h?.command ?? suite),
+          );
+        }
+      }
+      const unlock = () => {
+        if (suite !== null) deps.lock?.release(key);
+      };
 
       const base = join(deps.dir, key.toolUseId);
       const files = {
@@ -103,7 +165,16 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
           [...Object.values(files), `${files.exit}.tmp`].map((f) => rm(f, { force: true })),
         ).catch(() => {});
       let answered = false;
-      busy.set(seatId, command);
+      let cancelled = false;
+      let watched: Promise<unknown> = Promise.resolve();
+      busy.set(seatId, {
+        command,
+        // the run ended: stop watching, free the seat, close the check record and the lock now
+        cancel: async () => {
+          cancelled = true;
+          await watched;
+        },
+      });
       let started = false;
       try {
         await mkdir(deps.dir, { recursive: true });
@@ -125,6 +196,7 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
         busy.delete(seatId);
         await remove();
         deps.checks?.release?.(key);
+        unlock();
         if (!started) await deps.checks?.end(key, false, null);
         throw error;
       }
@@ -138,19 +210,22 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
       const watch = (async () => {
         const startedAt = Date.now();
         let code: number | null = null;
-        while (Date.now() - startedAt < CHECK_BASH_TIMEOUT_MS) {
+        while (!cancelled && Date.now() - startedAt < CHECK_BASH_TIMEOUT_MS) {
           code = await exitCode();
           if (code !== null) break;
           await new Promise((r) => setTimeout(r, pollMs));
         }
-        const ended = code !== null && !Number.isNaN(code) ? code : null;
+        const ended = !cancelled && code !== null && !Number.isNaN(code) ? code : null;
         await deps.checks?.end(key, ended === 0, ended);
+        unlock();
         busy.delete(seatId);
-        if (ended === null) deps.log?.(`${seatId}'s terminal command passed the check limit.`);
+        if (cancelled) deps.log?.(`${seatId}'s run ended while its terminal command ran.`);
+        else if (ended === null) deps.log?.(`${seatId}'s terminal command passed the check limit.`);
         // its answer went back at the timeout: nobody reads these files now
-        if (answered) await remove();
+        if (answered || cancelled) await remove();
         return ended;
       })();
+      watched = watch;
       const timedOut = Symbol("timedOut");
       let timer: NodeJS.Timeout | undefined;
       const ended = await Promise.race([
@@ -170,6 +245,7 @@ export function createSeatTerminal(deps: SeatTerminalDeps): SeatTerminal {
     },
     async tick(liveSeatIds) {
       const live = new Set(liveSeatIds);
+      for (const [seatId, running] of busy) if (!live.has(seatId)) await running.cancel();
       for (const [seatId, surface] of panes) {
         if (live.has(seatId)) continue;
         panes.delete(seatId);

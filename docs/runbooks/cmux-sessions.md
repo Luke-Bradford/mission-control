@@ -52,7 +52,10 @@ address and its current loopback reachability, and provides Start and Stop
 
 The hub probes app URLs each minute. A stopped app restarts no more than once every five minutes,
 including across a hub restart (the restart time is saved with the panes); the restart is logged. It stops and closes every app pane, and the terminal pane, when the seat's run
-ends, then releases that seat's port block. Preview hubs never start or restart crew apps.
+ends, then releases that seat's port block. A Stop from the Sessions page lasts, across a hub
+restart, until the next Start, `app_start` or `app_restart`, or the seat's next run. A start that
+fails part way closes the panes it opened and frees the port block; other seats' apps carry on.
+Preview hubs never start or restart crew apps.
 
 ### The seat's terminal pane
 
@@ -69,9 +72,12 @@ sandbox cannot reach: `make up` or `docker compose up -d`, migrations, database 
   ends.
 - Each typed command is posted to the crew channel on the ticket, secrets redacted.
 - A configured check typed here goes through the push gate's recorder: it reserves the checkout,
-  and a pass on a clean commit counts at push, as a check run in the sandbox does. Terminal runs do
-  not take the shared test lock.
-- The pane closes when the seat's run ends.
+  and a pass on a clean commit counts at push, as a check run in the sandbox does.
+- A full suite typed here takes the shared test lock, by the same reading of the command as a
+  sandbox shell call, and waits its turn like one; past the wait it is refused with who holds the
+  lock. The lock is released when the command ends.
+- When the seat's run ends, the hub stops watching any command still running, frees the seat,
+  closes the check record as not passed, releases the test lock, and closes the pane.
 
 ## Opening a session
 

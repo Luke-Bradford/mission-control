@@ -243,6 +243,72 @@ describe("crew apps", () => {
     await afterRestart.tick();
     expect(pane.newPane).toHaveBeenCalledTimes(4);
   });
+  it("keeps a manual stop across ticks and a hub restart until the next start", async () => {
+    const pane = cmux();
+    const state = {
+      value: null as string | null,
+      get: () => state.value,
+      set: (value: string) => {
+        state.value = value;
+      },
+    };
+    const deps = {
+      cmux: pane,
+      repos: () => [{ id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] }],
+      seats: () => [seat],
+      probe: vi.fn().mockResolvedValue(true),
+      state,
+    };
+    const apps = createCrewApps(deps);
+    await apps.start(seat.id);
+    await apps.stop(seat.id);
+    await apps.tick();
+    expect(pane.newPane).toHaveBeenCalledTimes(2);
+    expect(apps.view()[0]?.running).toBe(false);
+
+    const afterRestart = createCrewApps(deps);
+    await afterRestart.tick();
+    expect(pane.newPane).toHaveBeenCalledTimes(2);
+
+    await afterRestart.start(seat.id);
+    expect(pane.newPane).toHaveBeenCalledTimes(4);
+    await afterRestart.tick();
+    expect(afterRestart.view()[0]?.running).toBe(true);
+  });
+  it("closes the panes it opened and frees the ports when a later pane fails, and other seats keep ticking", async () => {
+    const ae = { id: "guido-ae", repoId: "autonomy-engine", worktree: "/crew/autonomy" };
+    const pane = cmux();
+    pane.workspaces.mockResolvedValue([
+      { id: "eb", name: "guido-eb · #1", cwd: seat.worktree },
+      { id: "ae", name: "guido-ae · #2", cwd: ae.worktree },
+    ]);
+    pane.newPane.mockImplementation(async (workspace: string, _cwd: string, command: string) => {
+      if (workspace === "eb" && command.includes("frontend"))
+        throw new Error("cmux new-pane failed");
+      return `${workspace}-pane`;
+    });
+    const log = vi.fn();
+    const apps = createCrewApps({
+      cmux: pane,
+      repos: () => [
+        { id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] },
+        { id: "autonomy-engine", commands: CREW_APP_DEFAULTS["autonomy-engine"] ?? [] },
+      ],
+      seats: () => [seat, ae],
+      probe: vi.fn().mockResolvedValue(false),
+      log,
+    });
+    await expect(apps.start(seat.id)).rejects.toThrow("cmux new-pane failed");
+    expect(pane.closePane).toHaveBeenCalledWith("eb-pane");
+    expect(apps.view().find((app) => app.id === seat.id)?.running).toBe(false);
+
+    await apps.tick();
+    expect(apps.view().find((app) => app.id === ae.id)).toMatchObject({
+      running: true,
+      apps: [{ url: "http://127.0.0.1:5173", answers: false }],
+    });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("cmux new-pane failed"));
+  });
   it("refuses eBull's launchd-owned jobs command", async () => {
     const apps = createCrewApps({
       cmux: cmux(),

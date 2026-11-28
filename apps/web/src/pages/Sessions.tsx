@@ -265,6 +265,7 @@ function CrewApps({
             type="button"
             className="ghost"
             disabled={busy === app.id}
+            aria-label={`${app.running ? "Stop" : "Start"} ${app.name} app`}
             onClick={() => void change(app.id, app.running ? "stop" : "start")}
           >
             {app.running ? "Stop" : "Start"}
