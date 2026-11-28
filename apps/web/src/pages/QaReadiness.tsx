@@ -697,13 +697,12 @@ function Pairs({
                     </figure>
                   ))}
                 </div>
-                <a
-                  href={`${base}-diff.png?repo=${enc(pr.repoId)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <EvidenceLink
+                  path={`${base}-diff.png?repo=${enc(pr.repoId)}`}
+                  loading="Loading pixel diff…"
                 >
                   Open pixel diff · {plural(pair.regions.length, "changed region")}
-                </a>
+                </EvidenceLink>
               </section>
             );
           })
@@ -816,7 +815,7 @@ function ReviewImage({ shot }: { shot: ReviewShotView }) {
 }
 
 /** Evidence images use the API reader so Demo never sends a browser image request to the hub. */
-function EvidenceImage({ path, alt }: { path: string; alt: string }) {
+function useEvidenceUrl(path: string) {
   const [url, setUrl] = useState<string>(),
     [error, setError] = useState(false);
   useEffect(() => {
@@ -844,6 +843,30 @@ function EvidenceImage({ path, alt }: { path: string; alt: string }) {
       active = false;
     };
   }, [path]);
+  return { url, error };
+}
+
+function EvidenceLink({
+  path,
+  loading,
+  children,
+}: {
+  path: string;
+  loading: string;
+  children: ReactNode;
+}) {
+  const { url, error } = useEvidenceUrl(path);
+  if (url)
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
+  return <p>{error ? "The evidence image could not be loaded." : loading}</p>;
+}
+
+function EvidenceImage({ path, alt }: { path: string; alt: string }) {
+  const { url, error } = useEvidenceUrl(path);
   if (url)
     return (
       <a href={url} target="_blank" rel="noopener noreferrer">

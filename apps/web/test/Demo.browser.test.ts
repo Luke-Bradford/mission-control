@@ -11,6 +11,7 @@ import {
   type RenderedPage,
 } from "./browserRunner.ts";
 import { demoSeed, overviewDensityFixture } from "./overviewDensityFixtures.ts";
+import { NOW } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 const HARNESS = "test/demoBrowser.html";
@@ -32,6 +33,14 @@ const open = (at: string, extra: Partial<Parameters<typeof renderAt>[0]> = {}) =
     height: 900,
     search: `?demo=1&at=${encodeURIComponent(at)}`,
     ...extra,
+  });
+
+const openSeeded = (at: string) =>
+  renderAt({
+    page: HARNESS,
+    width: 1600,
+    height: 900,
+    search: `?demo=1&seed=17&at=${encodeURIComponent(at)}`,
   });
 
 /** Polls the page until `read` is true; throws with the last page errors if it never is. */
@@ -107,6 +116,64 @@ describeRendered("Demo, rendered", () => {
       expect(await page.evaluate(() => window.__demoMisses(), undefined)).toEqual([]);
       expect(apiRequests(page)).toEqual([]);
       await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "opens a QA pixel diff from Demo memory without a browser API request",
+    async () => {
+      const page = await open("/qa?repo=mission-control&pr=1107");
+      await eventually(
+        page,
+        () =>
+          page.evaluate(
+            () =>
+              [...document.querySelectorAll("a")].some(
+                (link) =>
+                  link.textContent?.startsWith("Open pixel diff") &&
+                  link.getAttribute("href")?.startsWith("data:image/png"),
+              ),
+            undefined,
+          ),
+        "the Demo pixel diff to load",
+      );
+      await page.click("a[href^='data:image/png']");
+      expect(await text(page, "#toast")).not.toBe(DEMO_REFUSED);
+      expect(apiRequests(page)).toEqual([]);
+      expect(page.errors()).toEqual([]);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "shows a different adjacent work pattern on Overview, Agents, Board and FLIGHT",
+    async () => {
+      const rows = demoSeed(17).rows;
+      const pattern = (row: (typeof rows)[number]) =>
+        `${row.hudState}:${row.run ? NOW - row.run.startedAt : 0}:${row.run?.costUsd ?? 0}`;
+      expect(rows.map(pattern).every((value, index, all) => !index || value !== all[index - 1])).toBe(
+        true,
+      );
+
+      const pages = [
+        ["Overview", "/", "#agentsList .trow:not(.head)"],
+        ["Agents", "/agent", ".seat-card"],
+        ["Board", "/board", ".kcard"],
+        ["FLIGHT", "/flight", ".fp-brow"],
+      ] as const;
+      for (const [name, at, selector] of pages) {
+        const page = await openSeeded(at);
+        await eventually(page, async () => (await count(page, selector)) >= 2, `${name} work cards`);
+        const cards = await page.evaluate(
+          (css) => [...document.querySelectorAll(css)].map((card) => card.textContent?.trim() ?? ""),
+          selector,
+        );
+        expect(cards.every((value, index) => !index || value !== cards[index - 1])).toBe(true);
+        expect(apiRequests(page)).toEqual([]);
+        await page.close();
+      }
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
