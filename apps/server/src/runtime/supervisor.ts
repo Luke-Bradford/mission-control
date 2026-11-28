@@ -6045,7 +6045,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (l.attachStartedAt === null || l.attachStartedAt >= before) return null;
         // the keeper's own word on an open turn (taken at the attach) stands
         onAttached(l, false);
-        log(`${seatId}: an attach begun ${new Date(l.attachStartedAt).toISOString()} never finished; finished it`);
+        log(
+          `${seatId}: an attach begun ${new Date(l.attachStartedAt).toISOString()} never finished; finished it`,
+        );
         return "attach";
       }
       if (!l.inTurn || (row.lastTurnStartedAt ?? 0) >= before) return null;

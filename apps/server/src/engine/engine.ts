@@ -747,7 +747,9 @@ export function createEngine(deps: EngineDeps): Engine {
       return;
     const put = await (supervisor.recoverRelay?.(run.agentId, run.id, failedAt) ?? null).catch(
       (e: unknown) => {
-        log(`${run.id}: could not recover the CI line: ${e instanceof Error ? e.message : String(e)}`);
+        log(
+          `${run.id}: could not recover the CI line: ${e instanceof Error ? e.message : String(e)}`,
+        );
         return null;
       },
     );

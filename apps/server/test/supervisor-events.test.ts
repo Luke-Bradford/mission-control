@@ -263,12 +263,15 @@ describe("seat states", () => {
       await until(() => expect(seatState("guido-1")).toBe("idle"));
     });
 
-    it.each(["REFUSEINT", "NOCONTROL"])("keeps it running when the interrupt is %s", async (mode) => {
-      const { sup, runId } = await inLongTurn(mode);
-      expect(await sup.recoverRelay?.("guido-1", runId, LATER)).toBeNull();
-      expect(sup.seatFacts("guido-1")?.inTurn).toBe(true);
-      expect(seatState("guido-1")).toBe("running");
-    });
+    it.each(["REFUSEINT", "NOCONTROL"])(
+      "keeps it running when the interrupt is %s",
+      async (mode) => {
+        const { sup, runId } = await inLongTurn(mode);
+        expect(await sup.recoverRelay?.("guido-1", runId, LATER)).toBeNull();
+        expect(sup.seatFacts("guido-1")?.inTurn).toBe(true);
+        expect(seatState("guido-1")).toBe("running");
+      },
+    );
 
     it("leaves a turn begun after the owed line alone", async () => {
       const { sup, runId } = await inLongTurn();
