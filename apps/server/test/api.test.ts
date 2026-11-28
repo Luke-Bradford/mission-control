@@ -10459,12 +10459,12 @@ describe("operator token", () => {
       "sec-fetch-site": "same-origin",
       [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: capability,
     };
-    expect((await app.inject({ method: "GET", url: OPERATOR_BOOTSTRAP_PATH, headers })).json()).toEqual({
-      token: "tok-1",
-    });
-    expect((await app.inject({ method: "GET", url: OPERATOR_BOOTSTRAP_PATH, headers })).statusCode).toBe(
-      403,
-    );
+    expect(
+      (await app.inject({ method: "GET", url: OPERATOR_BOOTSTRAP_PATH, headers })).json(),
+    ).toEqual({ token: "tok-1" });
+    expect(
+      (await app.inject({ method: "GET", url: OPERATOR_BOOTSTRAP_PATH, headers })).statusCode,
+    ).toBe(403);
     await app.close();
   });
 
