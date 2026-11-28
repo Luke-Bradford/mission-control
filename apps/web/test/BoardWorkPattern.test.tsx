@@ -33,13 +33,21 @@ it("rejects adjacent Done cards whose raw times differ but displayed work patter
 });
 
 it.each([
-  ["Backlog", boardItem({ issueNumber: 73, status: "Backlog", state: "planned" }), "Backlog · not started"],
+  [
+    "Backlog",
+    boardItem({ issueNumber: 73, status: "Backlog", state: "planned" }),
+    "Backlog · not started",
+  ],
   [
     "Refinement",
     boardItem({ issueNumber: 74, status: "Refinement", state: "planned" }),
     "Refinement · not started",
   ],
-  ["Ready", boardItem({ issueNumber: 75, status: "Ready", state: "planned" }), "Ready · not started"],
+  [
+    "Ready",
+    boardItem({ issueNumber: 75, status: "Ready", state: "planned" }),
+    "Ready · not started",
+  ],
   [
     "Ready moved to Blocked",
     boardItem({

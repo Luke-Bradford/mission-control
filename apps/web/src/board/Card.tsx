@@ -392,8 +392,8 @@ function WorkPattern({
         : col === WAITING_COLUMN
           ? `waiting ${elapsed(Math.max(0, now - (item.waiting?.at ?? item.updatedAt)))}`
           : isNotStartedColumn(lifecycle)
-          ? "not started"
-          : `idle ${elapsed(Math.max(0, now - item.updatedAt))}`;
+            ? "not started"
+            : `idle ${elapsed(Math.max(0, now - item.updatedAt))}`;
   const spend = agent?.run?.costUsd;
   const value = [state, duration, spend == null ? null : cost(spend)].filter(Boolean).join(" · ");
   return (
