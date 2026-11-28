@@ -8510,6 +8510,8 @@ describe("the first loop's engine", () => {
         store,
         bus,
         supervisor: sup,
+        // the fixtures' time: by the real clock their items are past 14 days and settled (#2285)
+        now: () => NOW,
         engine: {
           onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
           status: () => ({ on: true, note: null }),

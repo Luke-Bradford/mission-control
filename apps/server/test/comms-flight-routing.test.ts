@@ -164,14 +164,16 @@ describe("crew Comms questions stay with FLIGHT", () => {
     },
   );
 
-  it("three overdue blockers with FLIGHT down produce one operator alert", async () => {
+  it("three overdue blockers with FLIGHT down stay on FLIGHT's queue, counted by one item (#2285)", async () => {
     flight(false);
     const keys = [0, 1, 2].map((n) => message("blocker", n));
     await pollDecisions();
     const items = await attention();
-    expect(items.filter((item) => item.owner === "operator").map((item) => item.key)).toEqual([
-      FLIGHT_NOT_TRIAGING_KEY,
-    ]);
+    expect(items.filter((item) => item.owner === "operator")).toEqual([]);
+    expect(items.find((item) => item.key === FLIGHT_NOT_TRIAGING_KEY)).toMatchObject({
+      owner: "flight",
+      notTriaging: { keys: expect.arrayContaining(keys) },
+    });
     for (const key of keys) expect(items.find((item) => item.key === key)?.owner).toBe("flight");
     expect(store.briefs().size).toBe(0);
   });
