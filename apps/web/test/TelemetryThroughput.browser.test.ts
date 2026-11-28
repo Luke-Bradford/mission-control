@@ -1,12 +1,14 @@
 // @vitest-environment node
-import { mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { afterAll, expect, it } from "vitest";
 import {
   BROWSER_TEST_TIMEOUT_MS,
   browserSession,
   describeRendered,
   type RenderedPage,
+  type ScreenshotClip,
 } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
 import { HOUR, NOW } from "./fixtures.ts";
@@ -19,6 +21,86 @@ type RepoWeeks = NonNullable<ReturnType<typeof crewTelemetry>["repoWeeks"]>;
 const LONG_TITLE =
   "Telemetry throughput ticket with a deliberately long board-card title that must remain readable without hiding the merged date, cycle time, or cost";
 const LONG_TICKET = "repository-with-a-schema-length-name-that-must-remain-visible#1900";
+
+interface ScoreboardShot {
+  image: string;
+  scope: "viewport" | "focused";
+  width: number;
+  height: number;
+  scheme: "dark" | "light";
+  state: string;
+  clip?: ScreenshotClip;
+}
+
+const scoreboardShots: ScoreboardShot[] = [];
+
+/** The capture manifest names the exact fixture and viewport for the retained main/head pairs. */
+function head() {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {
+    return "unknown";
+  }
+}
+
+async function captureScoreboard(
+  page: RenderedPage,
+  width: number,
+  height: number,
+  scheme: "dark" | "light",
+) {
+  if (!evidence) return;
+  mkdirSync(evidence, { recursive: true });
+  const name = `telemetry-throughput-table-scoreboard-${width}x${height}-${scheme}`;
+  await page.screenshot(join(evidence, `${name}-viewport.png`));
+  scoreboardShots.push({
+    image: `${name}-viewport.png`,
+    scope: "viewport",
+    width,
+    height,
+    scheme,
+    state: "Telemetry → Throughput → Table with the normal three-repository fixture",
+  });
+  await page.evaluate(async () => {
+    document.querySelector("#tRepoScoreboard")?.scrollIntoView({ block: "center" });
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }, undefined);
+  const panel = await page.box("#tRepoScoreboard");
+  expect(panel.y).toBeGreaterThanOrEqual(0);
+  expect(panel.y + panel.height).toBeLessThanOrEqual(height);
+  const clip = { x: panel.x, y: panel.y, width: panel.width, height: panel.height };
+  await page.screenshot(join(evidence, `${name}-scoreboard.png`), clip);
+  scoreboardShots.push({
+    image: `${name}-scoreboard.png`,
+    scope: "focused",
+    width,
+    height,
+    scheme,
+    state: "Repository scoreboard with all three crew repositories and loop baselines",
+    clip,
+  });
+}
+
+afterAll(() => {
+  if (!evidence || scoreboardShots.length === 0) return;
+  writeFileSync(
+    join(evidence, "telemetry-throughput-scoreboard-manifest.json"),
+    `${JSON.stringify(
+      {
+        page: "/telemetry?tab=throughput&view=table",
+        renderedSource: head(),
+        harness: "apps/web/test/TelemetryThroughput.browser.test.ts in test/desktopBrowser.html",
+        browser: "headless Chromium via the repo browser runner, device scale 1, zoom 100%",
+        data: "repoWeeksFixture(3, false): normal three crew repositories with no long values",
+        comparison:
+          "The CI evidence collector renders this same capture on main and the PR head; like-named images are the matched pairs.",
+        captures: scoreboardShots,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+});
 
 function throughputApi(repoWeeks?: RepoWeeks): Record<string, unknown> {
   const base = crewTelemetryApi();
@@ -367,6 +449,13 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
               ),
               rowBottoms: rows.map((row) => row.getBoundingClientRect().bottom),
               scrollBottom: scrollBox.bottom,
+              clipped: [...panel.querySelectorAll("tbody th, tbody td")]
+                .filter((cell) => cell.scrollWidth > cell.clientWidth + 1)
+                .map((cell) => ({
+                  text: cell.textContent,
+                  clientWidth: cell.clientWidth,
+                  scrollWidth: cell.scrollWidth,
+                })),
               text: panel.textContent,
             };
           }, undefined);
@@ -374,6 +463,7 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
           expect(scoreboard.count).toBe(3);
           expect(scoreboard.cue).toContain("3 repositories · all visible");
           expect(scoreboard.rowsVisible, JSON.stringify(scoreboard)).toBe(true);
+          expect(scoreboard.clipped).toEqual([]);
           expect(scoreboard.text).toContain("No merged PRs");
           expect(scoreboard.text).toContain("crew-repo-3");
           expect(scoreboard.headers).toHaveLength(6);
@@ -388,6 +478,7 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
               `column ${index} right`,
             ).toBeLessThanOrEqual(1);
           }
+          await captureScoreboard(page, width, height, scheme);
         } finally {
           await page.close();
         }
