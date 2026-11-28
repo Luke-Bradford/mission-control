@@ -83,6 +83,7 @@ function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
   const reviewer = col === "Done" || waits ? null : cardReviewer(item, pr, ctx.crew);
   const check = pr?.check ? flowChip(pr.check, ctx.flow.get(flowKey(pr.repoId, pr.number))) : null;
   const facts = ctx.rework.get(ticketRef(item));
+  const outcome = doneOutcome(item, prs);
   return {
     item,
     showRepo: ctx.showRepo,
@@ -107,7 +108,7 @@ function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
     checkReason: check?.reason,
     mine: needs.length > 0,
     unacked: needs.some((a) => !a.acked),
-    outcome: doneOutcome(item, prs),
+    outcome,
     when,
     statusOutOfDate: col !== "Done" && statusOutOfDate(item) ? statusOutOfDateTitle(item) : null,
     you: cardYou(needs, ctx.now),

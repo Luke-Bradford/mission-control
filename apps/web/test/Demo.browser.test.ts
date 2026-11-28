@@ -34,6 +34,14 @@ const open = (at: string, extra: Partial<Parameters<typeof renderAt>[0]> = {}) =
     ...extra,
   });
 
+const openSeeded = (at: string) =>
+  renderAt({
+    page: HARNESS,
+    width: 1600,
+    height: 900,
+    search: `?demo=1&seed=17&at=${encodeURIComponent(at)}`,
+  });
+
 /** Polls the page until `read` is true; throws with the last page errors if it never is. */
 async function eventually(
   page: RenderedPage,
@@ -58,6 +66,8 @@ const bodyHas = (page: RenderedPage, needle: string) =>
   page.evaluate((n) => document.body.textContent?.includes(n) ?? false, needle);
 const apiRequests = (page: RenderedPage) =>
   page.requests().filter((r) => r.path.startsWith("/api/"));
+const adjacentPatternsDiffer = (patterns: readonly string[]) =>
+  patterns.every((value, index) => !index || value !== patterns[index - 1]);
 
 interface PageCase {
   name: string;
@@ -72,7 +82,7 @@ const PAGES: PageCase[] = [
   { name: "Overview", at: "/", minText: 2000, populated: ["#agentsList .trow:not(.head)", 10] },
   { name: "Flight", at: "/flight#decisionsP", minText: 800, populated: ["#decisions .fp-drow", 3] },
   { name: "Board", at: "/board", minText: 700 },
-  { name: "a ticket", at: "/tickets/shop-app/101", minText: 150 },
+  { name: "a ticket", at: "/tickets/mission-control/101", minText: 150 },
   { name: "an agent", at: "/agent/dev-1", minText: 500 },
   { name: "Comms", at: "/comms/crew", minText: 2000 },
   { name: "QA", at: "/qa", minText: 500 },
@@ -107,6 +117,74 @@ describeRendered("Demo, rendered", () => {
       expect(await page.evaluate(() => window.__demoMisses(), undefined)).toEqual([]);
       expect(apiRequests(page)).toEqual([]);
       await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "opens a QA pixel diff from Demo memory without a browser API request",
+    async () => {
+      const page = await open("/qa?repo=mission-control&pr=1107");
+      await eventually(
+        page,
+        () =>
+          page.evaluate(
+            () =>
+              [...document.querySelectorAll("a")].some(
+                (link) =>
+                  link.textContent?.startsWith("Open pixel diff") &&
+                  link.getAttribute("href")?.startsWith("data:image/png"),
+              ),
+            undefined,
+          ),
+        "the Demo pixel diff to load",
+      );
+      await page.click("a[href^='data:image/png']");
+      expect(await text(page, "#toast")).not.toBe(DEMO_REFUSED);
+      expect(apiRequests(page)).toEqual([]);
+      expect(page.errors()).toEqual([]);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "shows a different adjacent work pattern on Overview, Agents, Board and FLIGHT",
+    async () => {
+      // Names and ticket titles differ here, but the duplicate visible work pattern must still fail.
+      expect(adjacentPatternsDiffer(["Running|12m|$1.20", "Running|12m|$1.20"])).toBe(false);
+
+      const pages = [
+        ["Overview", "/", "#agentsList .trow[data-work-pattern]"],
+        ["Agents", "/agent", ".seat-card[data-work-pattern]"],
+        ["Board", "/board", ".kcard [data-work-pattern]"],
+        ["FLIGHT", "/flight", ".fp-brow[data-work-pattern]"],
+      ] as const;
+      for (const [name, at, selector] of pages) {
+        const page = await openSeeded(at);
+        await eventually(
+          page,
+          async () => (await count(page, selector)) >= 2,
+          `${name} work cards`,
+        );
+        const patternGroups = await page.evaluate(
+          ({ css, board }) => {
+            const groups = board ? [...document.querySelectorAll(".kb")] : [document];
+            return groups.map((group) =>
+              [...group.querySelectorAll<HTMLElement>(css)].map(
+                (card) => card.dataset.workPattern ?? "",
+              ),
+            );
+          },
+          { css: selector, board: name === "Board" },
+        );
+        const patterns = patternGroups.flat();
+        expect(patterns.every(Boolean), `${name}: ${patterns.join(", ")}`).toBe(true);
+        for (const group of patternGroups)
+          expect(adjacentPatternsDiffer(group), `${name}: ${group.join(", ")}`).toBe(true);
+        expect(apiRequests(page)).toEqual([]);
+        await page.close();
+      }
     },
     BROWSER_TEST_TIMEOUT_MS,
   );

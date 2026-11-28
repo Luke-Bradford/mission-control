@@ -30,8 +30,8 @@ const PAGE_ROUTES: Record<Route["page"], readonly string[]> = {
   overview: ["/"],
   needs: ["/needs-you", "/needs-you/demo-design-signoff", "/needs-you/demo-picture-options"],
   flight: ["/flight"],
-  board: ["/board", "/board/shop-app"],
-  ticket: ["/tickets/shop-app/102"],
+  board: ["/board", "/board/eBull"],
+  ticket: ["/tickets/eBull/102"],
   agent: ["/agent", "/agent/dev-1", "/agent/flight-1"],
   comms: ["/comms", "/comms/crew", "/comms/agents/dev-1"],
   qa: ["/qa", "/qa?view=history"],
@@ -68,7 +68,7 @@ const MUST_SHOW: Record<string, { text?: string; images?: number }> = {
   "/qa": { images: 2 },
   "/planner": { text: "What is proposed", images: 1 },
   "/agent": { text: "DEV-1" },
-  "/board/shop-app": { text: "Retry failed payment webhooks" },
+  "/board/eBull": { text: "Retry failed payment webhooks" },
 };
 const CHOICE =
   "main [role=tab], main [role=tablist] button, main .seg button, main .tabs button, main nav button";

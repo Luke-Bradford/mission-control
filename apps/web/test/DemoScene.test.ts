@@ -2,6 +2,8 @@ import type { CrewRow, LimitRow } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { seedFromSearch } from "../src/demo/random.ts";
 import { getState, playNext, setSceneSeed } from "../src/demo/simulator.ts";
+import { NOW } from "./fixtures.ts";
+import { demoSeed } from "./overviewDensityFixtures.ts";
 
 const BEATS = 45;
 const rows = () => (getState().api["/api/crew?shape=summary"] as { rows: CrewRow[] }).rows;
@@ -35,6 +37,74 @@ it("the same seed plays the same scene, and another seed plays another", () => {
   expect(play(7)).toBe(play(7));
 });
 
+it("builds an uneven, repeatable day with the awkward cases in view", () => {
+  const first = demoSeed(17);
+  const again = demoSeed(17);
+  const other = demoSeed(18);
+  expect(JSON.stringify(first.rows)).toBe(JSON.stringify(again.rows));
+  expect(JSON.stringify(first.rows)).not.toBe(JSON.stringify(other.rows));
+
+  const rows = first.rows;
+  expect((first.api["/api/repos"] as { id: string }[]).map((repo) => repo.id)).toEqual([
+    "mission-control",
+    "eBull",
+    "autonomy-engine",
+  ]);
+  expect(first.api["/api/boards/autonomy-engine"]).toEqual([]);
+  for (const repoId of ["mission-control", "eBull", "autonomy-engine"])
+    expect(first.api[`/api/repos/${repoId}/rules`]).toBeDefined();
+  expect(first.api["/api/flight/memory?repo=mission-control"]).toBeDefined();
+  const repoIds = ["mission-control", "eBull", "autonomy-engine"];
+  const boardRefs = new Set(
+    repoIds.flatMap((repoId) =>
+      (first.api[`/api/boards/${repoId}`] as { repoId: string; issueNumber: number }[]).map(
+        (item) => `${item.repoId}#${item.issueNumber}`,
+      ),
+    ),
+  );
+  for (const row of rows) if (row.ticket) expect(boardRefs).toContain(row.ticket);
+  const pipeline = first.api["/api/overview"] as {
+    pipeline: { cards: { repoId: string; ticket: number }[] }[];
+  };
+  const expectResolvedTicket = (ref: string) => {
+    expect(boardRefs).toContain(ref);
+    const [repoId, issueNumber] = ref.split("#");
+    expect(first.api[`/api/tickets/${repoId}/${issueNumber}`]).toBeDefined();
+  };
+  for (const card of pipeline.pipeline.flatMap((stage) => stage.cards))
+    expectResolvedTicket(`${card.repoId}#${card.ticket}`);
+  const flight = first.api["/api/flight"] as { decisions: { ref: string | null }[] };
+  for (const decision of flight.decisions) {
+    expect(repoIds.some((repoId) => decision.ref?.startsWith(`${repoId}#`))).toBe(true);
+    expectResolvedTicket(decision.ref as string);
+  }
+  expect(rows[1]?.hudState).toBe("running");
+  const reworked = first.api["/api/tickets/eBull/108"] as {
+    prs: { rounds: unknown[]; ci: { checks: { name: string }[] }[] }[];
+  };
+  expect(reworked.prs[0]?.rounds).toHaveLength(3);
+  expect(
+    reworked.prs[0]?.ci.flatMap((run) => run.checks).some((check) => check.name.includes("re-run")),
+  ).toBe(true);
+  expect(new Set(rows.map((row) => row.hudState)).size).toBeGreaterThanOrEqual(5);
+  expect(
+    rows.every((row, index) => {
+      const previous = rows[index - 1];
+      return (
+        !previous ||
+        `${row.hudState}:${row.run?.costUsd}` !== `${previous.hudState}:${previous.run?.costUsd}`
+      );
+    }),
+  ).toBe(true);
+  expect(rows.some((row) => row.run && NOW - row.run.startedAt >= 6 * 60 * 60 * 1000)).toBe(true);
+  expect(rows.some((row) => row.hudState === "parked")).toBe(true);
+  expect(rows.some((row) => row.note?.includes("FLIGHT"))).toBe(true);
+  expect(rows.some((row) => row.hudState === "error")).toBe(true);
+  expect(
+    (first.api["/api/machine"] as { latest: { diskFreeBytes: number } }).latest.diskFreeBytes,
+  ).toBeLessThanOrEqual(20 * 2 ** 30);
+});
+
 it("takes its seed from the address, and falls back to 1", () => {
   expect(seedFromSearch("?seed=42")).toBe(42);
   expect(seedFromSearch("?seed=nope")).toBe(1);
@@ -56,10 +126,17 @@ it.each(Array.from({ length: 25 }, (_, i) => i + 1))(
     expect(rows().some((r) => r.loop?.tries?.n === 2 && r.loop.step === "review")).toBe(true);
     expect(rows().find((r) => r.run?.status === "failed")?.hudState).toBe("error");
     expect((s.api["/api/limits"] as LimitRow[]).some((l) => l.used >= l.stopAt)).toBe(true);
-    const prs = s.api["/api/repos/shop-app/prs"] as {
-      ci: string | null;
-      mergeable: string | null;
-    }[];
+    const prs: { ci: string | null; mergeable: string | null }[] = [
+      "mission-control",
+      "eBull",
+      "autonomy-engine",
+    ].flatMap(
+      (repoId) =>
+        s.api[`/api/repos/${repoId}/prs`] as {
+          ci: string | null;
+          mergeable: string | null;
+        }[],
+    );
     expect(prs.some((p) => p.ci === "failing")).toBe(true);
     expect(prs.some((p) => p.mergeable === "CONFLICTING")).toBe(true);
     // Small and odd figures, and a long title.
@@ -85,4 +162,26 @@ it("the next scene does not start from an all-running crew", () => {
   for (let i = 0; i < BEATS + 1; i++) playNext();
   expect(getState().loops).toBe(1);
   expect(rows().map((r) => r.hudState)).toContain("stalled");
+});
+
+it("keeps configured boards and seat references together as tickets move", () => {
+  setSceneSeed(17);
+  const before = JSON.stringify(getState().api["/api/boards/mission-control"]);
+  for (let i = 0; i < BEATS; i++) playNext();
+  const state = getState();
+  expect(state.moves).toBeGreaterThan(0);
+  expect(JSON.stringify(state.api["/api/boards/mission-control"])).not.toBe(before);
+  const configured = new Set(["mission-control", "eBull", "autonomy-engine"]);
+  const refs = new Set(
+    [...configured].flatMap((repoId) =>
+      (state.api[`/api/boards/${repoId}`] as { repoId: string; issueNumber: number }[]).map(
+        (item) => `${item.repoId}#${item.issueNumber}`,
+      ),
+    ),
+  );
+  for (const row of rows())
+    if (row.ticket) {
+      expect(configured).toContain(row.ticket.split("#")[0]);
+      expect(refs).toContain(row.ticket);
+    }
 });

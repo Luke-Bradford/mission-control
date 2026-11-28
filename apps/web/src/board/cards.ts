@@ -129,6 +129,11 @@ export const WAITING_COLUMN = "Waiting";
 /** A Board column: a Status column, or the hub's Waiting group. */
 export type BoardColumn = HudColumn | typeof WAITING_COLUMN;
 
+/** Whether a Board column represents work that has not begun. */
+export function isNotStartedColumn(col: BoardColumn): boolean {
+  return col !== WAITING_COLUMN && NOT_STARTED.includes(col);
+}
+
 /** Every Board column in order; Waiting sits right after Blocked. */
 export const BOARD_COLUMNS: readonly BoardColumn[] = HUD_COLUMNS.flatMap((c) =>
   c === "Blocked" ? [c, WAITING_COLUMN] : [c],
@@ -156,7 +161,7 @@ export function withWaiting(
 export function cardColumn(item: BoardItem): BoardColumn {
   const col = hudColumnOf(item);
   if (item.waiting && col !== "Done") return WAITING_COLUMN;
-  return NOT_STARTED.includes(col) && firstBlocker(item) !== null ? "Blocked" : col;
+  return isNotStartedColumn(col) && firstBlocker(item) !== null ? "Blocked" : col;
 }
 
 /**
