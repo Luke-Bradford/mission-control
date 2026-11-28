@@ -281,16 +281,16 @@ export class LocalNotifications {
     for (const item of items) {
       const category = categoryOf(item);
       // A late spell (FLIGHT's own watch) inside an outage keeps the episode: down again is no new alert.
-      if (
-        item.key === FLIGHT_NOT_TRIAGING_KEY &&
-        item.owner !== undefined &&
-        item.owner !== "operator"
-      ) {
+      // The item is FLIGHT's whatever its cause (#2285), so the cause tells an outage from a late spell.
+      const flightDown = item.key === FLIGHT_NOT_TRIAGING_KEY;
+      if (flightDown && item.notTriaging?.cause === "late") {
         const kept = this.state.seen[item.key];
         if (kept !== undefined) seen[item.key] = kept;
         continue;
       }
-      if (category === null || (item.owner !== undefined && item.owner !== "operator")) continue;
+      if (category === null) continue;
+      // an outage is the operator's to hear about, though the item itself is on FLIGHT's queue
+      if (!flightDown && item.owner !== undefined && item.owner !== "operator") continue;
       const version = versionOf(category, item);
       const previous = this.state.seen[item.key];
       // Updating to a new version format must not replay every open item.

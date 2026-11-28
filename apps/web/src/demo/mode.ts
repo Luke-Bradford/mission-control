@@ -58,12 +58,17 @@ const DEMO_PICTURE_ROUTES: readonly string[] = [
   "/api/plan-assets/",
   "/api/hud-screenshots/",
 ];
+const DEMO_PR_EVIDENCE =
+  /^\/api\/prs\/\d+\/evidence\/[0-9a-f]{40}\/[a-z_]+-(?:light|dark)-(?:before|after|diff)\.png\?repo=[\w-]+$/;
 
 /** Answer a Demo request: writes are refused here, reads come from the lazily loaded source. */
 export async function demoSend(path: string, init: RequestInit): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
   if (method !== "GET") return demoRefusal();
-  if (DEMO_PICTURE_ROUTES.some((prefix) => path.startsWith(prefix))) {
+  if (
+    DEMO_PICTURE_ROUTES.some((prefix) => path.startsWith(prefix)) ||
+    DEMO_PR_EVIDENCE.test(path)
+  ) {
     const { pictureBytes, pictureFor } = await import("./picture.ts");
     const bytes = pictureBytes(pictureFor(path));
     return new Response(bytes, { status: 200, headers: { "content-type": "image/png" } });

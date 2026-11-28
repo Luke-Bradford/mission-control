@@ -97,6 +97,7 @@ export const FLIGHT_DECISION_KINDS = [
   "approval",
   "shell",
   "grant",
+  "dependency",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
@@ -1392,6 +1393,25 @@ export const idleLong = (idle: FlightIdleSeats | undefined): FlightIdleSeats["se
 /** What the wake says on every wake while the operator's messages are owed an answer. */
 export const owedAsk = (ids: readonly string[]): string =>
   `You owe the operator an answer to Comms message ${ids.join(", ")}: reply with mc comms_send { replyTo: "comms:<id>" }, or react to it with mc comms_react when it needs no answer. It stays owed until you do.`;
+/** How long a seat's question waits on FLIGHT before each repeat wake (#2285). */
+export const FLIGHT_QUESTION_REWAKE_MS = 10 * 60_000;
+
+/** The seat questions that have waited at least one repeat period, oldest first. */
+export const questionsWaiting = <Q extends { ageMin: number }>(questions: readonly Q[]): Q[] =>
+  questions
+    .filter((q) => q.ageMin * 60_000 >= FLIGHT_QUESTION_REWAKE_MS)
+    .sort((a, b) => b.ageMin - a.ageMin);
+
+/** What a wake says first while a seat's question waits on FLIGHT unanswered (#2285). */
+export const questionAgainAsk = (
+  questions: readonly { id: number; seat: string; ageMin: number }[],
+): string =>
+  `Answer first: ${questions
+    .map((q) => `question ${q.id} from ${q.seat} has waited ${q.ageMin} min`)
+    .join(
+      "; ",
+    )}. The seat is idle until you answer it with mc answer_question, or take it to the operator with its brief.`;
+
 /** Added when the wake is the repeat (`idleAgain`): the crew was idle when FLIGHT was last told, and still is. */
 export const IDLE_SEAT_AGAIN_ASK =
   "You were told of this idle crew before and it still idles: this wake is the hub's repeat. If something you handed over or waited on has not moved, pick it up now.";
@@ -1681,7 +1701,9 @@ export function wakeLine(
       ? ` ${IDLE_SEAT_ASK}${s.wake?.idle?.again != null ? ` ${IDLE_SEAT_AGAIN_ASK}` : ""}`
       : "";
   const owed = s.wake?.owed?.length ? ` ${owedAsk(s.wake.owed)}` : "";
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleSeats}${owed}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
+  const waiting = questionsWaiting(s.questions);
+  const first = waiting.length > 0 ? `${questionAgainAsk(waiting)} ` : "";
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${first}${WAKE_ASK}${idleSeats}${owed}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

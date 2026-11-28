@@ -57,6 +57,7 @@ import {
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
+import { allowRunDependencies, markDependenciesAdded } from "../src/repo/dependency-allowance.ts";
 import { setRunPathGrants } from "../src/repo/path-grants.ts";
 import { Store } from "../src/store.ts";
 
@@ -204,6 +205,55 @@ describe("openPr", () => {
     expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
       title: "#7 Fix the thing",
       body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\nCloses #7.",
+    });
+  });
+
+  it("lists each package the run's commits added, with version and licence", async () => {
+    allowRunDependencies(
+      store,
+      "r1",
+      ["package.json", "pnpm-lock.yaml"],
+      [
+        { name: "hyparquet", version: "1.33.2", licence: "MIT" },
+        { name: "hyparquet-writer", version: "0.18.1", licence: "MIT" },
+        { name: "left-pad", version: "1.3.0", licence: "WTFPL" },
+        { name: "@scope/pkg", version: "2.0.0", licence: "Apache-2.0" },
+      ],
+    );
+    markDependenciesAdded(store, "r1", [
+      { name: "hyparquet", version: "1.33.2", licence: "MIT" },
+      { name: "hyparquet-writer", version: "0.18.1", licence: "MIT" },
+      { name: "@scope/pkg", version: "2.0.0", licence: "Apache-2.0" },
+    ]);
+    ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+    tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+    await createPublisher(deps()).openPr(run(), TICKET, "Changed it.");
+    // the scoped name is whole, in a code span, and passes the text check: the title is kept
+    expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
+      title: "#7 Fix the thing",
+      body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\n## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT\n- `hyparquet-writer` 0.18.1, licence MIT\n- `@scope/pkg` 2.0.0, licence Apache-2.0\n\nCloses #7.",
+    });
+  });
+
+  it("lists a committed package as committed, whatever a later allowance names", async () => {
+    const files = ["package.json", "pnpm-lock.yaml"];
+    allowRunDependencies(store, "r1", files, [
+      { name: "hyparquet", version: "1.33.2", licence: "MIT" },
+    ]);
+    markDependenciesAdded(store, "r1", [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }]);
+    allowRunDependencies(store, "r1", files, [
+      { name: "hyparquet", version: "1.40.0", licence: "GPL-3.0" },
+    ]);
+    // a second commit of the same name does not rewrite the record either
+    markDependenciesAdded(store, "r1", [
+      { name: "hyparquet", version: "1.40.0", licence: "GPL-3.0" },
+    ]);
+    ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+    tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+    await createPublisher(deps()).openPr(run(), TICKET, "Changed it.");
+    expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
+      title: "#7 Fix the thing",
+      body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\n## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT\n\nCloses #7.",
     });
   });
 
@@ -2170,6 +2220,28 @@ describe("postMinorFindings", () => {
     expect(posted?.indexOf("Seat rewrite.")).toBeLessThan(posted?.indexOf(MINOR_HEADING) ?? 0);
   });
 
+  it("replaces a seat body's added dependencies section from the current allowance", async () => {
+    allowRunDependencies(
+      store,
+      R.id,
+      ["package.json"],
+      [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }],
+    );
+    markDependenciesAdded(store, R.id, [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }]);
+    answer(
+      JSON.stringify({
+        headRefName: BRANCH,
+        state: "OPEN",
+        body: "Seat rewrite.\n\n## Added dependencies\n\n- `old-package` 1.0.0, licence ISC\n\nCloses #7.\n",
+      }),
+    );
+    await createPublisher(deps()).postMinorFindings(R, review([minor("first")]));
+    expect(posted).toContain("Seat rewrite.");
+    expect(posted).toContain("- `hyparquet` 1.33.2, licence MIT");
+    expect(posted).not.toContain("old-package");
+    expect(posted?.match(/## Added dependencies/g)).toHaveLength(1);
+  });
+
   it("gives a seat's body Part of, not Closes, once a later note says Part of", async () => {
     store.addEvidence(R.id, "Part of #7: stage 2.", START + 1000);
     answer(
@@ -2600,6 +2672,27 @@ describe("merge steps", () => {
         "merge-base": `${BASE}\n`,
         "rev-list": `${SHA}\n`,
         diff: "src/a.ts\0docs/b.md\0package.json\0",
+      };
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({
+        facts: { strays: ["docs/b.md"] },
+      });
+    });
+
+    it("leaves the files of the run's dependency allowance out of the strays", async () => {
+      store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
+      allowRunDependencies(
+        store,
+        R.id,
+        ["package.json", "pnpm-lock.yaml"],
+        [{ name: "hyparquet", version: "1.33.2", licence: "MIT" }],
+      );
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [HAVE_MAIN]: "",
+        [ANCESTOR]: "",
+        "merge-base": `${BASE}\n`,
+        "rev-list": `${SHA}\n`,
+        diff: "src/a.ts\0docs/b.md\0package.json\0pnpm-lock.yaml\0",
       };
       expect(await withArea().gateFacts(R, SHA)).toMatchObject({
         facts: { strays: ["docs/b.md"] },
