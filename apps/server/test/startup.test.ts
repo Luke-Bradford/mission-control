@@ -78,7 +78,9 @@ vi.mock("../src/api.ts", async (original) => {
     buildApp: (deps: AppDeps) => {
       boot.deps = deps;
       boot.onStreamCount = deps.onStreamCount ?? null;
-      const app = real.buildApp({ ...deps, logger: false });
+      // Fastify injection has no TCP peer for `peerIsSeat` to inspect. Model the operator's
+      // browser here; the capability consumer remains the one wired by `main`.
+      const app = real.buildApp({ ...deps, logger: false, seatPeer: () => false });
       boot.app = app;
       // Exercise main's serve/start ordering and real HTTP routes in process; no listening socket.
       vi.spyOn(app, "listen").mockImplementation(async () => {
@@ -283,6 +285,7 @@ describe("mixed hub startup", () => {
         boot.app?.inject({
           method: "GET",
           url: OPERATOR_BOOTSTRAP_PATH,
+          remoteAddress: "127.0.0.1",
           headers: {
             "sec-fetch-site": "same-origin",
             ...(given === undefined ? {} : { [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: given }),
