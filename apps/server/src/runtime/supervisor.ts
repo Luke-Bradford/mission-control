@@ -1503,7 +1503,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             if (row !== null) failResume(row, "could not end the old session for a fresh one");
             return;
           }
-          await relaunchFresh(info, runId, "crash");
+          const run = store.run(runId);
+          const ticket = run === null ? null : await freshTicket(info, run);
+          if (ticket !== null) return await relaunchFresh(info, runId, "crash", ticket);
+          // with no ticket to start from, the crashed session is resumed as at a hub restart
+          const row = store.seatSession(seatId);
+          if (row === null || runGone(runId, seatId)) return;
+          log(`${seatId}: its ticket could not be read; resuming the crashed session instead`);
+          await resumeOne(row);
         } finally {
           starting.delete(seatId);
         }
@@ -3071,6 +3078,27 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return true;
   }
 
+  /**
+   * The open findings of the PR's latest reported review, most severe first, ten at most: one line
+   * each with the file, line, summary and required fix. What a continuation or fresh session must fix.
+   */
+  function openFindingLines(repoId: string, prNumber: number | null | undefined): string[] {
+    const review = prNumber == null ? null : store.latestReportedReview(repoId, prNumber);
+    if (review === null) return [];
+    const severityRank: Record<string, number> = { Critical: 0, Important: 1 };
+    return store
+      .findingsOf(review.id)
+      .filter((finding) => finding.state === "open" && finding.resolution == null)
+      .sort(
+        (left, right) => (severityRank[left.severity] ?? 2) - (severityRank[right.severity] ?? 2),
+      )
+      .slice(0, 10)
+      .map(
+        (finding) =>
+          `Open ${finding.severity} finding at ${finding.file}:${finding.line}: ${cleanText(finding.summary, 1500)}. Required next action: ${cleanText(finding.fix, 1500)}`,
+      );
+  }
+
   /** The ticket's run notes and the hub's events on it, as a brief shows them; null when there are none. */
   const ticketNotes = (repoId: string, ticket: string): string | null =>
     runNotesText(
@@ -3102,6 +3130,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const why = await freshWhy(l);
     if (why === null) return;
     const seatId = l.info.seat.id;
+    // a fresh session starts from the ticket: unreadable now, the seat carries on and the next
+    // turn's end tries again
+    const ticket = await freshTicket(l.info, l.run);
+    if (ticket === null) {
+      log(`${seatId}: ${freshEventText(why)}, but its ticket could not be read; it carries on`);
+      return;
+    }
     await enqueue(l, async () => {
       if (live.get(seatId) !== l || l.inTurn || l.ending !== null || l.attaching) return;
       if (!l.session.alive || stopping || runGone(l.run.id, seatId)) return;
@@ -3119,19 +3154,37 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           if (row !== null) failResume(row, "could not end the old session for a fresh one");
           return;
         }
-        await relaunchFresh(l.info, l.run.id, why);
+        await relaunchFresh(l.info, l.run.id, why, ticket);
       } finally {
         starting.delete(seatId);
       }
     });
   }
 
+  /** The run's ticket as GitHub has it now (its body holds the plan), or null when it cannot be read. */
+  async function freshTicket(info: SeatInfo, run: Run): Promise<TicketView | null> {
+    const issue = issueOf(run);
+    if (issue === null) return null;
+    try {
+      return await deps.fetchTicket(info.repo, issue);
+    } catch (e) {
+      log(`${info.seat.id}: could not read ${info.repo.github}#${issue}: ${errText(e)}`);
+      return null;
+    }
+  }
+
   /**
    * The run's next CLI session, fresh rather than resumed: same run, branch, worktree and prompt
-   * file, a new session id, and a first line built from the ticket, its run notes and the repo's
-   * lessons. The old process is already gone. A failure ends the run as a failed resume does.
+   * file, a new session id, and a first line built from the ticket (read by the caller), its run
+   * notes, its PR's open review findings and the repo's lessons. The old process is already gone.
+   * A failure ends the run as a failed resume does.
    */
-  async function relaunchFresh(info: SeatInfo, runId: string, why: FreshWhy): Promise<void> {
+  async function relaunchFresh(
+    info: SeatInfo,
+    runId: string,
+    why: FreshWhy,
+    ticket: TicketView,
+  ): Promise<void> {
     const seatId = info.seat.id;
     const row = store.seatSession(seatId);
     const run = store.run(runId);
@@ -3141,9 +3194,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return;
     }
     try {
-      const issue = issueOf(run);
-      if (issue === null) throw new Error("the run names no ticket");
-      const ticket = await deps.fetchTicket(info.repo, issue).catch(() => null);
       const checkout = await existingCheckout(info.session.checkout, row.worktree, run.branch);
       if (stopping || runGone(runId, seatId)) return;
       const cliSessionId = randomUUID();
@@ -3164,11 +3214,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         call: call(info),
         here: seatDef(info.seat).here,
         repo: info.repo.github,
-        issue,
-        title: ticket?.title ?? run.ticketTitle ?? "",
-        body: ticket?.body ?? null,
+        issue: ticket.number,
+        title: ticket.title,
+        body: ticket.body,
+        bodyNote: cutNoteText(
+          ticket.body,
+          ticket.bodyTruncated,
+          ticket.bodyLength ?? ticket.body.length,
+        ),
         branch: run.branch,
         why,
+        findings: openFindingLines(run.repoId, run.loop?.prNumber),
         decisions: store.answeredQuestionsOn(run.ticket, BRIEF_DECISIONS_MAX),
         runNotes: ticketNotes(run.repoId, run.ticket),
         lessons: store.seatMemory.acceptedLessons(run.repoId),
@@ -4491,22 +4547,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ? null
           : (() => {
               const evidence = store.evidenceNotes(priorRun.id).at(-1)?.note;
-              const review =
-                priorRun.loop?.prNumber === null || priorRun.loop?.prNumber === undefined
-                  ? null
-                  : store.latestReportedReview(info.repo.id, priorRun.loop.prNumber);
-              const severityRank: Record<string, number> = { Critical: 0, Important: 1 };
-              const findings =
-                review === null
-                  ? []
-                  : store
-                      .findingsOf(review.id)
-                      .filter((finding) => finding.state === "open" && finding.resolution == null)
-                      .sort(
-                        (left, right) =>
-                          (severityRank[left.severity] ?? 2) - (severityRank[right.severity] ?? 2),
-                      )
-                      .slice(0, 10);
+              const findings = openFindingLines(info.repo.id, priorRun.loop?.prNumber);
               const handoffReason =
                 priorRun.ticket === null
                   ? null
@@ -4533,10 +4574,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                 ...(evidence === undefined
                   ? []
                   : [`Earlier evidence: ${cleanText(evidence, 1500)}`]),
-                ...findings.map(
-                  (finding) =>
-                    `Open ${finding.severity} finding at ${finding.file}:${finding.line}: ${cleanText(finding.summary, 1500)}. Required next action: ${cleanText(finding.fix, 1500)}`,
-                ),
+                ...findings,
               ].join("\n\n");
             })();
       const run: Run = {

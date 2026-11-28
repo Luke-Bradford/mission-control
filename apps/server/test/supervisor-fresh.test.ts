@@ -5,7 +5,16 @@ import { readFileSync } from "node:fs";
 import { freshEventText, NEW_LOOP, RUN_NOTES_LINE, SEAT_FRESH_MAX } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
-import { make, recorded, seatState, store, until, userLines } from "./supervisor-harness.ts";
+import {
+  type FetchTicket,
+  make,
+  recorded,
+  seatState,
+  store,
+  TICKET,
+  until,
+  userLines,
+} from "./supervisor-harness.ts";
 
 skipTestsIf(await blockedHere("crew-run"));
 
@@ -41,10 +50,10 @@ const isResult = (l: Line): boolean => l.type === "result";
 /** Long enough for a turn end's fresh-session check to have run. */
 const settle = () => new Promise((r) => setTimeout(r, 300));
 
-async function loopRun(over: Parameters<typeof make>[0] = {}) {
+async function loopRun(over: Parameters<typeof make>[0] = {}, prNumber: number | null = null) {
   const m = make(over);
   m.sup.start();
-  const { runId } = await m.sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+  const { runId } = await m.sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP, prNumber } });
   return { ...m, runId };
 }
 
@@ -178,5 +187,84 @@ describe("fresh sessions (#2319)", () => {
     await until(() => expect(transcriptLines(runId).filter(isResult)).toHaveLength(4));
     await settle();
     expect(starts()).toHaveLength(2);
+  });
+});
+
+describe("what a fresh session starts from (#2319 review)", () => {
+  /** The ticket reads once (the start), then GitHub cannot be reached. */
+  const readsOnce = (): FetchTicket => {
+    let reads = 0;
+    return async () => {
+      reads++;
+      if (reads > 1) throw new Error("gh: could not reach GitHub");
+      return TICKET;
+    };
+  };
+
+  it("carries the ticket body and the PR's open review findings, file, line and fix", async () => {
+    const { sup, runId } = await loopRun({}, 9);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const review = store.requestReview({
+      authorRunId: runId,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "a".repeat(40),
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 4,
+    });
+    if (review === null) throw new Error("missing review");
+    store.setReviewState(review, ["queued"], "running", { runId: "retro:review", at: 4 });
+    store.recordFindings(review, "retro:review", {
+      verdict: { spec: "fail", quality: "pass" },
+      summary: "findings",
+      findings: [
+        {
+          severity: "Important",
+          file: "apps/server/src/stop.ts",
+          line: 12,
+          summary: "stop() races the exit handler",
+          scenario: "exit during stop",
+          fix: "await the exit before clearing the seat",
+        },
+      ],
+      at: 5,
+    });
+
+    await sup.message("guido-1", "DIE", { interrupt: false });
+    await until(() => expect(userLines().at(-1)).toContain("Fresh session"));
+    const brief = userLines().at(-1) ?? "";
+    expect(brief).toContain(TICKET.body);
+    expect(brief).toContain("## Open review findings");
+    expect(brief).toContain(
+      "Open Important finding at apps/server/src/stop.ts:12: stop() races the exit handler. Required next action: await the exit before clearing the seat",
+    );
+  });
+
+  it("resumes the crashed session, never a fresh one without its ticket, when the ticket cannot be read", async () => {
+    const { sup, runId } = await loopRun({ fetchTicket: readsOnce() });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const first = store.run(runId)?.sessionId ?? "";
+
+    await sup.message("guido-1", "DIE", { interrupt: false });
+    await until(() => expect(starts()).toHaveLength(2));
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    expect(flagOf(starts()[1] ?? [], "--resume")).toBe(first);
+    expect(starts()[1]).not.toContain("--session-id");
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null, sessionId: first });
+    expect(userLines().some((l) => l.includes("Fresh session"))).toBe(false);
+    expect(loopEvents(runId)).not.toContain(freshEventText("crash"));
+  });
+
+  it("past the context line, carries on in its session while the ticket cannot be read", async () => {
+    const { runId } = await loopRun({ fetchTicket: readsOnce(), seatContextRotateTokens: 1 });
+    await until(() => expect(transcriptLines(runId).filter(isResult)).toHaveLength(1));
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await settle();
+    expect(starts()).toHaveLength(1);
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(loopEvents(runId)).not.toContain(freshEventText("context"));
   });
 });

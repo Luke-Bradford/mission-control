@@ -289,9 +289,13 @@ export function freshBrief(i: {
   repo: string;
   issue: number;
   title: string;
-  body: string | null;
+  body: string;
+  /** `cutNoteText` for the body: the line saying it was cut, or null. */
+  bodyNote: string | null;
   branch: string;
   why: FreshWhy;
+  /** The open findings of the PR's latest review, one line each with the file and the fix. */
+  findings: readonly string[];
   decisions?: readonly { question: string; answer: string }[];
   runNotes: string | null;
   lessons: readonly { text: string }[];
@@ -301,8 +305,20 @@ export function freshBrief(i: {
     "",
     `Fresh session: Mission Control started a new session for this run because ${FRESH_WHY_TEXT[i.why]}. Nothing of the earlier session's context carries over. You are still on branch ${i.branch}, in the same worktree, with its commits and any uncommitted changes. Do not redo committed work: read your run notes below and the branch's git log and git status first, then carry on from the next step.`,
     "",
-    ...(i.body === null ? [] : [i.body, ""]),
+    ...(i.bodyNote === null ? [] : [i.bodyNote, ""]),
+    i.body,
+    "",
     ...decisionsSection(i.decisions),
+    ...(i.findings.length === 0
+      ? []
+      : [
+          "## Open review findings",
+          "",
+          "The review of your PR found these; fix each one unless it is already fixed on the branch:",
+          "",
+          wrapExternalText(i.findings.join("\n\n")),
+          "",
+        ]),
     ...(i.runNotes === null
       ? [
           "## Run notes",
