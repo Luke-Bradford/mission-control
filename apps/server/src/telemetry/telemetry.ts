@@ -28,7 +28,7 @@ import { WINDOWS } from "../collectors/usage-common.ts";
 import { agentIds, type CcConfig, configuredAgents, crewSeatDef } from "../config.ts";
 import { crew } from "../hud/hud.ts";
 import { clippedMs, dayFormatter, endOf, lastDays, lockLabel } from "../hud/views.ts";
-import { type PrCache, runPrs, runTicket } from "../run/view.ts";
+import { type PrCache, parseTicket, runPrs, runTicket } from "../run/view.ts";
 import { sessionSpendSplit } from "../spend/sessions.ts";
 import { runSpend } from "../spend/spend.ts";
 import type { Store } from "../store.ts";
@@ -36,6 +36,7 @@ import type { Store } from "../store.ts";
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * 60 * MINUTE_MS;
+const WEEK_MS = 7 * DAY_MS;
 const CHART_STATES = new Set(["running", "waiting", "parked", "idle"] as const);
 
 type Interval = [number, number];
@@ -122,6 +123,10 @@ const addCost = (sum: number | null, c: number | null, f = 1): number | null =>
   c === null ? sum : (sum ?? 0) + c * f;
 
 const ioTokens = (r: Run): number => (r.tokens ? r.tokens.input + r.tokens.output : 0);
+
+/** Every reported usage token: repository efficiency compares against loop token allowances. */
+const usageTokens = (r: Run): number =>
+  r.tokens ? r.tokens.input + r.tokens.output + r.tokens.cacheRead + r.tokens.cacheCreate : 0;
 
 /** Which loops the scoped parts count; null is no restriction. */
 export interface TelemetryScope {
@@ -956,6 +961,136 @@ export function telemetry(
         (a.model ?? "").localeCompare(b.model ?? ""),
     );
 
+  // ── repository weeks ──
+  // These rows deliberately use the configured loop baseline rather than deriving a moving target.
+  // Complete weeks close on the loop's Thursday boundary. The same completed period remains
+  // comparable throughout the following week instead of moving with every local midnight.
+  const localDayStart = startOfLocalDay(now, tz);
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz }).format(
+    new Date(localDayStart + 12 * HOUR_MS),
+  );
+  const daysSinceThursday = { Sun: 3, Mon: 4, Tue: 5, Wed: 6, Thu: 0, Fri: 1, Sat: 2 }[weekday];
+  if (daysSinceThursday === undefined) throw new Error(`Unknown local weekday: ${weekday}`);
+  const currentWindowEnd = startOfLocalDay(
+    localDayStart - daysSinceThursday * DAY_MS + 12 * HOUR_MS,
+    tz,
+  );
+  const weekStarts = Array.from({ length: 4 }, (_, index) =>
+    startOfLocalDay(currentWindowEnd - (4 - index) * WEEK_MS + 12 * HOUR_MS, tz),
+  );
+  const allRuns = store.runsOverlapping(0, now + 1);
+  const allReviews = store.reviewsIn(["reported"]);
+  const repoWeeks: NonNullable<Telemetry["repoWeeks"]> = config.repos.map((repo) => {
+    const repoPrs = store
+      .pullRequests(repo.id)
+      .filter((pr) => pr.mergedAt !== null && pr.mergedAt <= now);
+    const repoMoves = store
+      .flowColumnMoves()
+      .filter((move) => move.repoId === repo.id && move.at <= now);
+    const readyIntervals: Interval[] = [];
+    const readyAt = new Map<number, number>();
+    for (const move of repoMoves) {
+      const began = readyAt.get(move.number);
+      if (began !== undefined && move.column !== "Ready") {
+        readyIntervals.push([began, move.at]);
+        readyAt.delete(move.number);
+      }
+      if (began === undefined && move.column === "Ready") readyAt.set(move.number, move.at);
+    }
+    for (const began of readyAt.values()) readyIntervals.push([began, now]);
+    const repoRuns = allRuns.filter((run) => run.repoId === repo.id);
+    const noSeatWorkingHours = (from: number, to: number): number | null => {
+      if (repoMoves.length === 0) return null;
+      const boundaries = new Set([from, to]);
+      for (const [start, end] of readyIntervals) {
+        if (end > from && start < to) {
+          boundaries.add(Math.max(from, start));
+          boundaries.add(Math.min(to, end));
+        }
+      }
+      for (const run of repoRuns) {
+        const end = endOf(run, now);
+        if (end > from && run.startedAt < to) {
+          boundaries.add(Math.max(from, run.startedAt));
+          boundaries.add(Math.min(to, end));
+        }
+      }
+      const points = [...boundaries].sort((a, b) => a - b);
+      let idleMs = 0;
+      for (let index = 1; index < points.length; index++) {
+        const start = points[index - 1] as number;
+        const end = points[index] as number;
+        const midpoint = start + (end - start) / 2;
+        const hasReady = readyIntervals.some(([a, b]) => a <= midpoint && midpoint < b);
+        const working = repoRuns.some(
+          (run) => run.startedAt <= midpoint && midpoint < endOf(run, now),
+        );
+        if (hasReady && !working) idleMs += end - start;
+      }
+      return idleMs / HOUR_MS;
+    };
+    return {
+      repoId: repo.id,
+      baseline: repo.loopBaseline ?? null,
+      weeks: weekStarts.map((start, index) => {
+        const end = weekStarts[index + 1] ?? currentWindowEnd;
+        const merged = repoPrs.filter(
+          (pr) => pr.mergedAt !== null && pr.mergedAt >= start && pr.mergedAt < end,
+        );
+        const tokens = { claude: 0, codex: 0 };
+        for (const run of repoRuns) {
+          const overlap = share(run, start, end);
+          if (overlap === 0) continue;
+          const vendor =
+            run.vendor ??
+            config.accounts.find(
+              (account) =>
+                account.id === agents.find((agent) => agent.id === run.agentId)?.accountId,
+            )?.vendor ??
+            "claude";
+          if (vendor === "claude" || vendor === "codex")
+            tokens[vendor] += usageTokens(run) * overlap;
+        }
+        const rounds = merged.flatMap((pr) => {
+          const reported = allReviews.filter(
+            (review) => review.repoId === repo.id && review.prNumber === pr.number,
+          );
+          return reported.length === 0 ? [] : [Math.max(...reported.map((review) => review.round))];
+        });
+        const durations = merged.flatMap((pr) => {
+          const mergedAt = pr.mergedAt;
+          const ticket = pr.ticket === null ? null : parseTicket(pr.ticket);
+          if (mergedAt === null || ticket?.repoId !== repo.id) return [];
+          const readyAt = repoMoves.reduce<number | null>(
+            (latest, move) =>
+              move.number === ticket.number && move.column === "Ready" && move.at <= mergedAt
+                ? Math.max(latest ?? move.at, move.at)
+                : latest,
+            null,
+          );
+          return readyAt === null ? [] : [(mergedAt - readyAt) / HOUR_MS];
+        });
+        return {
+          week: dayFormatter(tz)(start),
+          mergedPrs: merged.length,
+          tokensPerMergedPr:
+            merged.length === 0
+              ? { claude: null, codex: null }
+              : {
+                  claude: Math.round(tokens.claude / merged.length),
+                  codex: Math.round(tokens.codex / merged.length),
+                },
+          reviewRoundsPerPr:
+            rounds.length === 0
+              ? null
+              : rounds.reduce((sum, round) => sum + round, 0) / merged.length,
+          medianReadyToMergeHours: median(durations),
+          noSeatWorkingHours: noSeatWorkingHours(start, end),
+        };
+      }),
+    };
+  });
+
   return {
     series,
     today,
@@ -976,5 +1111,6 @@ export function telemetry(
     sessionSpend: sessionSpendSplit(config, store, now),
     capcom,
     totals: totalRows,
+    repoWeeks,
   };
 }

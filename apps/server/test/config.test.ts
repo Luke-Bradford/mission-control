@@ -455,6 +455,40 @@ describe("loadConfig", () => {
 });
 
 describe("parseConfig", () => {
+  it("maps an optional loop baseline and rejects invalid values", () => {
+    const source = readFileSync(EXAMPLE, "utf8");
+    const withBaseline = source.replace(
+      "    project: 2\n",
+      "    project: 2\n    loop_baseline: { merged_prs_per_week: 88, tokens_per_week: 1500000000 }\n",
+    );
+    expect(parseConfig(withBaseline, "baseline").repos[0]?.loopBaseline).toEqual({
+      mergedPrsPerWeek: { min: 88, max: 88 },
+      tokensPerWeek: { min: 1_500_000_000, max: 1_500_000_000 },
+    });
+    const withRange = source.replace(
+      "    project: 2\n",
+      "    project: 2\n    loop_baseline: { merged_prs_per_week: { min: 76, max: 100 }, tokens_per_week: { min: 1300000000, max: 1700000000 } }\n",
+    );
+    expect(parseConfig(withRange, "range baseline").repos[0]?.loopBaseline).toEqual({
+      mergedPrsPerWeek: { min: 76, max: 100 },
+      tokensPerWeek: { min: 1_300_000_000, max: 1_700_000_000 },
+    });
+    expect(parseConfig(source, "without baseline").repos[0]?.loopBaseline).toBeUndefined();
+    for (const value of [
+      "{ merged_prs_per_week: -1, tokens_per_week: 1 }",
+      "{ merged_prs_per_week: no, tokens_per_week: 1 }",
+      "{ merged_prs_per_week: { min: 100, max: 76 }, tokens_per_week: 1 }",
+      "{ merged_prs_per_week: 1 }",
+    ]) {
+      expect(() =>
+        parseConfig(
+          source.replace("    project: 2\n", `    project: 2\n    loop_baseline: ${value}\n`),
+          "bad baseline",
+        ),
+      ).toThrow(ConfigError);
+    }
+  });
+
   it("validates text exactly as loadConfig validates the file", () => {
     const text = readFileSync(EXAMPLE, "utf8");
     expect(parseConfig(text, "example")).toEqual(loadConfig(EXAMPLE));

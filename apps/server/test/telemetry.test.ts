@@ -2379,3 +2379,265 @@ it.each([
     attemptUsage?.length && attemptUsage[0]?.tokens ? 6 : (10 * 13) / 14,
   );
 });
+
+describe("repository weekly telemetry", () => {
+  it("keeps former seats in historical token efficiency", () => {
+    const week = at("2026-10-12T00:00:00Z");
+    store.replacePullRequests("shop-app", [pr(1, week + HOUR), pr(2, week + 2 * HOUR)], 0);
+    store.upsertRun(
+      run({
+        id: "former-seat",
+        agentId: "former-seat",
+        startedAt: week + 3 * HOUR,
+        endedAt: week + 4 * HOUR,
+        vendor: "claude",
+        tokens: tok(58_000_000, 0),
+      }),
+    );
+
+    const row = tel("7d").repoWeeks?.find((value) => value.repoId === "shop-app");
+    expect(row?.weeks).toContainEqual(
+      expect.objectContaining({
+        week: "2026-10-08",
+        tokensPerMergedPr: { claude: 29_000_000, codex: 0 },
+      }),
+    );
+  });
+
+  it("reports mission-control's 19–26 November token efficiency", () => {
+    config.repos.push({
+      id: "mission-control",
+      github: "o/mission-control",
+      project: 4,
+      statusMap: {},
+      autonomy: "draft",
+    });
+    config.loops.push({
+      id: "mission-control-loop",
+      repoId: "mission-control",
+      kind: "ta-loop",
+      accountId: "claude-main",
+      stateDir: join(dir, "mc-loop"),
+      worktree: join(dir, "mc-worktree"),
+      launchdLabel: "mc-loop",
+    });
+    const mergedAt = at("2026-11-20T12:00:00Z");
+    store.replacePullRequests(
+      "mission-control",
+      [
+        pr(1, mergedAt, "mission-control"),
+        pr(2, mergedAt + HOUR, "mission-control"),
+        pr(3, at("2026-11-24T12:00:00Z"), "mission-control"),
+        pr(4, at("2026-11-24T13:00:00Z"), "mission-control"),
+      ],
+      0,
+    );
+    store.upsertRun(
+      run({
+        id: "mc-claude-week",
+        agentId: "mission-control-loop",
+        repoId: "mission-control",
+        vendor: "claude",
+        startedAt: at("2026-11-19T00:00:00Z"),
+        endedAt: at("2026-11-20T00:00:00Z"),
+        tokens: tok(0, 0, 100_000_000, 0),
+      }),
+    );
+    store.upsertRun(
+      run({
+        id: "mc-codex-week",
+        agentId: "mission-control-loop",
+        repoId: "mission-control",
+        vendor: "codex",
+        startedAt: at("2026-11-24T00:00:00Z"),
+        endedAt: at("2026-11-25T00:00:00Z"),
+        tokens: tok(0, 0, 16_000_000, 0),
+      }),
+    );
+
+    const row = telemetry(config, store, "7d", at("2026-11-26T12:00:00Z"), ALL).repoWeeks?.find(
+      (value) => value.repoId === "mission-control",
+    );
+    expect(row?.weeks).toContainEqual(
+      expect.objectContaining({
+        week: "2026-11-19",
+        mergedPrs: 4,
+        tokensPerMergedPr: { claude: 25_000_000, codex: 4_000_000 },
+      }),
+    );
+
+    const laterRow = telemetry(
+      config,
+      store,
+      "7d",
+      at("2026-11-28T12:00:00Z"),
+      ALL,
+    ).repoWeeks?.find((value) => value.repoId === "mission-control");
+    expect(laterRow?.weeks).toContainEqual(
+      expect.objectContaining({
+        week: "2026-11-19",
+        mergedPrs: 4,
+        tokensPerMergedPr: { claude: 25_000_000, codex: 4_000_000 },
+      }),
+    );
+  });
+
+  it("uses the linked ticket's Ready transition and excludes one after merge", () => {
+    const week = at("2026-10-12T00:00:00Z");
+    store.replacePullRequests(
+      "shop-app",
+      [
+        { ...pr(99, week + 5 * HOUR), ticket: "shop-app#4" },
+        { ...pr(100, week + 6 * HOUR), ticket: "shop-app#5" },
+      ],
+      0,
+    );
+    store.replaceFlow(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 4,
+          size: "S",
+          startAt: week + HOUR,
+          doneAt: null,
+        },
+        {
+          repoId: "shop-app",
+          number: 5,
+          size: "S",
+          startAt: week + 7 * HOUR,
+          doneAt: null,
+        },
+      ],
+      [],
+      [
+        { repoId: "shop-app", number: 4, at: week + HOUR, column: "Ready" },
+        { repoId: "shop-app", number: 5, at: week + 7 * HOUR, column: "Ready" },
+      ],
+    );
+
+    const row = tel("7d").repoWeeks?.find((value) => value.repoId === "shop-app");
+    expect(row?.weeks).toContainEqual(
+      expect.objectContaining({ week: "2026-10-08", medianReadyToMergeHours: 4 }),
+    );
+  });
+
+  it("separates Claude and Codex tokens per merged PR and keeps the configured loop baseline", () => {
+    (
+      config.repos[0] as (typeof config.repos)[number] & {
+        loopBaseline: {
+          mergedPrsPerWeek: { min: number; max: number };
+          tokensPerWeek: { min: number; max: number };
+        };
+      }
+    ).loopBaseline = {
+      mergedPrsPerWeek: { min: 88, max: 88 },
+      tokensPerWeek: { min: 1_500_000_000, max: 1_500_000_000 },
+    };
+    const week = at("2026-10-12T00:00:00Z");
+    store.replacePullRequests("shop-app", [pr(1, week + HOUR), pr(2, week + 2 * HOUR)], 0);
+    store.upsertRun(
+      run({
+        id: "claude-week",
+        startedAt: week + 3 * HOUR,
+        endedAt: week + 4 * HOUR,
+        vendor: "claude",
+        tokens: tok(20_000_000, 0),
+      }),
+    );
+    store.upsertRun(
+      run({
+        id: "codex-week",
+        startedAt: week + 4 * HOUR,
+        endedAt: week + 5 * HOUR,
+        vendor: "codex",
+        tokens: tok(38_000_000, 0),
+      }),
+    );
+
+    const rows = (
+      tel("7d") as typeof tel extends (...args: never[]) => infer T
+        ? T & { repoWeeks: unknown[] }
+        : never
+    ).repoWeeks;
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        repoId: "shop-app",
+        baseline: {
+          mergedPrsPerWeek: { min: 88, max: 88 },
+          tokensPerWeek: { min: 1_500_000_000, max: 1_500_000_000 },
+        },
+        weeks: expect.arrayContaining([
+          expect.objectContaining({
+            week: "2026-10-08",
+            mergedPrs: 2,
+            tokensPerMergedPr: { claude: 10_000_000, codex: 19_000_000 },
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("reports review rounds, Ready-to-merge median and unstaffed Ready hours", () => {
+    const week = at("2026-10-12T00:00:00Z");
+    store.replacePullRequests(
+      "shop-app",
+      [{ ...pr(3, week + 12 * HOUR), ticket: "shop-app#3" }],
+      0,
+    );
+    store.replaceFlow(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 3,
+          size: "S",
+          startAt: week + 8 * HOUR,
+          doneAt: week + 12 * HOUR,
+        },
+      ],
+      [],
+      [
+        { repoId: "shop-app", number: 3, at: week + 8 * HOUR, column: "Ready" },
+        { repoId: "shop-app", number: 3, at: week + 12 * HOUR, column: "Done" },
+      ],
+    );
+    store.upsertRun(run({ id: "working", startedAt: week + 9 * HOUR, endedAt: week + 10 * HOUR }));
+    const reviewId = store.requestReview({
+      authorRunId: "author",
+      repoId: "shop-app",
+      seatId: "retro",
+      prNumber: 3,
+      sha: "a".repeat(40),
+      epoch: 0,
+      attempt: 1,
+      round: 2,
+      at: week + 10 * HOUR,
+    }) as number;
+    store.setReviewState(reviewId, ["queued"], "running", {
+      at: week + 10 * HOUR,
+      runId: "review",
+    });
+    store.recordFindings(reviewId, "review", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "clear",
+      findings: [],
+      at: week + 11 * HOUR,
+    });
+
+    const row = (
+      tel("7d") as typeof tel extends (...args: never[]) => infer T
+        ? T & { repoWeeks: { repoId: string; weeks: unknown[] }[] }
+        : never
+    ).repoWeeks.find((value) => value.repoId === "shop-app");
+    expect(row?.weeks).toContainEqual(
+      expect.objectContaining({
+        week: "2026-10-08",
+        reviewRoundsPerPr: 2,
+        medianReadyToMergeHours: 4,
+        noSeatWorkingHours: 3,
+      }),
+    );
+  });
+});
