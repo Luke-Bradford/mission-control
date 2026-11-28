@@ -180,6 +180,128 @@ describe("Telemetry, Throughput tab", () => {
     expect(read("Commits per run", "14d")).toEqual(["3.4", "commits"]);
   });
 
+  it("compares four repository weeks with the configured loop baseline", async () => {
+    await open(
+      tel({
+        repoWeeks: [
+          {
+            repoId: "mission-control",
+            baseline: {
+              mergedPrsPerWeek: { min: 88, max: 88 },
+              tokensPerWeek: { min: 1_500_000_000, max: 1_500_000_000 },
+            },
+            weeks: [
+              {
+                week: "2026-11-02",
+                mergedPrs: 101,
+                tokensPerMergedPr: { claude: 20_000_000, codex: 9_000_000 },
+                reviewRoundsPerPr: 1.4,
+                medianReadyToMergeHours: 6.5,
+                noSeatWorkingHours: 2,
+              },
+              {
+                week: "2026-11-09",
+                mergedPrs: 0,
+                tokensPerMergedPr: { claude: null, codex: null },
+                reviewRoundsPerPr: null,
+                medianReadyToMergeHours: null,
+                noSeatWorkingHours: null,
+              },
+            ],
+          },
+          {
+            repoId: "autonomy-engine",
+            baseline: {
+              mergedPrsPerWeek: { min: 76, max: 100 },
+              tokensPerWeek: { min: 1_300_000_000, max: 1_700_000_000 },
+            },
+            weeks: [
+              {
+                week: "2026-11-02",
+                mergedPrs: 80,
+                tokensPerMergedPr: { claude: null, codex: null },
+                reviewRoundsPerPr: null,
+                medianReadyToMergeHours: null,
+                noSeatWorkingHours: null,
+              },
+            ],
+          },
+          {
+            repoId: "eBull",
+            baseline: {
+              mergedPrsPerWeek: { min: 97, max: 161 },
+              tokensPerWeek: { min: 1_500_000_000, max: 2_000_000_000 },
+            },
+            weeks: [
+              {
+                week: "2026-11-02",
+                mergedPrs: 120,
+                tokensPerMergedPr: { claude: null, codex: null },
+                reviewRoundsPerPr: null,
+                medianReadyToMergeHours: null,
+                noSeatWorkingHours: null,
+              },
+            ],
+          },
+          { repoId: "unbaselined", baseline: null, weeks: [] },
+        ],
+      }),
+      "?tab=throughput&view=table",
+    );
+    const scoreboard = panel("tRepoScoreboard");
+    expect(scoreboard.textContent).toContain("Repository throughput");
+    expect(scoreboard.textContent).toContain("mission-control");
+    expect(scoreboard.textContent).toContain("101");
+    expect(scoreboard.textContent).toContain("29M/PR");
+    expect(scoreboard.textContent).toContain("C20M");
+    expect(scoreboard.textContent).toContain("X9M");
+    expect(scoreboard.textContent).toContain("1.4r");
+    expect(scoreboard.textContent).toContain("6.5 h");
+    expect(scoreboard.textContent).toContain("2 h");
+    expect(scoreboard.textContent).toContain("88 PR/wk · 1.5B/wk · 17M/PR");
+    expect(scoreboard.textContent).toContain("76–100 PR/wk · 1.3–1.7B/wk · 13–22.4M/PR");
+    expect(scoreboard.textContent).toContain("97–161 PR/wk · 1.5–2B/wk · 9.3–20.6M/PR");
+    expect(scoreboard.textContent).toContain("4 repositories · all visible");
+    expect(scoreboard.textContent).toContain("No merged PRs");
+    expect(scoreboard.textContent).toContain("Baseline not configured");
+    expect(scoreboard.querySelectorAll(".repo-scoreboard-repo")).toHaveLength(4);
+  });
+
+  it("explains an empty repository comparison and keeps many repositories in the scroll region", async () => {
+    await open(tel({ repoWeeks: [] }), "?tab=throughput&view=table");
+    expect(panel("tRepoScoreboard").textContent).toContain(
+      "No repository telemetry is configured yet.",
+    );
+    cleanup();
+
+    await open(
+      tel({
+        repoWeeks: Array.from({ length: 12 }, (_, index) => ({
+          repoId: `crew-repo-${index + 1}`,
+          baseline: {
+            mergedPrsPerWeek: { min: 88, max: 88 },
+            tokensPerWeek: { min: 1_500_000_000, max: 1_500_000_000 },
+          },
+          weeks: [
+            {
+              week: "2026-11-02",
+              mergedPrs: 1,
+              tokensPerMergedPr: { claude: 29_000_000, codex: null },
+              reviewRoundsPerPr: 1,
+              medianReadyToMergeHours: 1,
+              noSeatWorkingHours: 0,
+            },
+          ],
+        })),
+      }),
+      "?tab=throughput&view=table",
+    );
+    const scoreboard = panel("tRepoScoreboard");
+    expect(scoreboard.querySelectorAll(".repo-scoreboard-repo")).toHaveLength(12);
+    expect(scoreboard.querySelector(".repo-scoreboard-scroll.has-overflow")).toBeTruthy();
+    expect(scoreboard.textContent).toContain("crew-repo-12");
+  });
+
   it("builds the five panels and drops the forecast and the coming note", async () => {
     await open(tel());
     for (const id of ["tMerged", "tCycleTicket", "tCycleSize", "tWip"])

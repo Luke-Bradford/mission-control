@@ -21,6 +21,7 @@ import {
   inertNegatedClosingRefs,
   isFullSuite,
   MC_WRITER_TOOLS,
+  redactSecrets,
   scanSecrets,
   scanText,
   splitCommands,
@@ -901,6 +902,19 @@ describe("scanText", () => {
     const out = scanText("PR body", `fine\nthen ${TOKEN}`, []);
     expect(out).toEqual([{ where: "PR body", line: 2, kind: "GitHub token" }]);
     expect(JSON.stringify(out)).not.toContain(TOKEN);
+  });
+});
+
+describe("redactSecrets", () => {
+  it("hides token patterns, known secrets and secret-named assignments and flags", () => {
+    const known = "local-credential-0123456789";
+    const out = redactSecrets(
+      `GH=${TOKEN} DB_PASSWORD=hunter2 api_key=abc make up --token xyz --password=pw use ${known} ok`,
+      [known],
+    );
+    expect(out).toBe(
+      "GH=[redacted] DB_PASSWORD=[redacted] api_key=[redacted] make up --token [redacted] --password=[redacted] use [redacted] ok",
+    );
   });
 });
 

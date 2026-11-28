@@ -305,6 +305,82 @@ const commit = (message: unknown, ts: McTool[] = tools, ctx: McToolContext = CTX
 const rm = (remove: unknown, message = "chore: drop", ts: McTool[] = tools, ctx = CTX) =>
   tool("commit", ts).call(ctx, { message, remove });
 
+describe("seat terminal tools", () => {
+  it("runs only in the caller's active worktree and returns output with an exit code", async () => {
+    liveSeat("guido-1", RUN);
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: RUN,
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: "/crew/seat",
+      updatedAt: NOW,
+    });
+    const terminalRun = vi.fn().mockResolvedValue({ output: "ok\n", exitCode: 0, timedOut: false });
+    const ts = make({ terminalRun, knownSecrets: async () => ["local-secret-0123456789"] });
+    const result = await tool("terminal_run", ts).call(CTX, {
+      command: "DB_PASSWORD=hunter2 uv run pytest -m db --dsn local-secret-0123456789",
+      timeoutSeconds: 90,
+    });
+    expect(terminalRun).toHaveBeenCalledWith({
+      seatId: "guido-1",
+      runId: RUN,
+      worktree: "/crew/seat",
+      command: "DB_PASSWORD=hunter2 uv run pytest -m db --dsn local-secret-0123456789",
+      timeoutMs: 90_000,
+    });
+    expect(result).toEqual({ text: "Exit code 0.\nok\n" });
+    const trace = store.commsForCrew().at(-1);
+    expect(trace).toMatchObject({ from: "guido-1", to: "crew", ticket: "mc#42" });
+    expect(trace?.text).toBe(
+      "Typed in guido-1's terminal: `DB_PASSWORD=[redacted] uv run pytest -m db --dsn [redacted]`",
+    );
+  });
+
+  it("answers with the output so far when the command passes its timeout", async () => {
+    liveSeat("guido-1", RUN);
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: RUN,
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: "/crew/seat",
+      updatedAt: NOW,
+    });
+    const terminalRun = vi
+      .fn()
+      .mockResolvedValue({ output: "booting\n", exitCode: null, timedOut: true });
+    const result = await tool("terminal_run", make({ terminalRun })).call(CTX, {
+      command: "make up",
+    });
+    expect(terminalRun).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 600_000 }));
+    expect(result.text).toBe(
+      "Still running after 600 s; it keeps running in this seat's terminal pane.\nbooting\n",
+    );
+  });
+
+  it("names a terminal refusal as an error", async () => {
+    liveSeat("guido-1", RUN);
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: RUN,
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: "/crew/seat",
+      updatedAt: NOW,
+    });
+    const terminalRun = vi
+      .fn()
+      .mockRejectedValue(new Error("No live cmux workspace for this seat."));
+    await expect(
+      tool("terminal_run", make({ terminalRun })).call(CTX, { command: "make up" }),
+    ).resolves.toEqual({ text: "No live cmux workspace for this seat.", isError: true });
+  });
+});
+
 beforeEach(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-tools-")));
   clone = join(dir, "clone");
@@ -356,6 +432,10 @@ const seatbeltBlocked = await blockedHere("seatbelt");
 describe("the mc tools", () => {
   it("serves the mode tools under the names the CLI prefixes, and no push or draft_pr", () => {
     expect(tools.map((t) => [t.name, t.modes])).toEqual([
+      [MC_TOOL_NAMES.appStart, ["writer"]],
+      [MC_TOOL_NAMES.appRestart, ["writer"]],
+      [MC_TOOL_NAMES.appStatus, ["writer"]],
+      [MC_TOOL_NAMES.terminalRun, ["writer"]],
       [MC_TOOL_NAMES.commsRead, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsInbox, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsSend, ["writer", "read-only", "scratch"]],
@@ -373,6 +453,10 @@ describe("the mc tools", () => {
       ["report_plan", []],
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
+      MC_TOOLS.appStart,
+      MC_TOOLS.appRestart,
+      MC_TOOLS.appStatus,
+      MC_TOOLS.terminalRun,
       MC_TOOLS.commsRead,
       MC_TOOLS.commsInbox,
       MC_TOOLS.commsSend,
@@ -1528,6 +1612,10 @@ describe("through /mcp", () => {
       const names = async (tok: string) =>
         (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
       expect(await names(writer)).toEqual([
+        "app_start",
+        "app_restart",
+        "app_status",
+        "terminal_run",
         "comms_read",
         "comms_inbox",
         "comms_send",

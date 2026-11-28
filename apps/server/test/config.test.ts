@@ -455,6 +455,40 @@ describe("loadConfig", () => {
 });
 
 describe("parseConfig", () => {
+  it("maps an optional loop baseline and rejects invalid values", () => {
+    const source = readFileSync(EXAMPLE, "utf8");
+    const withBaseline = source.replace(
+      "    project: 2\n",
+      "    project: 2\n    loop_baseline: { merged_prs_per_week: 88, tokens_per_week: 1500000000 }\n",
+    );
+    expect(parseConfig(withBaseline, "baseline").repos[0]?.loopBaseline).toEqual({
+      mergedPrsPerWeek: { min: 88, max: 88 },
+      tokensPerWeek: { min: 1_500_000_000, max: 1_500_000_000 },
+    });
+    const withRange = source.replace(
+      "    project: 2\n",
+      "    project: 2\n    loop_baseline: { merged_prs_per_week: { min: 76, max: 100 }, tokens_per_week: { min: 1300000000, max: 1700000000 } }\n",
+    );
+    expect(parseConfig(withRange, "range baseline").repos[0]?.loopBaseline).toEqual({
+      mergedPrsPerWeek: { min: 76, max: 100 },
+      tokensPerWeek: { min: 1_300_000_000, max: 1_700_000_000 },
+    });
+    expect(parseConfig(source, "without baseline").repos[0]?.loopBaseline).toBeUndefined();
+    for (const value of [
+      "{ merged_prs_per_week: -1, tokens_per_week: 1 }",
+      "{ merged_prs_per_week: no, tokens_per_week: 1 }",
+      "{ merged_prs_per_week: { min: 100, max: 76 }, tokens_per_week: 1 }",
+      "{ merged_prs_per_week: 1 }",
+    ]) {
+      expect(() =>
+        parseConfig(
+          source.replace("    project: 2\n", `    project: 2\n    loop_baseline: ${value}\n`),
+          "bad baseline",
+        ),
+      ).toThrow(ConfigError);
+    }
+  });
+
   it("validates text exactly as loadConfig validates the file", () => {
     const text = readFileSync(EXAMPLE, "utf8");
     expect(parseConfig(text, "example")).toEqual(loadConfig(EXAMPLE));
@@ -1604,6 +1638,32 @@ describe("guard config", () => {
     expect(parse(text).repos[2]?.runCommand).toBeUndefined();
     const empty = text.replace(FULL_SUITE_BLOCK, `${FULL_SUITE_BLOCK}\n    run_command: ""`);
     expect(() => parse(empty)).toThrow();
+  });
+
+  it("loads several development app commands", () => {
+    const apps = text.replace(
+      FULL_SUITE_BLOCK,
+      `${FULL_SUITE_BLOCK}\n    app_commands:\n      - command: pnpm dev\n        url: http://127.0.0.1:$PORT`,
+    );
+    expect(parse(apps).repos[2]?.appCommands).toEqual([
+      { command: "pnpm dev", url: "http://127.0.0.1:$PORT" },
+    ]);
+  });
+
+  it("loads a backend health URL on $BACKEND_PORT, and still refuses one off loopback HTTP", () => {
+    const withUrl = (url: string) =>
+      text.replace(
+        FULL_SUITE_BLOCK,
+        `${FULL_SUITE_BLOCK}\n    app_commands:\n      - command: uv run uvicorn app.main:app --port $BACKEND_PORT\n        url: ${url}`,
+      );
+    expect(parse(withUrl("http://127.0.0.1:$BACKEND_PORT/health")).repos[2]?.appCommands).toEqual([
+      {
+        command: "uv run uvicorn app.main:app --port $BACKEND_PORT",
+        url: "http://127.0.0.1:$BACKEND_PORT/health",
+      },
+    ]);
+    expect(() => parse(withUrl("http://example.com:$BACKEND_PORT/health"))).toThrow();
+    expect(() => parse(withUrl("https://127.0.0.1:$BACKEND_PORT"))).toThrow();
   });
 
   it.each(["rm -rf /", "pnpm -s tests", "pnpm test", "git push"])(

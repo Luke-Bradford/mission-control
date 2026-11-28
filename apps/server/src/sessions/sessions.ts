@@ -15,6 +15,7 @@ import {
   type CmuxSessionsView,
   COMMS_CAPCOM,
   type OpenSessionInput,
+  SESSION_APP_HEALTH_STATUS_KEY,
   SESSION_APP_STATUS_KEY,
   SESSION_LINE_MAX,
   SESSION_NO_APP_TEXT,
@@ -432,7 +433,10 @@ export function createSessions(deps: SessionsDeps): SessionsService {
     if (lastLine === null)
       lastLine = lastScreenLine(await byDeadline(cmux.readScreen(ws.id, SCREEN_TAIL_LINES), ""));
     const statusKey = Object.keys(statuses).find(
-      (k) => k !== SESSION_APP_STATUS_KEY && !k.startsWith(SIDEBAR_KEY_PREFIX),
+      (k) =>
+        k !== SESSION_APP_STATUS_KEY &&
+        k !== SESSION_APP_HEALTH_STATUS_KEY &&
+        !k.startsWith(SIDEBAR_KEY_PREFIX),
     );
     const url = statuses[SESSION_APP_STATUS_KEY]?.trim();
     // a local app's probe starts here but is waited for in `withAnswers`, never inside a row's turn

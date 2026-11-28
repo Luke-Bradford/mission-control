@@ -40,6 +40,7 @@ import {
   ROLE_PROMPT,
   ROLE_PROMPT_DIR,
   type RoleDef,
+  renderAppPorts,
   resolveSeatDef,
   SANDBOX_DENY_READ_HOME,
   type SeatCommands,
@@ -264,6 +265,11 @@ export interface CcConfig {
     id: RepoId;
     github: string;
     project: number;
+    /** October loop baseline, deliberately configured rather than recomputed from current records. */
+    loopBaseline?: {
+      mergedPrsPerWeek: { min: number; max: number };
+      tokensPerWeek: { min: number; max: number };
+    };
     statusMap: Record<string, TicketState>;
     /** Labels that mark an open issue as needing the operator; collector default is ['needs-design']. */
     needsYouLabels?: string[];
@@ -271,6 +277,8 @@ export interface CcConfig {
     fullSuite?: string[];
     /** The command that runs the repo's app from a checkout; the QA readiness card shows it under the branch commands. */
     runCommand?: string;
+    /** Development processes the hub keeps in a dedicated cmux app workspace. */
+    appCommands?: { command: string; url: string }[];
     /** The checks that decide CI on a PR head, by name. [] = every check but mc/review. Loaded: always set. */
     requiredChecks?: string[];
     /** A repository-owned bot whose verdict replaces the crew review. */
@@ -539,6 +547,14 @@ const seatCommand = z.string().superRefine((e, ctx) => {
   if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
 });
 const percent = z.number().min(0).max(100);
+const loopBaselineRange = z
+  .union([
+    z.number().nonnegative(),
+    z
+      .strictObject({ min: z.number().nonnegative(), max: z.number().nonnegative() })
+      .refine((range) => range.min <= range.max, "min must not exceed max"),
+  ])
+  .transform((value) => (typeof value === "number" ? { min: value, max: value } : value));
 const modelName = z.string().regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/");
 export const seatEffort = z.string().min(1);
 const RETIRED_MC_TOOLS: readonly unknown[] = ["code_health", "publish_preview"];
@@ -616,10 +632,31 @@ const fileSchema = z
         id: nonEmpty,
         github: nonEmpty,
         project: z.number().int().positive(),
+        loop_baseline: z
+          .strictObject({
+            merged_prs_per_week: loopBaselineRange,
+            tokens_per_week: loopBaselineRange,
+          })
+          .optional(),
         status_map: z.record(z.string(), ticketState),
         needs_you_labels: z.array(nonEmpty).optional(),
         full_suite: z.array(nonEmpty).default([]),
         run_command: nonEmpty.optional(),
+        app_commands: z
+          .array(
+            z.strictObject({
+              command: nonEmpty,
+              url: nonEmpty.refine((url) => {
+                try {
+                  const parsed = new URL(renderAppPorts(url, 5173, 5182));
+                  return parsed.protocol === "http:" && parsed.hostname === "127.0.0.1";
+                } catch {
+                  return false;
+                }
+              }, "must be a 127.0.0.1 HTTP URL"),
+            }),
+          )
+          .default([]),
         required_checks: z
           .array(
             nonEmpty.refine(
@@ -841,10 +878,19 @@ const fileSchema = z
         id: r.id,
         github: r.github,
         project: r.project,
+        ...(r.loop_baseline === undefined
+          ? {}
+          : {
+              loopBaseline: {
+                mergedPrsPerWeek: r.loop_baseline.merged_prs_per_week,
+                tokensPerWeek: r.loop_baseline.tokens_per_week,
+              },
+            }),
         statusMap: r.status_map,
         ...(r.needs_you_labels === undefined ? {} : { needsYouLabels: r.needs_you_labels }),
         fullSuite: r.full_suite,
         ...(r.run_command === undefined ? {} : { runCommand: r.run_command }),
+        ...(r.app_commands.length === 0 ? {} : { appCommands: r.app_commands }),
         requiredChecks: r.required_checks,
         ...(r.review === undefined
           ? {}

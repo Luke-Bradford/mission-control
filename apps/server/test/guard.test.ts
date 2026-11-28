@@ -963,6 +963,12 @@ describe("POST /api/guard/check", () => {
       expect((await check(tokA, ask("mcp__mc__promote", {}))).body).toBe(REFUSE);
     });
 
+    it("refuses a Bash request that asks to leave the sandbox", async () => {
+      expect(
+        (await check(tokA, ask("Bash", { command: "ls", dangerouslyDisableSandbox: true }))).body,
+      ).toBe(REFUSE);
+    });
+
     it("keeps a seat to its area: an edit outside it is refused, one inside allowed", async () => {
       const cfg = config();
       const seats = cfg.crew?.sessions[0]?.seats ?? [];
@@ -1685,6 +1691,20 @@ describe("hookMain", () => {
       (await hookMain(stdinFor(), [tokenFile, URL_OK], answer(200, guardPermissionOutput(null))))
         .exit,
     ).toBe(2);
+  });
+
+  it("forwards a Bash sandbox escalation request for the guard to refuse", async () => {
+    const stdin = JSON.parse(stdinFor({ hook_event_name: "PermissionRequest", tool_name: "Bash" }));
+    delete stdin.tool_use_id;
+    stdin.tool_input = { command: "ls", dangerouslyDisableSandbox: true };
+    await hookMain(
+      JSON.stringify(stdin),
+      [tokenFile, URL_OK],
+      answer(200, guardPermissionOutput(null)),
+    );
+    expect(JSON.parse(posts[0]?.body ?? "")).toMatchObject({
+      tool_input: { command: "ls", dangerouslyDisableSandbox: true },
+    });
   });
 
   it("refuses a block answer to a tool event", async () => {
