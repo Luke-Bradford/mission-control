@@ -97,6 +97,7 @@ export const FLIGHT_DECISION_KINDS = [
   "approval",
   "shell",
   "grant",
+  "dependency",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
