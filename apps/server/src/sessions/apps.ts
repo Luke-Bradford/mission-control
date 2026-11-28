@@ -43,7 +43,6 @@ export interface CrewAppSeat {
 }
 interface CrewAppsDeps {
   cmux: Pick<Cmux, "closePane" | "newPane" | "setStatus" | "readPane" | "workspaces">;
-  run(command: string, args: string[]): Promise<string>;
   repos(): readonly CrewAppRepo[];
   seats(): readonly CrewAppSeat[];
   now?(): number;
@@ -75,10 +74,8 @@ export async function seatWorkspace(
   );
 }
 const urlAt = (url: string, port: number) => url.replaceAll("$PORT", String(port));
-const pidOf = (seat: string, index: number) =>
-  `.mc-app-${seat.replaceAll(/[^a-zA-Z0-9_-]/g, "-")}-${index}.pid`;
 const quote = (value: string) => `'${value.replaceAll("'", "'\\\"'\\\"'")}'`;
-function commandAt(repo: string, command: string, port: number, backendPort: number, pid: string) {
+export function appCommand(repo: string, command: string, port: number, backendPort: number) {
   const rendered = command
     .replaceAll("$PORT", String(port))
     .replaceAll("$BACKEND_PORT", String(backendPort));
@@ -86,7 +83,7 @@ function commandAt(repo: string, command: string, port: number, backendPort: num
     repo.toLowerCase() === "ebull" && /cd frontend &&/.test(rendered)
       ? ` VITE_API_PROXY_TARGET=http://127.0.0.1:${backendPort}`
       : "";
-  return `sh -lc ${quote(`echo $$ > ${quote(pid)}; exec PORT=${port} BACKEND_PORT=${backendPort}${proxy} ${rendered}`)}`;
+  return `exec env PORT=${port} BACKEND_PORT=${backendPort}${proxy} sh -lc ${quote(rendered)}`;
 }
 export function createCrewApps(deps: CrewAppsDeps): CrewApps {
   const now = deps.now ?? Date.now;
@@ -125,14 +122,8 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
   const stop = async (seatId: string) => {
     const app = running.get(seatId);
     if (!app) return;
-    for (const index of app.repo.commands.keys()) {
-      const pid = `${app.worktree}/${pidOf(seatId, index)}`;
-      await deps.run("sh", [
-        "-lc",
-        `if test -r ${quote(pid)}; then kill "$(cat ${quote(pid)})" 2>/dev/null || true; fi`,
-      ]);
-    }
     await Promise.all(app.apps.map((entry) => deps.cmux.closePane(entry.pane).catch(() => {})));
+    await deps.cmux.setStatus(app.workspace, SESSION_APP_STATUS_KEY, "");
     running.delete(seatId);
     reservedPorts.delete(seatId);
     deps.log?.(`Stopped ${seatId}'s ${app.repo.id} app panes.`);
@@ -155,11 +146,11 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
       const pane = await deps.cmux.newPane(
         workspace,
         seat.worktree,
-        commandAt(repo.id, entry.command, port, backendPort, pidOf(seatId, index)),
+        appCommand(repo.id, entry.command, port, backendPort),
       );
       apps.push({ pane, url: urlAt(entry.url, port), answers: null });
     }
-    await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, apps[0]?.url ?? "");
+    await deps.cmux.setStatus(workspace, SESSION_APP_STATUS_KEY, appStatus(apps));
     running.set(seatId, { workspace, worktree: seat.worktree, repo, portStart: startPort, apps });
     deps.log?.(`Started ${seatId}'s ${repo.id} app panes.`);
   };
@@ -192,8 +183,17 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
         app.apps.forEach((entry, index) => {
           entry.answers = answers[index] ?? false;
         });
+        await deps.cmux.setStatus(app.workspace, SESSION_APP_STATUS_KEY, appStatus(app.apps));
+        const alive = await Promise.all(
+          app.apps.map((entry) =>
+            deps.cmux
+              .readPane(entry.pane, 1)
+              .then(() => true)
+              .catch(() => false),
+          ),
+        );
         if (
-          answers.every(Boolean) ||
+          alive.every(Boolean) ||
           (app.restartedAt !== undefined && now() - app.restartedAt < APP_RESTART_MS)
         )
           continue;
@@ -227,4 +227,12 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
       });
     },
   };
+}
+function appStatus(apps: { url: string; answers: boolean | null }[]) {
+  return apps
+    .map(
+      ({ url, answers }) =>
+        `${url} ${answers === true ? "answers" : answers === false ? "not answering" : "starting"}`,
+    )
+    .join(" · ");
 }

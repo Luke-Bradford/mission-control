@@ -1077,10 +1077,6 @@ export async function main(): Promise<void> {
   const cmux = createCmux([CMUX_COMMAND], (m) => log(m));
   crewApps = createCrewApps({
     cmux,
-    run: (command, args) =>
-      new Promise<string>((resolve, reject) =>
-        execFile(command, args, (error, stdout) => (error ? reject(error) : resolve(stdout))),
-      ),
     repos: () =>
       config.repos.flatMap((repo) => {
         const commands = repo.appCommands ?? CREW_APP_DEFAULTS[repo.id.toLowerCase()];

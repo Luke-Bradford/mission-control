@@ -14,7 +14,6 @@ describe("crew apps", () => {
     const pane = cmux();
     const apps = createCrewApps({
       cmux: pane,
-      run: vi.fn(),
       repos: () => [{ id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] }],
       seats: () => [seat],
     });
@@ -30,7 +29,11 @@ describe("crew apps", () => {
       "/crew/ebull",
       expect.stringContaining("PORT=5174 BACKEND_PORT=5173"),
     );
-    expect(pane.setStatus).toHaveBeenCalledWith("ws", "app", "http://127.0.0.1:5173");
+    expect(pane.setStatus).toHaveBeenCalledWith(
+      "ws",
+      "app",
+      "http://127.0.0.1:5173 starting · http://127.0.0.1:5174 starting",
+    );
   });
   it("keeps autonomy-engine and eBull in their own live seat workspaces", async () => {
     const ae = { id: "guido-ae", repoId: "autonomy-engine", worktree: "/crew/autonomy" };
@@ -41,7 +44,6 @@ describe("crew apps", () => {
     ]);
     const apps = createCrewApps({
       cmux: pane,
-      run: vi.fn(),
       repos: () => [
         { id: "autonomy-engine", commands: CREW_APP_DEFAULTS["autonomy-engine"] ?? [] },
         { id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] },
@@ -73,7 +75,6 @@ describe("crew apps", () => {
     ]);
     const apps = createCrewApps({
       cmux: pane,
-      run: vi.fn(),
       repos: () => [
         { id: "autonomy-engine", commands: CREW_APP_DEFAULTS["autonomy-engine"] ?? [] },
         { id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] },
@@ -98,7 +99,6 @@ describe("crew apps", () => {
     pane.readPane.mockImplementation(async (surface: string) => `${surface} lines`);
     const apps = createCrewApps({
       cmux: pane,
-      run: vi.fn(),
       repos: () => [{ id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] }],
       seats: () => [seat],
     });
@@ -113,10 +113,8 @@ describe("crew apps", () => {
     let seats = [seat];
     let at = 0;
     const pane = cmux();
-    const run = vi.fn();
     const apps = createCrewApps({
       cmux: pane,
-      run,
       repos: () => [{ id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] }],
       seats: () => seats,
       now: () => at,
@@ -125,21 +123,18 @@ describe("crew apps", () => {
     await apps.start(seat.id);
     await apps.tick();
     await apps.tick();
-    expect(pane.newPane).toHaveBeenCalledTimes(4);
+    expect(pane.newPane).toHaveBeenCalledTimes(2);
     at = 5 * 60_000;
     await apps.tick();
-    expect(pane.newPane).toHaveBeenCalledTimes(6);
-    run.mockClear();
+    expect(pane.newPane).toHaveBeenCalledTimes(2);
     pane.closePane.mockClear();
     seats = [];
     await apps.tick();
-    expect(run).toHaveBeenCalledTimes(2);
     expect(pane.closePane).toHaveBeenCalledTimes(2);
   });
   it("refuses eBull's launchd-owned jobs command", async () => {
     const apps = createCrewApps({
       cmux: cmux(),
-      run: vi.fn(),
       repos: () => [
         {
           id: "ebull",

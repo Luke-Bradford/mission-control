@@ -13,7 +13,7 @@ import {
 } from "@mc/core";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { AppDeps } from "../api.ts";
+import { type AppDeps, LOOP_WRITES_DISABLED } from "../api.ts";
 import { checkCommand } from "../engine/rule-config.ts";
 import { operatorTokenMatches } from "../operator.ts";
 import { CmuxError } from "../runtime/cmux.ts";
@@ -102,6 +102,7 @@ export function registerSessionRoutes(api: FastifyInstance, deps: AppDeps): void
       const action = AppAction.safeParse(req.params.action);
       if (!action.success) return reply.code(404).send({ error: "No app action has that name." });
       if (!deps.crewApps) return reply.code(503).send({ error: SESSIONS_OFF_TEXT });
+      if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
       const found = deps.crewApps.view().some((app) => app.id === req.params.seat);
       if (!found) return reply.code(404).send({ error: "No crew app runs for that seat." });
       try {
