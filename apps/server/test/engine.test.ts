@@ -776,7 +776,13 @@ function harness(): Harness {
             x.asides.push(runId);
             const r = store.run(runId);
             const row = r === null ? null : store.seatSession(r.agentId);
-            if (!x.asideOn || r === null || row?.runId !== runId || row.worktree === null) {
+            if (
+              !x.asideOn ||
+              x.facts?.inTurn ||
+              r === null ||
+              row?.runId !== runId ||
+              row.worktree === null
+            ) {
               return null;
             }
             store.setSeatSession({ ...row, runId: null, cliSessionId: null, worktree: null });
@@ -789,6 +795,9 @@ function harness(): Harness {
             const r = store.run(runId);
             const aside = r?.loop?.hold?.worktree;
             if (r === null || !aside) throw new SupervisorError(409, "the run is not waiting");
+            const row = store.seatSession(r.agentId);
+            if (row !== null && row.runId !== null)
+              throw new SupervisorError(409, "GUIDO-1 already has a run");
             seatIdle(runId, r.agentId);
           },
           busy: () => x.busyList,
@@ -1859,16 +1868,27 @@ describe("CI and review", () => {
     });
 
     it("a seat another live run holds: sets the run aside and wakes it, within 5 minutes", async () => {
-      store.upsertRun(run({ id: `${SEAT}:other` }));
+      const other = `${SEAT}:other`;
+      store.upsertRun(run({ id: other, seq: 2 }));
       const failedAt = await failWithStaleTurn("owner");
       const row = store.seatSession(SEAT);
       if (row === null) throw new Error("no seat row");
-      store.setSeatSession({ ...row, runId: `${SEAT}:other` });
+      store.setSeatSession({ ...row, runId: other });
+      h.asideOn = true;
+      // The holder is mid-turn when the red run is first due back. It must not be interrupted.
+      h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      clock += 2 * MIN;
+      await h.engine.tick();
+      expect(h.asides).toEqual([]);
+      h.facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
       await untilSent(failedAt);
       expect(clock - failedAt).toBeLessThan(5 * MIN);
-      // the other run's row is never taken: the run went aside and came back by its wake
+      // The occupied-seat wake is refused. The holder yields between turns, then the red run wakes.
       expect(h.staleTurns).toEqual([`aside:${SEAT}`]);
-      expect(h.wakes).toEqual([RUN]);
+      expect(h.asides).toEqual([other]);
+      expect(h.wakes.filter((runId) => runId === RUN)).toHaveLength(3);
+      expect(h.wakes).toContain(other);
+      expect(store.run(other)?.loop?.hold).toMatchObject({ worktree: join(dir, "wt"), wake: true });
       expect(h.sent[0]?.key).toBe(`ci:${RUN}:${SHA}`);
       expect(h.sent[0]?.text).toContain("1) [chromium] › e2e/board.spec.ts:12:5 › shows the board");
       expect(loopTexts().some((t) => t.includes("set this run aside"))).toBe(true);

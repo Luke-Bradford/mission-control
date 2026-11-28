@@ -775,6 +775,40 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /**
+   * A red PR may need its seat back while a later run holds it. The holder only leaves between
+   * turns; its own wake stays due, behind the older CI repair, so it can carry on afterwards.
+   */
+  async function yieldCiRelayHolder(holder: Run, red: Run, at: number): Promise<boolean> {
+    const loop = holder.loop;
+    const row = supervisor.seat(holder.agentId);
+    if (
+      loop === null ||
+      loop === undefined ||
+      loop.phase !== "working" ||
+      loop.hold?.worktree ||
+      row?.runId !== holder.id ||
+      row.worktree === null ||
+      supervisor.seatFacts(holder.agentId)?.inTurn
+    )
+      return false;
+    const before = loop.hold;
+    const next = { ...loop, hold: leaveSeat(before, row.worktree, true) };
+    store.setRunLoop(holder.id, next);
+    const aside = await supervisor.setAside(holder.id);
+    if (aside === null) {
+      store.setRunLoop(holder.id, loop);
+      return false;
+    }
+    store.addLoopEvent(
+      `${holder.id}:relay-yield:${red.id}:${red.loop?.ciFailedSha ?? ""}`,
+      holder.id,
+      `${seatCallSign(holder.agentId)} yielded its seat for the CI failure on ${red.ticket ?? red.id}`,
+      at,
+    );
+    return true;
+  }
+
+  /**
    * The hub may move a run's worktree: its seat is not in a turn and not starting one (a run off
    * its seat has no turn to race). A seat with no live session counts as idle.
    */
@@ -2038,8 +2072,11 @@ export function createEngine(deps: EngineDeps): Engine {
               holder !== null &&
               holder !== run.id &&
               store.run(holder)?.loop?.phase === "working"
-            )
+            ) {
+              const held = store.run(holder);
+              if (held !== null && (await yieldCiRelayHolder(held, run, at))) out.again = true;
               void reconcileRun(holder);
+            }
             return;
           }
           wakeRetries.delete(run.id);
