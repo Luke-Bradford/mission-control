@@ -319,8 +319,8 @@ export interface CmuxSessionInput {
   claudeConfigDir?: string;
   /** The node that runs the hub's own tools: its folder goes first on PATH. */
   nodeDir?: string;
-  /** A durable seat workspace. Claude is launched in its existing terminal and it stays after exit. */
-  workspace?: string;
+  /** The seat's own workspace: Claude is launched in its existing terminal, and it stays after Claude exits. */
+  seatWorkspace?: string;
   /** Called once the workspace exists and again once Claude's pid is known; and when it is closed (null). */
   save?: (state: CmuxSaved | null) => void;
   log?: (m: string) => void;
@@ -469,7 +469,7 @@ function createCmuxDriver(
    * shell behind under its name. `always` closes a durable one too (a Claude the hub did not start runs in it).
    */
   async function closeWorkspace(always = false): Promise<void> {
-    if (workspace !== "" && (always || i.workspace === undefined)) {
+    if (workspace !== "" && (always || i.seatWorkspace === undefined)) {
       try {
         await i.cmux.close(workspace);
       } catch (e) {
@@ -910,7 +910,7 @@ function createCmuxDriver(
    * is known gone; one that will not stop ends the run instead.
    */
   async function failStart(reason: string): Promise<void> {
-    if (workspace !== "" && i.workspace === undefined) {
+    if (workspace !== "" && i.seatWorkspace === undefined) {
       await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
     }
     const stopped = await stopLaunched();
@@ -1024,8 +1024,9 @@ function createCmuxDriver(
       if (!finished && !closing) {
         closing = true;
         await closeWorkspace();
-        // closed before Claude was up: its launcher may be mid-start, so it is stopped, then its files go
-        if (!readyYet) {
+        // closed before Claude was up: its launcher may be mid-start, so it is stopped, then its files go.
+        // In the seat's own workspace Claude is always stopped: the workspace stays for the next run.
+        if (!readyYet || i.seatWorkspace !== undefined) {
           await stopLaunched();
           removeLaunchFiles();
         }
@@ -1105,14 +1106,14 @@ export function startCmuxSession(i: CmuxSessionInput): CrewSession {
         { mode: 0o700 },
       );
       const workspace =
-        i.workspace ??
+        i.seatWorkspace ??
         (await i.cmux.newWorkspace({
           name: i.name,
           cwd: i.cwd,
           command: quote(script),
         }));
       i.save?.({ workspace, pid: null });
-      if (i.workspace !== undefined)
+      if (i.seatWorkspace !== undefined)
         await i.cmux.send(workspace, `cd ${quote(i.cwd)} && ${quote(script)}`);
       core.begin(workspace);
     } catch (e) {

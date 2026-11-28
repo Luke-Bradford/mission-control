@@ -2087,6 +2087,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (cmux !== null && run.vendor !== "codex") {
       try {
         await cmux.ensure();
+        // the seat's own workspace in the Mission Control group; one cmux cannot make is a keeper start too
+        await reconcileCmuxWorkspaces();
         inCmux = true;
       } catch (e) {
         if (!(e instanceof CmuxError)) throw e;
@@ -2095,8 +2097,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       if (stopping) throw new Error(SHUTTING_DOWN);
       if (inCmux) {
-        await reconcileCmuxWorkspaces();
-        // a resume starts a new workspace: the old one (its Claude gone, or about to be replaced) closes
+        // a run from before seat workspaces holds its own: it closes; the seat's own one stays
         const durableWorkspace = store.getSetting(cmuxSeatWorkspaceKey(info.seat.id));
         const priorWorkspace = savedWorkspace(run.id);
         if (priorWorkspace?.workspace !== durableWorkspace && !(await closeWorkspace(run.id)))
@@ -2604,7 +2605,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             source: resume ? savedSource(run.id) : null,
             ...(store.getSetting(cmuxSeatWorkspaceKey(info.seat.id)) === null
               ? {}
-              : { workspace: store.getSetting(cmuxSeatWorkspaceKey(info.seat.id)) as string }),
+              : { seatWorkspace: store.getSetting(cmuxSeatWorkspaceKey(info.seat.id)) as string }),
             save: (saved) => keepWorkspace(run.id, saved),
             log,
             ...(deps.cmuxPollMs === undefined ? {} : { pollMs: deps.cmuxPollMs }),
@@ -2612,7 +2613,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           });
           const seatWorkspace = store.getSetting(cmuxSeatWorkspaceKey(info.seat.id));
           if (seatWorkspace !== null) {
-            const ticket = run.ticket === null ? info.seat.role : `#${run.ticket}`;
+            const ticket = run.ticket ?? info.seat.role;
             store.setSetting(`cmux.seat-ticket:${info.seat.id}`, ticket);
             void cmux
               .setStatus(seatWorkspace, "mc-seat", `Running · ${ticket}`)
@@ -3538,6 +3539,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       log,
       ...(deps.cmuxPollMs === undefined ? {} : { pollMs: deps.cmuxPollMs }),
       workspace: saved.workspace,
+      ...(store.getSetting(cmuxSeatWorkspaceKey(row.seatId)) === saved.workspace
+        ? { seatWorkspace: saved.workspace }
+        : {}),
       pid: saved.pid,
       // the durable cursor outlives the workspace setting, which a fresh resume has not yet given one
       source: savedSource(runId) ?? saved.source ?? null,

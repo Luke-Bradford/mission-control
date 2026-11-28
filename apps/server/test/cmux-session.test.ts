@@ -1401,6 +1401,28 @@ describe("with no cmux record of the session", () => {
     expect(existsSync(join(root, "run", CMUX_ENV_FILE))).toBe(false);
   });
 
+  it("in the seat's own workspace, a close stops Claude and leaves the workspace open", async () => {
+    const seat = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    patch((s) => {
+      s.autoClaude = false;
+      s.screen = PROMPT_SCREEN;
+      s.workspaces = [{ id: seat, ref: "workspace:1", name: "writer-1 · o/repo", cwd: root }];
+    });
+    const h = start({ claudeConfigDir: join(root, "config"), seatWorkspace: seat });
+    // the launcher goes into the seat's shell: no new workspace
+    await wait(() => (state().sent ?? []).length > 0);
+    expect(state().sent[0].ws).toBe(seat);
+    expect(state().workspaces).toHaveLength(1);
+    const c = sleeper();
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${c.pid}\n`);
+    await h.session.ready;
+    await h.session.close();
+    expect(gonePid(c.pid as number)).toBe(true);
+    expect(state().closed ?? []).not.toContain(seat);
+    expect(state().workspaces.map((w: { id: string }) => w.id)).toContain(seat);
+    expect(h.saved.at(-1)).toBeNull();
+  });
+
   it("ends when Claude's process ends", async () => {
     const h = await bare();
     const c = sleeper();

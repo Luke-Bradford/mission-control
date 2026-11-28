@@ -94,7 +94,8 @@ const launchClaude = (workspace, command) => {
   const script = readFileSync(command.replace(/^'|'$/g, "").replaceAll("'\\''", "'"), "utf8");
   const m = script.match(/'--(?:session-id|resume)' '([^']+)'/);
   if (!m) return;
-  state.sessions ??= [];
+  // one terminal runs one Claude: a new one replaces the record of the one before it there
+  state.sessions = (state.sessions ?? []).filter((r) => r.workspace_id !== workspace);
   const dir = state.transcriptDir ?? "/tmp";
   state.sessions.push({
     session_id: m[1],
