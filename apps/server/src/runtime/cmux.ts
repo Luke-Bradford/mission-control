@@ -275,8 +275,7 @@ export function parseWorkspaceGroups(text: string): CmuxWorkspaceGroup[] {
         id,
         externalId: typeof externalId === "string" ? externalId : null,
         name,
-        anchorWorkspaceId:
-          typeof anchor === "string" ? anchor : (workspaceIds.at(0) ?? null),
+        anchorWorkspaceId: typeof anchor === "string" ? anchor : (workspaceIds.at(0) ?? null),
         workspaceIds,
       });
   }

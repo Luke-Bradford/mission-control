@@ -185,7 +185,8 @@ switch (cmd) {
       ok("OK");
     }
     if (sub === "set-icon") {
-      if (more.length !== 3 || more[1] !== "--symbol") fail("set-icon expects <group> --symbol <symbol>");
+      if (more.length !== 3 || more[1] !== "--symbol")
+        fail("set-icon expects <group> --symbol <symbol>");
       ok("OK");
     }
     fail(`unknown workspace-group command ${sub}`);
