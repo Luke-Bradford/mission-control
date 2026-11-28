@@ -31,7 +31,7 @@ import { USAGE_STALE_MAX_MS } from "../src/collectors/usage-claude.ts";
 import { pausedSeat, writeCrewPause } from "../src/config/crew-pause.ts";
 import { ProfilesError } from "../src/config/profiles.ts";
 import type { CcConfig } from "../src/config.ts";
-import { wakeDueAsideRun } from "../src/engine/aside.ts";
+import { asideWakeDue, wakeDueAsideRun } from "../src/engine/aside.ts";
 import {
   accountAtStop,
   accountHoldsNewWork,
@@ -1313,6 +1313,85 @@ describe("takeNext", () => {
     expect(store.queue(SERVER)[0]?.takenAt).toBeNull();
     store.upsertPullRequests(REPO, [pr({ ci: "failing", headSha: "b".repeat(40) })], NOW);
     expect(seatMayTake(store, SERVER)).toBe(true);
+  });
+
+  it("a parked run set aside is not due back: the seat's newer run with a CI fix due wakes", () => {
+    const SHA = "a".repeat(40);
+    const off = { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false };
+    // the older run parked at the review cap, its last review's blocking findings never sent
+    store.upsertRun(
+      run({
+        id: "r-parked",
+        agentId: SERVER,
+        ticket: `${REPO}#9`,
+        startedAt: NOW - 20 * 60_000,
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          prNumber: 11,
+          hold: { ...off, kind: "review", reason: "review cap" },
+        },
+      }),
+    );
+    store.setRunPush({ runId: "r-parked", sha: SHA, at: NOW });
+    const id = store.requestReview({
+      authorRunId: "r-parked",
+      repoId: REPO,
+      seatId: "retro",
+      prNumber: 11,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW,
+    });
+    if (id === null) throw new Error("no review");
+    store.setReviewState(id, ["queued"], "running", { at: NOW, runId: "rr" });
+    store.recordFindings(id, "rr", {
+      verdict: { spec: "pass", quality: "fail" },
+      summary: "s",
+      findings: [
+        { severity: "Important", file: "a.ts", line: 1, summary: "s", scenario: "w", fix: "f" },
+      ],
+      at: NOW,
+    });
+    // the newer run is in ci, failing on its pushed sha after its re-run
+    store.upsertRun(
+      run({
+        id: "r-ci",
+        agentId: SERVER,
+        ticket: `${REPO}#8`,
+        startedAt: NOW - 10 * 60_000,
+        loop: { ...NEW_LOOP, phase: "ci", prNumber: 12, hold: off, ciFailedSha: SHA },
+      }),
+    );
+    store.setRunPush({ runId: "r-ci", sha: SHA, at: NOW });
+    store.upsertPullRequests(
+      REPO,
+      [
+        {
+          repoId: REPO,
+          number: 12,
+          title: "t",
+          url: "u",
+          branch: "b",
+          ticket: null,
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: "failing",
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: null,
+          headSha: SHA,
+          mergeable: "MERGEABLE",
+        },
+      ],
+      NOW,
+    );
+    seatRow("idle");
+    expect(asideWakeDue(store, defined(store.run("r-parked")))).toBe(false);
+    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-ci");
   });
 
   it("the cap: a seat with two runs set aside takes no third", async () => {
