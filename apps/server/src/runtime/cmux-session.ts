@@ -548,6 +548,7 @@ function createCmuxDriver(
   // an attach has its own record to wait for: the first poll says `attached`
   const queue: string[] = [];
   let pumping = false;
+  let pumpingPromise: Promise<void> | null = null;
   const startedAt = Date.now();
   const configDir = i.claudeConfigDir ?? claudeConfigDir(i.env);
   /** Whether Claude's last top-level line leaves it a turn to finish (a prompt, a tool call or a result). */
@@ -1026,7 +1027,7 @@ function createCmuxDriver(
     // one word per refusal: a dialog still showing at the next look adds none while one waits
     if (!queue.includes(CMUX_TOOL_REFUSED_TEXT)) {
       queue.push(CMUX_TOOL_REFUSED_TEXT);
-      void pump();
+      startPump();
     }
     return true;
   }
@@ -1041,7 +1042,7 @@ function createCmuxDriver(
       lifecycle = rec.lifecycle;
       i.save?.({ workspace, pid });
       resolveReady();
-      void pump();
+      startPump();
       return;
     }
     if (Date.now() - startedAt >= (i.startWaitMs ?? START_WAIT_MS)) {
@@ -1076,7 +1077,7 @@ function createCmuxDriver(
       log(`${i.name}: Claude is up (pid ${launched}); cmux has no record of it yet`);
       i.save?.({ workspace, pid });
       resolveReady();
-      void pump();
+      startPump();
       return;
     }
     if (menu === null || Date.now() - trustAt < TRUST_KEY_GAP_MS) return;
@@ -1176,6 +1177,16 @@ function createCmuxDriver(
     }
   }
 
+  /** cmux owns its send child until its paste has settled; close waits for it. */
+  function startPump(): void {
+    if (pumpingPromise !== null) return;
+    const task = pump();
+    pumpingPromise = task;
+    void task.finally(() => {
+      if (pumpingPromise === task) pumpingPromise = null;
+    });
+  }
+
   const session: CrewSession = {
     send(text) {
       if (!alive || closing) throw new SessionControlError("ended", "session ended");
@@ -1189,7 +1200,7 @@ function createCmuxDriver(
         typed = cmuxMessageText(path);
       }
       queue.push(typed);
-      void pump();
+      startPump();
     },
     control(subtype, opts) {
       if (!alive || closing)
@@ -1218,6 +1229,7 @@ function createCmuxDriver(
       if (!finished && !closing) {
         closing = true;
         await closeWorkspace();
+        await pumpingPromise;
         // closed before Claude was up: its launcher may be mid-start, so it is stopped, then its files go.
         // In the seat's own workspace Claude is always stopped: the workspace stays for the next run.
         if (!readyYet || i.seatWorkspace !== undefined) {

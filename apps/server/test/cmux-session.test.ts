@@ -485,6 +485,30 @@ describe("startCmuxSession", () => {
     await h.session.close();
   });
 
+  it("waits for an in-flight paste before closing", async () => {
+    const cmux = fake({ findWaitMs: 2000 });
+    let release: () => void = () => {};
+    const sent = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    cmux.send = async () => {
+      await sent;
+      return "sent";
+    };
+    const h = start({ cmux });
+    await h.session.ready;
+    h.session.send("hello there");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    let closed = false;
+    const closing = h.session.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(closed).toBe(false);
+    release();
+    await closing;
+  });
+
   it("with a stale same-named workspace open, messages reach the new start's Claude", async () => {
     patch((s) => {
       s.claudePid = ALIVE;
