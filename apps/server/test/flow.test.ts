@@ -170,6 +170,45 @@ describe("collectFlow issues", () => {
     );
   });
 
+  it("retains Ready evidence for a fixed Thursday telemetry week on late Wednesday", async () => {
+    const lateWednesday = Date.parse("2026-11-25T12:00:00Z");
+    const readyAt = lateWednesday - 34 * DAY;
+    const mergedAt = readyAt + 4 * 60 * 60 * 1000;
+    store.replaceBoard("shop-app", [board(1, { updatedAt: mergedAt })]);
+    store.replacePullRequests(
+      "shop-app",
+      [pr(1, { ticket: "shop-app#1", mergedAt })],
+      0,
+    );
+    const history = timeline(
+      { createdAt: new Date(readyAt).toISOString(), status: "Ready", project: { number: 2 } },
+      { createdAt: new Date(mergedAt).toISOString(), status: "Done", project: { number: 2 } },
+    );
+
+    await collectFlow(repo, store, stub({ 1: history }).gql, lateWednesday);
+
+    const t = telemetry(
+      {
+        operator: { id: "operator", timezone: "UTC" },
+        accounts: [],
+        repos: [repo],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+      },
+      store,
+      "7d",
+      lateWednesday,
+      { agent: null, account: null },
+    );
+    expect(t.repoWeeks?.[0]?.weeks).toContainEqual(
+      expect.objectContaining({
+        week: "2026-10-22",
+        medianReadyToMergeHours: 4,
+        noSeatWorkingHours: 4,
+      }),
+    );
+  });
+
   it("retains open Ready work with its state-entry time", async () => {
     store.replaceBoard("shop-app", [
       board(1, { status: "In Progress", state: "in progress", closed: false }),

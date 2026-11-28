@@ -26,8 +26,8 @@ import {
 } from "./github.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** Four weekly repository telemetry rows need their earliest Ready evidence. */
-const REPOSITORY_TELEMETRY_DAYS = 4 * 7;
+/** Four displayed weeks plus up to six days before their Thursday boundary need Ready evidence. */
+const REPOSITORY_TELEMETRY_DAYS = (4 + 1) * 7;
 
 /** The timeline field; a later page continues from the query's `$after` variable. */
 const timelineFields = (paged: boolean) => `timelineItems(first: ${FLOW_TIMELINE_PAGE_SIZE}${
