@@ -382,6 +382,15 @@ function tailBytes(text: string, max: number): string {
     .replace(/^�+/, "");
 }
 
+/**
+ * A colour code GitHub's failed-job log keeps as text, its escape byte written `^[`: `^[[41m`.
+ * Only colour codes, so a pattern such as `^[[A-Z]` in a diff stays whole.
+ */
+const LITERAL_COLOUR = /\^\[\[[0-9;]*m/g;
+
+/** `log` without colour codes, real escape bytes or literal `^[[…m` text, so its lines can be matched. */
+const plainLog = (log: string): string => cleanLog(log).replace(LITERAL_COLOUR, "");
+
 /** The job that only reports whether the others passed: its lines never stand ahead of theirs. */
 export const CI_SUMMARY_JOB = "check";
 /** A failure as vitest prints it, at the start of the line: never a passing test or code line that says FAIL. */
@@ -468,7 +477,9 @@ const omittedText = (n: number, job: string): string =>
  * a closing line. A log without any failing line is its last lines alone. The summary job stands
  * aside when another job has lines.
  */
-export function ciLogBody(log: string, max: number): string {
+export function ciLogBody(input: string, max: number): string {
+  // colour codes would hide a FAIL, `×` or error line from the patterns below
+  const log = plainLog(input).trimEnd();
   const jobs = new Map<string, JobLines>();
   const cut = (t: string) => Array.from(t).slice(0, FAILING_LINE_MAX).join("");
   const seen = new Set<string>();
@@ -1399,7 +1410,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           if (room <= 0) continue; // no room for a header with anything under it
           const log = f.jobs === undefined ? await failedLog(repo, f) : await jobsLog(repo, f.jobs);
           if (log === null) return CI_LOG_UNREADABLE;
-          const body = ciLogBody(cleanLog(log).trimEnd(), room);
+          const body = ciLogBody(log, room);
           if (body === "") continue;
           const section = head + body;
           budget -= byteLength(section) + (sections.length > 0 ? SEPARATOR_BYTES : 0);
