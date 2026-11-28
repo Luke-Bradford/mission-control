@@ -312,6 +312,8 @@ interface Harness {
   pushes: string[];
   prs: { title: string; note: string }[];
   excerpts: string[];
+  /** Seats whose stale turn flag the engine cleared. */
+  staleTurns: string[];
   moves: Move[];
   ended: string[];
   endedReasons: Record<string, string | undefined>;
@@ -442,6 +444,7 @@ function harness(): Harness {
     pushes: [],
     prs: [],
     excerpts: [],
+    staleTurns: [],
     moves: [],
     ended: [],
     endedReasons: {},
@@ -723,6 +726,12 @@ function harness(): Harness {
             return store.seatSession(id);
           },
           seatFacts: (id) => (id === RETRO ? x.retroFacts : x.facts),
+          async clearStaleTurn(seatId) {
+            if (x.facts?.inTurn !== true) return false;
+            x.staleTurns.push(seatId);
+            x.facts = { ...x.facts, inTurn: false };
+            return true;
+          },
           async endRunByEngine(runId, reason) {
             const r = store.run(runId);
             if (r === null || r.endedAt !== null || x.endBlocked) return;
@@ -1744,29 +1753,58 @@ describe("CI and review", () => {
     expect(loopOf()).toMatchObject({ ciFails: 1, ciFailedSha: SHA });
   });
 
-  it("a fix push that fails, is re-run and fails again goes back to the seat with the failing tests", async () => {
-    await inCi();
-    await failCi();
-    await h.engine.reconcileRun(RUN);
-    expect(h.sent).toHaveLength(1);
-    // the seat's fix: a new push on its live session, never set aside
-    report("Fixed it", SHA_B);
-    await h.engine.reconcileRun(RUN);
-    setPr({ ci: "failing", headSha: SHA_B });
-    await h.engine.reconcileRun(RUN);
-    expect(h.reruns).toEqual([SHA, SHA_B]);
-    expect(h.sent).toHaveLength(1);
-    clock += 1000;
-    h.excerptTexts = [
-      "studio:\n1) [chromium] › e2e/board.spec.ts:12:5 › shows the board\nError: expect(locator).toBeVisible() failed",
-    ];
-    setPr({ ci: "failing", headSha: SHA_B });
-    await h.engine.reconcileRun(RUN);
-    await h.engine.reconcileRun(RUN);
-    expect(loopOf()).toMatchObject({ phase: "working", ciFailedSha: SHA_B, relayedSha: SHA_B });
-    expect(h.sent).toHaveLength(2);
-    expect(h.sent[1]?.key).toBe(`ci:${RUN}:${SHA_B}`);
-    expect(h.sent[1]?.text).toContain("1) [chromium] › e2e/board.spec.ts:12:5 › shows the board");
+  describe("a failure after the re-run, held back by a turn flag left on from before it", () => {
+    const EXCERPT =
+      "studio:\n1) [chromium] › e2e/board.spec.ts:12:5 › shows the board\nError: expect(locator).toBeVisible() failed";
+    /** Fail, re-run, fail, with the seat's turn flag stuck on from a turn begun before the push. */
+    async function failWithStaleTurn(): Promise<number> {
+      await inCi();
+      store.setSeatTurnStarted(SEAT, clock - MIN);
+      h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      clock += 1000;
+      h.excerptTexts = [EXCERPT];
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      expect(h.reruns).toEqual([SHA]);
+      expect(loopOf()).toMatchObject({ phase: "working", ciFailedSha: SHA });
+      expect(h.sent).toEqual([]);
+      return clock;
+    }
+
+    it("goes back to the seat within 5 minutes with the failing test's name and error", async () => {
+      const failedAt = await failWithStaleTurn();
+      while (h.sent.length === 0 && clock - failedAt < 5 * MIN) {
+        clock += MIN;
+        await h.engine.tick();
+      }
+      expect(clock - failedAt).toBeLessThan(5 * MIN);
+      expect(h.staleTurns).toEqual([SEAT]);
+      expect(h.sent[0]?.key).toBe(`ci:${RUN}:${SHA}`);
+      expect(h.sent[0]?.text).toContain("1) [chromium] › e2e/board.spec.ts:12:5 › shows the board");
+      expect(h.sent[0]?.text).toContain("Error: expect(locator).toBeVisible() failed");
+      expect(loopOf().relayedSha).toBe(SHA);
+    });
+
+    it("leaves a turn begun after the failure alone", async () => {
+      const failedAt = await failWithStaleTurn();
+      store.setSeatTurnStarted(SEAT, failedAt + 1000);
+      clock += 3 * MIN;
+      await h.engine.tick();
+      expect(h.staleTurns).toEqual([]);
+      expect(h.sent).toEqual([]);
+    });
+
+    it("leaves a seat waiting on a dialog alone", async () => {
+      await failWithStaleTurn();
+      const row = store.seatSession(SEAT);
+      if (row === null) throw new Error("no seat row");
+      store.setSeatSession({ ...row, state: "needs-input" });
+      clock += 3 * MIN;
+      await h.engine.tick();
+      expect(h.staleTurns).toEqual([]);
+    });
   });
 
   it("a re-run gh refused is not tried again; the next failure is the real one", async () => {

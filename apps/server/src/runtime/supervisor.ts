@@ -662,6 +662,13 @@ export interface Supervisor {
   /** null when the seat has no live process. */
   seatFacts(seatId: string): SeatFacts | null;
   /**
+   * Ends a turn the hub still counts as open on the seat's live session for `runId`, when that
+   * turn began before `before` (so nothing since has kept it going): it interrupts the CLI, then
+   * clears the flag, as a missed turn end would have. Never for a seat waiting on a dialog. True
+   * when it cleared one.
+   */
+  clearStaleTurn?(seatId: string, runId: string, before: number): Promise<boolean>;
+  /**
    * Whether the seat's CLI session is attached and alive, for the run its row holds: the process
    * the hub holds, not the run row. Null while the hub cannot tell: crew is off or stopping, the startup take-back is running,
    * or a start, resume or account move for the seat is under way. Never throws.
@@ -5992,6 +5999,32 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const l = live.get(seatId);
       if (!l?.session.alive) return null;
       return { inTurn: l.inTurn, resumedAt: l.resumedAt, rateLimitedUntil: l.rateLimitedUntil };
+    },
+
+    async clearStaleTurn(seatId, runId, before) {
+      const l = live.get(seatId);
+      const stale = (x: Live, row = store.seatSession(seatId)) =>
+        x.session.alive &&
+        x.inTurn &&
+        x.run.id === runId &&
+        x.ending === null &&
+        !x.attaching &&
+        row?.runId === runId &&
+        row.state !== "needs-input" &&
+        (row.lastTurnStartedAt ?? 0) < before;
+      if (l === undefined || !mayAct() || stopping || starting.has(seatId) || !stale(l))
+        return false;
+      return enqueue(l, async () => {
+        if (!stale(l)) return false;
+        // a turn really going ends here; a turn end the hub missed has nothing to interrupt
+        await sendInterrupt(l).catch((e) => log(`${seatId}: stale turn interrupt: ${errText(e)}`));
+        if (!l.inTurn) return true;
+        l.inTurn = false;
+        l.interrupted = false;
+        setState(l, "idle", null);
+        emit({ kind: "idle", seatId, runId: l.run.id, resumed: false });
+        return true;
+      });
     },
 
     sessionAlive(seatId) {

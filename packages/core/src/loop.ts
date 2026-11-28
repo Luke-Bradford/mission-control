@@ -222,6 +222,10 @@ export const CI_PASSED_EVENT_PREFIX = "CI passed on ";
 export const CI_FAILED_EVENT_PREFIX = "CI failed on ";
 export const CI_FLAKED_EVENT_PREFIX = "CI flaked on ";
 export const CI_RERUN_FAILED_EVENT_PREFIX = "CI failed again on the re-run of ";
+/** A CI failure owed to a seat still unsent this long after it was recorded is recovered. */
+export const CI_RELAY_RECOVER_MS = 2 * 60_000;
+/** How far back the recovery looks for the failure's event. */
+export const CI_RELAY_LOOKBACK_MS = 24 * 60 * 60_000;
 export const CI_PARK_FAILED_PREFIX = "CI failed ";
 
 /** The events and re-run state for a sha that CI now shows green; a re-run of that sha was a flake. */

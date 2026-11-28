@@ -414,7 +414,8 @@ export function flightSignals(i: {
     if (pr?.state !== "open" || pr.ci !== "failing" || pr.headSha !== pushed.sha) continue;
     const row = store.seatSession(run.agentId);
     const own = row?.runId === runId;
-    if (own && row.state === "running") continue;
+    // a turn going since the failure is the seat at work on it; one begun before it may be stale
+    if (own && row.state === "running" && (row.lastTurnStartedAt ?? 0) >= failedAt) continue;
     const active = Math.max(
       failedAt,
       store.newestRunCommit(runId)?.at ?? 0,

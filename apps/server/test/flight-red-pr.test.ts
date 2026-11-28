@@ -100,6 +100,20 @@ const failed = (ago: number) =>
     NOW - ago,
   );
 
+/** The seat's row on this run, in `state`, its last turn begun at `turnAt`. */
+const seatRow = (state: "running" | "idle", turnAt: number) => {
+  store.setSeatSession({
+    seatId: "guido-1",
+    runId: RUN,
+    cliSessionId: "cli",
+    state,
+    reason: null,
+    worktree: "/w/guido-1",
+    updatedAt: turnAt,
+  });
+  store.setSeatTurnStarted("guido-1", turnAt);
+};
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mc-red-pr-"));
   store = new Store(join(dir, "mc.sqlite"));
@@ -150,6 +164,18 @@ describe("a red PR with no seat activity", () => {
       sha: "b".repeat(40),
       at: NOW - 10 * MIN,
     });
+    expect(redPr()).toEqual([]);
+  });
+
+  it("wakes FLIGHT for a seat marked running whose last turn began before the failure", () => {
+    failed(FLIGHT_RED_PR_IDLE_MS);
+    seatRow("running", NOW - FLIGHT_RED_PR_IDLE_MS - MIN);
+    expect(redPr()).toHaveLength(1);
+  });
+
+  it("counts a turn begun after the failure and still running as seat activity", () => {
+    failed(60 * MIN);
+    seatRow("running", NOW - 50 * MIN);
     expect(redPr()).toEqual([]);
   });
 

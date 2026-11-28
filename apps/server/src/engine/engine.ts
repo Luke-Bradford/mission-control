@@ -33,6 +33,8 @@ import {
   branchMovedText,
   CI_FAILED_EVENT_PREFIX,
   CI_FAILED_TEXT,
+  CI_RELAY_LOOKBACK_MS,
+  CI_RELAY_RECOVER_MS,
   CI_PASSED_EVENT_PREFIX,
   CI_RERUN_FAILED_EVENT_PREFIX,
   CI_RERUN_FAILED_TEXT,
@@ -695,6 +697,57 @@ export function createEngine(deps: EngineDeps): Engine {
       }
     }
     return sent;
+  }
+
+  /**
+   * A CI failure on the run's pushed sha, owed to its seat and still unsent CI_RELAY_RECOVER_MS
+   * after it was recorded, because the hub counts the seat as in a turn that began before the
+   * failure: that turn's end was missed (or it has run on with nothing new). The supervisor ends
+   * it, so this pass plans the line as usual.
+   */
+  async function recoverCiRelay(run: Run, loop: RunLoop, at: number): Promise<void> {
+    const sha = loop.ciFailedSha;
+    if (
+      sha === null ||
+      loop.phase !== "working" ||
+      loop.hold?.worktree ||
+      loop.relayedSha === sha ||
+      store.runPush(run.id)?.sha !== sha ||
+      `ci:${run.id}:${sha}` in store.claimedKeys(run.id) ||
+      supervisor.seatFacts(run.agentId)?.inTurn !== true
+    )
+      return;
+    const failedAt = store
+      .loopEvents(at - CI_RELAY_LOOKBACK_MS, run.repoId)
+      .filter(
+        (e) =>
+          e.runId === run.id &&
+          e.text.startsWith(`${CI_FAILED_EVENT_PREFIX}${sha.slice(0, 7)}`) &&
+          !e.key.includes(":rerun:"),
+      )
+      .reduce((n, e) => Math.max(n, e.at), 0);
+    if (failedAt === 0 || at - failedAt < CI_RELAY_RECOVER_MS) return;
+    // a dialog is FLIGHT's to answer; a turn begun since the failure may be the seat's own work
+    const row = store.seatSession(run.agentId);
+    if (
+      row?.runId !== run.id ||
+      row.state === "needs-input" ||
+      (row.lastTurnStartedAt ?? 0) >= failedAt
+    )
+      return;
+    const cleared = await supervisor
+      .clearStaleTurn?.(run.agentId, run.id, failedAt)
+      .catch((e: unknown) => {
+        log(`${run.id}: could not end a stale turn: ${e instanceof Error ? e.message : String(e)}`);
+        return false;
+      });
+    if (cleared === true)
+      store.addLoopEvent(
+        `${run.id}:stale-turn:${sha}`,
+        run.id,
+        `${seatCallSign(run.agentId)}'s turn from before CI failed on ${sha.slice(0, 7)} was still open; ended it to send the failure`,
+        at,
+      );
   }
 
   /**
@@ -2503,6 +2556,7 @@ export function createEngine(deps: EngineDeps): Engine {
         log(`${runId}: moving the worktree failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+    if (run.endedAt === null) await recoverCiRelay(run, input, at);
     const snap = snapshot(run, input, at, mergeAllowed);
     // a commit on top of the seat's push (a main merge, a doc edit): the PR head follows the push
     if (
