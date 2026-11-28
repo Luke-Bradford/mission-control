@@ -215,7 +215,16 @@ describe("Telemetry, Throughput tab", () => {
               mergedPrsPerWeek: { min: 76, max: 100 },
               tokensPerWeek: { min: 1_300_000_000, max: 1_700_000_000 },
             },
-            weeks: [],
+            weeks: [
+              {
+                week: "2026-11-02",
+                mergedPrs: 80,
+                tokensPerMergedPr: { claude: null, codex: null },
+                reviewRoundsPerPr: null,
+                medianReadyToMergeHours: null,
+                noSeatWorkingHours: null,
+              },
+            ],
           },
           {
             repoId: "eBull",
@@ -223,7 +232,16 @@ describe("Telemetry, Throughput tab", () => {
               mergedPrsPerWeek: { min: 97, max: 161 },
               tokensPerWeek: { min: 1_500_000_000, max: 2_000_000_000 },
             },
-            weeks: [],
+            weeks: [
+              {
+                week: "2026-11-02",
+                mergedPrs: 120,
+                tokensPerMergedPr: { claude: null, codex: null },
+                reviewRoundsPerPr: null,
+                medianReadyToMergeHours: null,
+                noSeatWorkingHours: null,
+              },
+            ],
           },
           { repoId: "unbaselined", baseline: null, weeks: [] },
         ],
@@ -243,6 +261,9 @@ describe("Telemetry, Throughput tab", () => {
     expect(scoreboard.textContent).toContain("88 PRs/wk · 1.5B tokens/wk");
     expect(scoreboard.textContent).toContain("76–100 PRs/wk · 1.3–1.7B tokens/wk");
     expect(scoreboard.textContent).toContain("97–161 PRs/wk · 1.5–2B tokens/wk");
+    expect(scoreboard.textContent).toContain("Loop baseline 17M / PR");
+    expect(scoreboard.textContent).toContain("Loop baseline 13–22.4M / PR");
+    expect(scoreboard.textContent).toContain("Loop baseline 9.3–20.6M / PR");
     expect(scoreboard.textContent).toContain("4 repositories · scroll to compare all");
     expect(scoreboard.textContent).toContain("No merged PRs");
     expect(scoreboard.textContent).toContain("Baseline not configured");

@@ -3,6 +3,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { DASH } from "./common.ts";
 
 type RepoWeek = NonNullable<Telemetry["repoWeeks"]>[number]["weeks"][number];
+type RepoBaseline = NonNullable<Telemetry["repoWeeks"]>[number]["baseline"];
 
 function compactTokens(tokens: number): string {
   if (tokens >= 1_000_000_000) return `${(tokens / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
@@ -34,21 +35,32 @@ function weekLabel(week: string): string {
       }).format(date);
 }
 
-function tokensPerPr(week: RepoWeek): string {
+function baselineTokensPerPr(baseline: RepoBaseline): string | null {
+  if (baseline === null) return null;
+  return compactTokenRange({
+    min: baseline.tokensPerWeek.min / baseline.mergedPrsPerWeek.max,
+    max: baseline.tokensPerWeek.max / baseline.mergedPrsPerWeek.min,
+  });
+}
+
+function tokensPerPr(week: RepoWeek, baseline: RepoBaseline): string {
   if (week.mergedPrs === 0) return "No merged PRs";
   const { claude, codex } = week.tokensPerMergedPr;
-  if (claude === null && codex === null) return DASH;
+  const loopBaseline = baselineTokensPerPr(baseline);
+  if (claude === null && codex === null)
+    return loopBaseline === null ? DASH : `${DASH} · Loop baseline ${loopBaseline} / PR`;
   const values = [claude, codex].filter((value): value is number => value !== null);
   return [
     `${compactTokens(values.reduce((sum, value) => sum + value, 0))} total`,
     claude !== null && `Claude ${compactTokens(claude)}`,
     codex !== null && `Codex ${compactTokens(codex)}`,
+    loopBaseline !== null && `Loop baseline ${loopBaseline} / PR`,
   ]
     .filter(Boolean)
     .join(" · ");
 }
 
-function baselineLabel(baseline: NonNullable<Telemetry["repoWeeks"]>[number]["baseline"]): string {
+function baselineLabel(baseline: RepoBaseline): string {
   const range = (
     value: { min: number; max: number },
     format: (number: number) => string,
@@ -56,7 +68,7 @@ function baselineLabel(baseline: NonNullable<Telemetry["repoWeeks"]>[number]["ba
     value.min === value.max ? format(value.min) : `${format(value.min)}–${format(value.max)}`;
   return baseline === null
     ? "Baseline not configured"
-    : `${range(baseline.mergedPrsPerWeek, String)} PRs/wk · ${compactTokenRange(baseline.tokensPerWeek)} tokens/wk`;
+    : `${range(baseline.mergedPrsPerWeek, String)} PRs/wk · ${compactTokenRange(baseline.tokensPerWeek)} tokens/wk · ${baselineTokensPerPr(baseline)} tokens/PR`;
 }
 
 /** Four ISO weeks of delivery and capacity figures, compared with the configured loop baseline. */
@@ -100,7 +112,7 @@ export function RepoScoreboard({ repoWeeks }: { repoWeeks: Telemetry["repoWeeks"
                         <tr key={week.week}>
                           <th scope="row">{weekLabel(week.week)}</th>
                           <td className="r num">{week.mergedPrs}</td>
-                          <td className="r num">{tokensPerPr(week)}</td>
+                          <td className="r num">{tokensPerPr(week, repo.baseline)}</td>
                           <td className="r num">
                             {week.reviewRoundsPerPr === null
                               ? DASH
