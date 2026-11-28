@@ -157,9 +157,46 @@ export const GUARD_CHECK_PATH = "/api/guard/check";
 /** `POST /api/guard/check`'s body limit; the hook checks its body against it before posting. */
 export const GUARD_BODY_LIMIT = 64 * 1024;
 
-/** The hook events the guard route takes (spike: PermissionDenied never fires). */
-export const GUARD_HOOK_EVENTS = ["PreToolUse", "PostToolUse", "PostToolUseFailure"] as const;
+/**
+ * The hook events the guard route takes (spike: PermissionDenied never fires). PermissionRequest
+ * fires as Claude is about to open its permission dialog: the guard answers it, so no seat waits
+ * on a dialog nobody watches (#2304).
+ */
+export const GUARD_HOOK_EVENTS = [
+  "PreToolUse",
+  "PostToolUse",
+  "PostToolUseFailure",
+  "PermissionRequest",
+] as const;
 export type GuardHookEvent = (typeof GUARD_HOOK_EVENTS)[number];
+
+/** A PermissionRequest carries no tool_use_id; the hook sends this one in its place. */
+export const PERMISSION_REQUEST_ID = "permission-request";
+
+/** The tools whose permission dialog the guard may allow: file edits inside the seat's rules. */
+export const PERMISSION_EDIT_TOOLS: readonly string[] = [
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+];
+
+/** What a seat is told when the guard refuses Claude's permission dialog for it. */
+export const GUARD_PERMISSION_REFUSED_TEXT =
+  "Mission Control refused that permission request: it is outside this seat's rules. Carry on without it, or report that you are blocked.";
+
+/**
+ * The guard's answer to Claude's permission dialog, in the form the CLI honours: allow (null) or
+ * deny with the text the model sees. Either way the dialog never opens.
+ */
+export function guardPermissionOutput(deny: string | null): string {
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PermissionRequest",
+      decision: deny === null ? { behavior: "allow" } : { behavior: "deny", message: deny },
+    },
+  });
+}
 
 /** The hook's "no objection" answer: the CLI's own rules still apply after it. */
 export const GUARD_ALLOW_OUTPUT = "{}";

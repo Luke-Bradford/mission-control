@@ -60,6 +60,7 @@ import {
   NEW_LOOP,
   PACE_SETTING,
   type PullRequestView,
+  questionAgainAsk,
   RULING_PARK,
   type Run,
   type SeatSessionRow,
@@ -1451,18 +1452,15 @@ describe("FLIGHT's brief in the digest", () => {
       liveCrew();
       ask();
       await watch.check();
-      // the unanswered question goes stale at 10 minutes; its wake waits out the 30-minute gap
+      // unanswered at 10 minutes, it wakes FLIGHT a second time at once (#2285), its stale
+      // signal with it
       nowMs += 11 * MIN;
       await watch.check();
-      expect(sendCalls).toHaveLength(1);
+      expect(sendCalls).toHaveLength(2);
+      expect(status()?.wokeOn).toEqual(["qAgain (1)", "signals (1)"]);
       nowMs += HOUR + MIN;
       await watch.check();
       expect(sendCalls).toHaveLength(2);
-      expect(status()?.wokeOn).toEqual(["signals (1)"]);
-      nowMs += HOUR + MIN;
-      await watch.check();
-      expect(sendCalls).toHaveLength(2);
-      expect(status()?.wokeOn).toEqual(["signals (1)"]);
     });
 
     it("leaves a failed send unrecorded", async () => {
@@ -2625,6 +2623,29 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
+  it("wakes FLIGHT again, that question first, when a seat's question waits 10 minutes unanswered (#2285)", async () => {
+    liveCrew();
+    ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += 10 * MIN - 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    const head = sendCalls[1]?.text.split("\n") ?? [];
+    expect(head[0]).toContain("woke on: qAgain (1)");
+    expect(head[1]?.startsWith(questionAgainAsk([{ id: 1, seat: "guido-1", ageMin: 10 }]))).toBe(
+      true,
+    );
+    // the second wake is the last for it: no wake every 10 minutes after
+    await watch.check();
+    nowMs += 30 * MIN;
+    await watch.check();
+    expect(sendCalls.filter((c) => c.text.includes("woke on: qAgain"))).toHaveLength(1);
+  });
+
   it("sends no wake while the runaway breaker is tripped, and lists it in the wake facts", async () => {
     liveCrew();
     ask();
@@ -2795,8 +2816,8 @@ describe("the FLIGHT watcher", () => {
     await watch.check();
     nowMs = T0 + 11 * MIN;
     await watch.check();
-    // the question went stale at 10 minutes: its own wake, held to the 30-minute gap
-    expect(sendCalls).toHaveLength(1);
+    // unanswered at 10 minutes: the one second wake (#2285), its stale signal with it
+    expect(sendCalls).toHaveLength(2);
     nowMs = T0 + FLIGHT_BATCH_MS + MIN;
     await watch.check();
     expect(sendCalls).toHaveLength(2);

@@ -93,11 +93,12 @@ export function pathGrantProblem(path: string, extra: readonly string[] = []): s
   ) {
     return "the crew's own rules and hooks run from it";
   }
-  if (path.includes("/") && isProtectedPath(path, extra)) {
-    return "a protected-file rule covers it in a folder, so only a file at the repo's top can be granted";
-  }
+  if (path.includes("/") && isProtectedPath(path, extra)) return NESTED_PROTECTED_PROBLEM;
   return null;
 }
+
+export const NESTED_PROTECTED_PROBLEM =
+  "a protected-file rule covers it in a folder, so only a file at the repo's top can be granted";
 
 /** Whether a run holding `grants` may write `path`. A grant is the exact file, folded as APFS folds names. */
 export function grantedPath(grants: readonly string[], path: string): boolean {

@@ -188,7 +188,6 @@ Hub code checks every item before it counts in Needs you (`packages/core/src/nee
 #1543). An item counts only when it is one of these:
 
 1. **A hub alert the operator alone can act on.** Hub code writes its words. The alerts:
-   - FLIGHT is not triaging;
    - an Update only a person can run (the alert says how much changed, not which commits or paths).
      A held Update FLIGHT can run is not this alert: while FLIGHT is live on a `superuser` repo it
      is FLIGHT's item with no window, since FLIGHT may hold it on purpose, and FLIGHT runs it in a
@@ -249,7 +248,19 @@ place. The web's asker line must read `asker` before `agentId`; that change is t
 - **FLIGHT keeps, answers or briefs it.** A wait goes on FLIGHT's watch list. A question FLIGHT
   cannot state goes back to the seat (#1532).
 - **When FLIGHT is not triaging,** failed items are counted under the one "FLIGHT is not triaging"
-  alert. The operator learns that work waits, and starting FLIGHT is the fix.
+  item. It is on FLIGHT's queue, not Needs you (#2285): it counts FLIGHT's own work, which the
+  operator cannot answer. The operator still gets the FLIGHT-down notification, and FLIGHT's page
+  shows the outage.
+- **Stale items settle on load (#2285).** An item raised 14 days ago or more, or whose ticket the
+  board has seen closed, leaves the list. Hub alerts and live states (a stall,
+  an error, the test lock, a rate limit) never go stale, nor does an item under a hold, which is a
+  decision to wait; a released hold counts its age from the release. An operator brief 14 days old expires, so
+  its item goes back to FLIGHT. An item whose brief choice was applied and read leaves too.
+- **The hub's news is FLIGHT's (#2285).** Machine capacity, the file service, the CLI hold and
+  rollback and a focus import are things the hub puts right itself. They ask the operator nothing,
+  so they go to FLIGHT like any other note.
+- **A seat's question waits at most 10 minutes (#2285).** It wakes FLIGHT at once. Still unanswered
+  at 10 minutes, it wakes FLIGHT a second time (`qAgain`), and that wake names the question first.
 - **FLIGHT's window** for a returned item starts when FLIGHT could first see it: raised, briefed,
   released from a hold, FLIGHT live or the hub started. A rollout is not "late" at once.
 - **An item the operator already read** is dealt with when it is ordinary. When it is protected,

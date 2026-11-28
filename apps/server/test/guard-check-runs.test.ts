@@ -595,7 +595,10 @@ describe("why the recorder dropped a check call", () => {
 
   describe("a check whose tool handed back before its process ended", () => {
     const WORKTREE = "/work/trees/guido-1-9";
-    const watching = (alive: { now: boolean }) =>
+    const watching = (
+      alive: { now: boolean },
+      options: { onLost?: (runId: string, commands: readonly string[]) => void } = {},
+    ) =>
       createCheckRecorder({
         store: { addCheckRun: (row) => void rows.push(row) },
         checks: async () => CHECKS,
@@ -603,6 +606,7 @@ describe("why the recorder dropped a check call", () => {
         worktree: async () => WORKTREE,
         processAlive: async () => alive.now,
         pollMs: 5,
+        ...options,
       });
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -612,6 +616,22 @@ describe("why the recorder dropped a check call", () => {
       expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBe(LINT);
       await wait(20);
       expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+    });
+
+    it("tells the seat when a focused test ends before the first process poll", async () => {
+      const focused = "pnpm -s vitest apps/server/test/guard-check-runs.test.ts";
+      const lost: string[][] = [];
+      const r = watching(
+        { now: false },
+        { onLost: (_runId, commands) => lost.push([...commands]) },
+      );
+      await r.admit?.(KEY, focused);
+      await r.begin(KEY, focused);
+      r.dropRun("r1");
+      await wait(20);
+
+      expect(lost).toEqual([[focused]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, focused)).toBeNull();
     });
 
     it("keeps an admitted check when its process starts after the first watcher poll", async () => {
@@ -725,16 +745,18 @@ describe("why the recorder dropped a check call", () => {
 
     it("frees the checkout and says so when the process ends with no completion", async () => {
       const alive = { now: true };
-      const r = watching(alive);
-      await r.admit?.(KEY, LINT);
-      await r.begin(KEY, LINT);
+      const lost: string[][] = [];
+      const r = watching(alive, { onLost: (_runId, commands) => lost.push([...commands]) });
+      const focused = "pnpm -s vitest apps/server/test/guard-check-runs.test.ts";
+      await r.admit?.(KEY, focused);
       r.dropRun("r1");
       await wait(20);
       alive.now = false;
       await wait(40);
       expect(r.pending("r1")).toEqual([]);
-      expect(reasons(r)).toEqual([["session-lost", LINT, HEAD]]);
-      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+      expect(reasons(r)).toEqual([]);
+      expect(lost).toEqual([[focused]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, focused)).toBeNull();
     });
   });
 

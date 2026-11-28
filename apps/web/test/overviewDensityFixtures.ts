@@ -7,6 +7,7 @@ import type {
   PipelineStage,
   RunDigest,
 } from "@mc/core";
+import { seeded } from "../src/demo/random.ts";
 import { agentView } from "./agentV2Fixture.ts";
 import {
   DEMO_ARRIVING_KEY,
@@ -16,9 +17,15 @@ import {
   demoMaterials,
 } from "./demoNeeds.ts";
 import {
+  boardItems,
+  DEMO_CONFIGURED_REPOS,
   DEMO_REPO,
   DEMO_TICKETS,
   demoPageAnswers,
+  demoRepoForTicket,
+  demoTicketRef,
+  demoTicketsForRepo,
+  openPrs,
   pipelineStages,
   prFlowView,
   SEAT_ROLES,
@@ -568,38 +575,112 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
  * working, the pipeline built from one ticket list, and an answer for every other page. All of it
  * is fictional, fixed at `NOW`; Demo moves it to the present.
  */
-export function demoSeed() {
+/**
+ * A deliberately uneven day. The seed changes the small details, while the awkward cases remain
+ * present so a picture always shows useful states rather than a neat synthetic crew.
+ */
+export function demoSeed(daySeed = 1) {
   const base = overviewDensityFixture("default");
+  const random = seeded(daySeed);
+  const repos = DEMO_CONFIGURED_REPOS;
+  const day = [
+    {
+      state: "waiting",
+      hours: 0.4,
+      cost: 0.4,
+      note: "Waiting for a decision before assigning the next ticket.",
+    },
+    {
+      state: "running",
+      hours: 6,
+      cost: 18.73,
+      note: null,
+    },
+    {
+      state: "parked",
+      hours: 2.5,
+      cost: 0.41,
+      note: "Parked after a failed check; the re-run is queued.",
+    },
+    {
+      state: "blocked",
+      hours: 1.25,
+      cost: 1.16,
+      note: "Waiting for FLIGHT to answer the rollout question.",
+    },
+    { state: "waiting", hours: 0.75, cost: 3.64, note: "PR is in its third review round." },
+    {
+      state: "stopped",
+      hours: 0.5,
+      cost: 0.09,
+      note: "Stopped after merging; its branch is being cleaned up.",
+    },
+    {
+      state: "error",
+      hours: 3.25,
+      cost: 6.28,
+      note: "CI failed again after FLIGHT re-ran the red check.",
+    },
+    { state: "running", hours: 4.5, cost: 11.92, note: null },
+    { state: "idle", hours: 0, cost: null, note: "Review complete; no ticket is assigned." },
+    { state: "blocked", hours: 5.75, cost: 2.07, note: "Waiting for the dependency PR to merge." },
+    { state: "running", hours: 0.25, cost: 0.18, note: null },
+  ] as const;
   const rows = base.rows.map((row, index): CrewRow => {
     const ticket = DEMO_TICKETS.find((t) => t.seat === row.id);
-    const blocked = row.id === "dev-4";
+    const shape = day[index] ?? day[0];
+    const jitterMinutes = Math.floor(random() * 23);
     return {
       ...row,
-      hudState: blocked ? "blocked" : "running",
+      repoId: ticket
+        ? demoRepoForTicket(ticket)
+        : (repos[index % repos.length] ?? "mission-control"),
+      hudState: shape.state,
       paused: false,
       stop: null,
       queuedReview: null,
-      note: blocked ? "Waiting for the breakpoint decision." : null,
+      note: shape.note,
       role: SEAT_ROLES[row.id] ?? "GUIDO",
       mode: row.id === "dev-9" ? "read-only" : "writer",
-      ticket: ticket ? `${DEMO_REPO}#${ticket.n}` : null,
+      ticket: ticket ? demoTicketRef(ticket) : null,
       ticketTitle: ticket?.title ?? null,
+      stateSince: NOW - (shape.hours * 60 + jitterMinutes) * MIN,
+      // Keep the loop record on an idle or stopped seat too: it lets the scene's later review
+      // and held-merge incidents describe the existing run instead of inventing a new one.
       loop: ticket ? demoLoop() : null,
       run: {
         ...(seatRow().run as NonNullable<CrewRow["run"]>),
         id: `demo-run-${index}`,
+        startedAt: NOW - (shape.hours * 60 + jitterMinutes) * MIN,
         status: "running",
         endedAt: null,
+        costUsd: shape.cost === null ? null : shape.cost + Math.round(random() * 100) / 100,
       },
     };
   });
   const config = structuredClone(base.config);
+  const repoViews = repos.map((id, index) => ({
+    id,
+    github: `Luke-Bradford/${id}`,
+    project: index + 1,
+    statusMap: { Ready: "planned", "In progress": "in progress", Done: "done" } as const,
+    needsYouLabels: null,
+    fullSuite: [],
+  }));
+  config.repos = repoViews;
+  if (config.crew?.sessions[0]) config.crew.sessions[0].repoId = "mission-control";
   for (const session of config.crew?.sessions ?? [])
     for (const seat of session.seats) seat.role = SEAT_ROLES[seat.id] ?? seat.role;
-  const attention = demoAttention();
+  const attention = demoAttention().map((item) => {
+    const number = Number(item.ticket?.split("#")[1]);
+    const ticket = DEMO_TICKETS.find((candidate) => candidate.n === number);
+    if (!ticket) return item;
+    const repoId = demoRepoForTicket(ticket);
+    return { ...item, repoId, ticket: `${repoId}#${ticket.n}` };
+  });
   const summary: OverviewSummary = {
     ...base.summary,
-    pipeline: pipelineStages(DEMO_TICKETS),
+    pipeline: pipelineStages(DEMO_TICKETS, demoRepoForTicket),
     kpis: {
       ...base.summary.kpis,
       inFlight: { ...base.summary.kpis.inFlight, count: 9 },
@@ -608,7 +689,7 @@ export function demoSeed() {
   };
   const api: Record<string, unknown> = {
     ...base.api,
-    ...demoPageAnswers(),
+    ...demoPageAnswers(DEMO_TICKETS, demoRepoForTicket),
     ...Object.fromEntries(
       rows.flatMap((row, index) => {
         const view = demoAgentView(row, index);
@@ -630,9 +711,10 @@ export function demoSeed() {
     ),
     ...demoDiscussions([...attention.map((a) => a.key), DEMO_ARRIVING_KEY]),
     "/api/config": config,
+    "/api/repos": repoViews,
     "/api/overview": summary,
     "/api/overview?session=demo": summary,
-    "/api/prs/flow": prFlowView(),
+    "/api/prs/flow": prFlowView(DEMO_TICKETS, demoRepoForTicket, repos),
     "/api/flight": {
       seat: {
         id: "flight-1",
@@ -649,7 +731,7 @@ export function demoSeed() {
           kind: "answer",
           seatId: ticket.seat,
           targetRunId: null,
-          ref: `${DEMO_REPO}#${ticket.n}`,
+          ref: demoTicketRef(ticket),
           questionId: null,
           about: ticket.title,
           decision: "Keep the agreed scope and check the result against the ticket before merging.",
@@ -658,14 +740,55 @@ export function demoSeed() {
       ),
     },
     "/api/flight/summary": flightSummary(),
-    [`/api/repos/${DEMO_REPO}/rules`]: rulesFixture(DEMO_REPO),
+    ...Object.fromEntries(
+      repos.map((repoId) => [`/api/repos/${repoId}/rules`, rulesFixture(repoId)]),
+    ),
     "/api/settings/away": {
       on: false,
       until: "",
       may: { pickUp: true, research: false, check: true, status: true, safePr: false },
     },
   };
-  for (const t of DEMO_TICKETS) api[`/api/tickets/${DEMO_REPO}/${t.n}`] = ticketHistory(t);
+  api["/api/machine"] = {
+    ...(api["/api/machine"] as { latest: object }),
+    latest: {
+      ...(api["/api/machine"] as { latest: object }).latest,
+      diskFreeBytes: 18 * 2 ** 30,
+    },
+    warning: "Disk space is at the configured floor.",
+  };
+  api["/api/activity"] = [
+    2, 2, 2, 3, 3, 3, 3, 3, 3, 2, 2, 2, 1, 1, 0, 0, 0, 0, 1, 0, 0, 4, 6, 5,
+  ].flatMap((count, hour) =>
+    Array.from({ length: count }, (_, i) => ({
+      at: NOW - (24 - hour) * 60 * MIN + i * 7 * MIN,
+      kind: "run-start",
+      who: rows[(hour + i) % rows.length]?.id ?? "flight-1",
+      text: `Recorded demo event ${hour}:${i}`,
+      ref: null,
+      url: null,
+      prs: [],
+      status: null,
+      summary: null,
+    })),
+  );
+  const memory = api[`/api/flight/memory?repo=${DEMO_REPO}`];
+  for (const repoId of repos)
+    api[`/api/flight/memory?repo=${repoId}`] = JSON.parse(
+      JSON.stringify(memory).replaceAll(DEMO_REPO, repoId),
+    );
+  for (const repoId of repos) {
+    const own = demoTicketsForRepo(repoId);
+    const replaceRepo = <T>(value: T): T =>
+      JSON.parse(JSON.stringify(value).replaceAll(DEMO_REPO, repoId)) as T;
+    api[`/api/boards/${repoId}`] = replaceRepo(boardItems(own));
+    const prs = replaceRepo(openPrs(own));
+    api[`/api/repos/${repoId}/prs`] = prs;
+    api[`/api/repos/${repoId}/prs?shape=summary`] = prs;
+    api[`/api/repos/${repoId}/prs?linked=1&shape=summary`] = prs;
+    for (const ticket of own)
+      api[`/api/tickets/${repoId}/${ticket.n}`] = replaceRepo(ticketHistory(ticket));
+  }
   return { ...base, rows, attention, config, summary, api };
 }
 
