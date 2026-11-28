@@ -5,6 +5,7 @@
  * results from Claude's own transcript, which is copied into the run's transcript as the keeper did.
  * It speaks the same `CrewSession` the keeper-backed drivers do.
  */
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   closeSync,
@@ -151,13 +152,27 @@ const cut = (s: string, max: number) =>
   s.length > max ? `${s.slice(0, Math.max(0, max - 1))}…` : s;
 
 /**
- * The call to FLIGHT about a dialog nobody has answered: what it asks and every option, numbered.
- * The budget is shared out first: each option gets an equal part (with its number always kept), and
- * the question has what is left, so a long question or many long options never drop an option.
+ * A dialog's identity: a hash of its whole question and every whole option, as read from the screen.
+ * FLIGHT's call carries it (the text it sees may be cut short) and `answer_dialog` names it, so an
+ * answer goes only to the very dialog FLIGHT was told about.
+ */
+export function cmuxDialogId(d: CmuxDialog): string {
+  return createHash("sha256")
+    .update(JSON.stringify([d.question, d.options]))
+    .digest("hex")
+    .slice(0, 16);
+}
+/** What a `cmuxDialogId` looks like. */
+export const CMUX_DIALOG_ID = /^[0-9a-f]{16}$/;
+
+/**
+ * The call to FLIGHT about a dialog nobody has answered: its id, what it asks and every option,
+ * numbered. The budget is shared out first: each option gets an equal part (with its number always
+ * kept), and the question has what is left, so a long question or many long options never drop an
+ * option. The id comes first, so no cut ever drops it.
  */
 export function cmuxDialogReason(d: CmuxDialog): string {
-  const head =
-    "A Claude dialog is open in this seat's cmux workspace and nobody has answered it. It asks: \"";
+  const head = `A Claude dialog (id ${cmuxDialogId(d)}) is open in this seat's cmux workspace and nobody has answered it. It asks: "`;
   const n = Math.max(1, d.options.length);
   const fixed = head.length + `" Options: .`.length + " / ".length * (n - 1);
   const share = Math.floor(
@@ -176,7 +191,7 @@ export const CMUX_DIALOG_NOT_WAITING =
 export const CMUX_DIALOG_GONE = "No dialog is open in that seat's cmux workspace.";
 export const CMUX_DIALOG_NO_OPTION = "The open dialog has no such option.";
 export const CMUX_DIALOG_CHANGED =
-  "The open dialog is not the one you were told about: its option reads differently now. Read the seat's call again.";
+  "The open dialog is not the one you were told about: its question or options read differently now. Read the seat's call again.";
 export const CMUX_DIALOG_PERMISSION =
   "That is Claude's tool permission dialog: the hub refuses it, and FLIGHT never grants one.";
 export const CMUX_DIALOG_STUCK = "The dialog's cursor did not reach that option.";
@@ -193,36 +208,34 @@ function dialogCursor(screen: string): number | null {
   return at < 0 ? null : at;
 }
 
-const words = (s: string) => s.replace(/\s+/g, " ").trim();
-
 /**
  * FLIGHT's answer to a dialog the hub called it about: the cursor is moved to option `option` a key
  * at a time, each after a fresh read of the screen, and Enter goes only once the screen shows it
- * there. `label` is the option as FLIGHT was told it (a cut one ends `…`); every read must still show
- * it, so a dialog that changed is never answered. A tool permission dialog is refused. The keys are
- * forced: cmux will not type into a workspace while a dialog is open. Throws with the reason.
+ * there. `dialog` is the id FLIGHT's call gave (`cmuxDialogId`); every read must still show that
+ * dialog, its whole question and every whole option, so a dialog that changed is never answered. A
+ * tool permission dialog is refused. The keys are forced: cmux will not type into a workspace while
+ * a dialog is open. Returns the option picked, as the screen showed it; throws with the reason.
  */
 export async function answerCmuxDialog(
   cmux: Pick<Cmux, "readScreen" | "sendKey">,
   workspace: string,
-  answer: { option: number; label: string },
+  answer: { option: number; dialog: string },
   o: { pollMs?: number } = {},
-): Promise<void> {
-  const want = words(answer.label).replace(/…$/, "");
+): Promise<string> {
   for (let step = 0; step < 32; step++) {
     const screen = await cmux.readScreen(workspace);
     const d = dialogOf(screen);
     if (d === null) throw new Error(CMUX_DIALOG_GONE);
     if (isPermissionPrompt(screen)) throw new Error(CMUX_DIALOG_PERMISSION);
     const at = d.options.findIndex((x) => new RegExp(`^${answer.option}\\.\\s`).test(x));
-    if (at < 0) throw new Error(step === 0 ? CMUX_DIALOG_NO_OPTION : CMUX_DIALOG_CHANGED);
-    if (want === "" || !words(d.options[at] as string).startsWith(want))
-      throw new Error(CMUX_DIALOG_CHANGED);
+    if (at < 0 && step === 0 && cmuxDialogId(d) === answer.dialog)
+      throw new Error(CMUX_DIALOG_NO_OPTION);
+    if (at < 0 || cmuxDialogId(d) !== answer.dialog) throw new Error(CMUX_DIALOG_CHANGED);
     const cursor = dialogCursor(screen);
     if (cursor === null) throw new Error(CMUX_DIALOG_STUCK);
     if (cursor === at) {
       await cmux.sendKey(workspace, "enter", true);
-      return;
+      return d.options[at] as string;
     }
     await cmux.sendKey(workspace, cursor < at ? "down" : "up", true);
     await sleep(o.pollMs ?? TRUST_KEY_GAP_MS);

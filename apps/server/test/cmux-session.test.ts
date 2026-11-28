@@ -40,6 +40,7 @@ import {
   CMUX_TOOL_REFUSED_TEXT,
   CMUX_TRUST_QUIT,
   claudeTranscript,
+  cmuxDialogId,
   cmuxDialogReason,
   cmuxMessageText,
   dialogOf,
@@ -937,23 +938,30 @@ describe("startCmuxSession", () => {
       return { m, cmux };
     };
     const OPTS = ["1. Postgres", "2. SQLite", "3. Neither"];
+    const Q = "Which database should I use?";
+    /** The id FLIGHT's call gives for a dialog asking `question` with `options`. */
+    const idOf = (options: string[], question = Q) => cmuxDialogId({ question, options });
 
     it("moves the cursor to the option a key at a time, then Enter, forced past the open dialog", async () => {
       const { m, cmux } = menu(OPTS);
-      await answerCmuxDialog(cmux, "ws", { option: 3, label: "3. Neither" }, { pollMs: 0 });
+      await answerCmuxDialog(cmux, "ws", { option: 3, dialog: idOf(OPTS) }, { pollMs: 0 });
       expect(m.keys).toEqual([
         { key: "down", force: true },
         { key: "down", force: true },
         { key: "enter", force: true },
       ]);
       const up = menu(OPTS, 2);
-      await answerCmuxDialog(up.cmux, "ws", { option: 1, label: "1. Postgres" }, { pollMs: 0 });
+      await expect(
+        answerCmuxDialog(up.cmux, "ws", { option: 1, dialog: idOf(OPTS) }, { pollMs: 0 }),
+      ).resolves.toBe("1. Postgres");
       expect(up.m.keys.map((k) => k.key)).toEqual(["up", "up", "enter"]);
     });
 
-    it("takes a label FLIGHT saw cut short", async () => {
-      const { m, cmux } = menu(["1. Keep data", "2. Delete data and every backup"]);
-      await answerCmuxDialog(cmux, "ws", { option: 2, label: "2. Delete data…" }, { pollMs: 0 });
+    it("answers a dialog whose option FLIGHT's call cut short", async () => {
+      const opts = ["1. Keep data", `2. Delete data and every backup ${"z".repeat(300)}`];
+      expect(cmuxDialogReason({ question: Q, options: opts })).toContain(idOf(opts));
+      const { m, cmux } = menu(opts);
+      await answerCmuxDialog(cmux, "ws", { option: 2, dialog: idOf(opts) }, { pollMs: 0 });
       expect(m.keys.map((k) => k.key)).toEqual(["down", "enter"]);
     });
 
@@ -961,25 +969,42 @@ describe("startCmuxSession", () => {
       const gone = menu(OPTS);
       gone.m.closed = true;
       await expect(
-        answerCmuxDialog(gone.cmux, "ws", { option: 1, label: "1. Postgres" }, { pollMs: 0 }),
+        answerCmuxDialog(gone.cmux, "ws", { option: 1, dialog: idOf(OPTS) }, { pollMs: 0 }),
       ).rejects.toThrow(CMUX_DIALOG_GONE);
       const none = menu(OPTS);
       await expect(
-        answerCmuxDialog(none.cmux, "ws", { option: 4, label: "4. Mongo" }, { pollMs: 0 }),
+        answerCmuxDialog(none.cmux, "ws", { option: 4, dialog: idOf(OPTS) }, { pollMs: 0 }),
       ).rejects.toThrow(CMUX_DIALOG_NO_OPTION);
       const changed = menu(OPTS);
       await expect(
-        answerCmuxDialog(changed.cmux, "ws", { option: 2, label: "2. Delete data" }, { pollMs: 0 }),
+        answerCmuxDialog(
+          changed.cmux,
+          "ws",
+          { option: 2, dialog: idOf(["1. Keep data", "2. Delete data", "3. Neither"]) },
+          { pollMs: 0 },
+        ),
       ).rejects.toThrow(CMUX_DIALOG_CHANGED);
-      const tool = menu(
-        ["1. Yes", "2. Yes, and switch to accept edits", "3. No"],
-        0,
-        "Do you want to create a.sql?",
-      );
+      // the same labels under another question are another dialog
+      const asked = menu(OPTS);
       await expect(
-        answerCmuxDialog(tool.cmux, "ws", { option: 1, label: "1. Yes" }, { pollMs: 0 }),
+        answerCmuxDialog(
+          asked.cmux,
+          "ws",
+          { option: 1, dialog: idOf(OPTS, "Which cache should I use?") },
+          { pollMs: 0 },
+        ),
+      ).rejects.toThrow(CMUX_DIALOG_CHANGED);
+      const toolOpts = ["1. Yes", "2. Yes, and switch to accept edits", "3. No"];
+      const tool = menu(toolOpts, 0, "Do you want to create a.sql?");
+      await expect(
+        answerCmuxDialog(
+          tool.cmux,
+          "ws",
+          { option: 1, dialog: idOf(toolOpts, "Do you want to create a.sql?") },
+          { pollMs: 0 },
+        ),
       ).rejects.toThrow(CMUX_DIALOG_PERMISSION);
-      for (const t of [gone, none, changed, tool]) expect(t.m.keys).toEqual([]);
+      for (const t of [gone, none, changed, asked, tool]) expect(t.m.keys).toEqual([]);
     });
 
     it("stops if the dialog changes under it, before Enter", async () => {
@@ -990,9 +1015,48 @@ describe("startCmuxSession", () => {
         m.options = ["1. Yes, migrate", "2. No, wait", "3. Later"];
       };
       await expect(
-        answerCmuxDialog(cmux, "ws", { option: 3, label: "3. Neither" }, { pollMs: 0 }),
+        answerCmuxDialog(cmux, "ws", { option: 3, dialog: idOf(OPTS) }, { pollMs: 0 }),
       ).rejects.toThrow(CMUX_DIALOG_CHANGED);
       expect(m.keys.map((k) => k.key)).not.toContain("enter");
+    });
+
+    // RETRO-CX: "Use the cached data?" answered 2, then "Delete the cached data?" with the same labels
+    it("stops if the question changes under it with the same option labels", async () => {
+      const opts = ["1. Yes", "2. No"];
+      const { m, cmux } = menu(opts, 0, "Use the cached data?");
+      const send = cmux.sendKey;
+      cmux.sendKey = async (ws, key, force) => {
+        await send(ws, key, force);
+        m.question = "Delete the cached data?";
+      };
+      await expect(
+        answerCmuxDialog(
+          cmux,
+          "ws",
+          { option: 2, dialog: idOf(opts, "Use the cached data?") },
+          { pollMs: 0 },
+        ),
+      ).rejects.toThrow(CMUX_DIALOG_CHANGED);
+      expect(m.keys.map((k) => k.key)).toEqual(["down"]);
+    });
+
+    it("stops if an option changes past the part FLIGHT's call showed", async () => {
+      const long = (end: string) => [
+        "1. Keep data",
+        `2. Delete data from ${"the shared store ".repeat(20)}${end}`,
+      ];
+      const reason = cmuxDialogReason({ question: Q, options: long("then stop") });
+      expect(reason).not.toContain("then stop");
+      const { m, cmux } = menu(long("then stop"));
+      const send = cmux.sendKey;
+      cmux.sendKey = async (ws, key, force) => {
+        await send(ws, key, force);
+        m.options = long("and every backup");
+      };
+      await expect(
+        answerCmuxDialog(cmux, "ws", { option: 2, dialog: idOf(long("then stop")) }, { pollMs: 0 }),
+      ).rejects.toThrow(CMUX_DIALOG_CHANGED);
+      expect(m.keys.map((k) => k.key)).toEqual(["down"]);
     });
   });
 

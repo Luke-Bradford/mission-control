@@ -772,9 +772,10 @@ export interface Supervisor {
   interrupt(seatId: string): Promise<void>;
   /**
    * FLIGHT's answer to the dialog open in a seat's cmux workspace (`answerCmuxDialog`). Throws with
-   * the reason when the seat is not waiting on one in cmux, or the dialog is not the one named.
+   * the reason when the seat is not waiting on one in cmux, or the dialog is not the one named by
+   * its id. Returns the option picked, as the screen showed it.
    */
-  answerDialog(seatId: string, answer: { option: number; label: string }): Promise<void>;
+  answerDialog(seatId: string, answer: { option: number; dialog: string }): Promise<string>;
   /** Ends the run and leaves the seat idle for its next ticket; `hold` benches it (stopped) instead. */
   endRun(seatId: string, opts?: { hold?: boolean }): Promise<void>;
   /** null when the seat has no live session, or it did not answer. */
@@ -6027,8 +6028,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new SupervisorError(409, CMUX_DIALOG_NOT_WAITING);
       const saved = viaCmux(l.run) ? savedWorkspace(l.run.id) : null;
       if (saved === null || cmux === null) throw new SupervisorError(409, CMUX_DIALOG_NOT_WAITING);
-      await answerCmuxDialog(cmux, saved.workspace, answer);
+      const picked = await answerCmuxDialog(cmux, saved.workspace, answer);
       log(`${seatId}: FLIGHT answered its cmux dialog with option ${answer.option}`);
+      return picked;
     },
 
     async interrupt(seatId) {

@@ -277,7 +277,7 @@ let startCalls: unknown[][];
 let endCalls: string[];
 let interruptCalls: string[];
 let dialogAnswers: unknown[][];
-let answerDialogImpl: () => Promise<void>;
+let answerDialogImpl: () => Promise<string>;
 let callOrder: string[];
 let onInterrupt: () => void;
 let messageCalls: unknown[][];
@@ -405,7 +405,7 @@ beforeEach(() => {
   endCalls = [];
   interruptCalls = [];
   dialogAnswers = [];
-  answerDialogImpl = async () => {};
+  answerDialogImpl = async () => "2. SQLite";
   callOrder = [];
   onInterrupt = () => {};
   messageCalls = [];
@@ -561,7 +561,7 @@ beforeEach(() => {
       },
       answerDialog: async (...a) => {
         dialogAnswers.push(a);
-        await answerDialogImpl();
+        return await answerDialogImpl();
       },
       interrupt: async (seatId) => {
         interruptCalls.push(seatId);
@@ -918,14 +918,19 @@ describe("move_review", () => {
 
 // #2304: FLIGHT is called about a dialog in a seat's cmux workspace and answers it
 describe("answer_dialog", () => {
-  const args = { seat: "guido-1", option: 2, label: "2. SQLite", basis: "the ticket names SQLite" };
+  const args = {
+    seat: "guido-1",
+    option: 2,
+    dialog: "0123456789abcdef",
+    basis: "the ticket names SQLite",
+  };
 
   it("hands the answer to the supervisor and records it", async () => {
     live("guido-1", "r-guido");
     store.setSeatSession({ ...row("guido-1", "r-guido"), state: "needs-input" });
     const result = await call("answer_dialog", args);
     expect(result).toEqual({ text: "Picked option 2 in GUIDO-1's dialog." });
-    expect(dialogAnswers).toEqual([["guido-1", { option: 2, label: "2. SQLite" }]]);
+    expect(dialogAnswers).toEqual([["guido-1", { option: 2, dialog: "0123456789abcdef" }]]);
     expect(store.flightDecisions(0, 10)).toEqual([
       expect.objectContaining({
         kind: "answer",
@@ -953,10 +958,13 @@ describe("answer_dialog", () => {
     expect(store.flightDecisions(0, 10)).toEqual([]);
   });
 
-  it("refuses an option out of range or an empty label before asking", async () => {
+  it("refuses an option out of range, or no dialog id, before asking", async () => {
     live("guido-1", "r-guido");
     expect((await call("answer_dialog", { ...args, option: 0 })).isError).toBe(true);
-    expect((await call("answer_dialog", { ...args, label: "" })).isError).toBe(true);
+    expect((await call("answer_dialog", { ...args, dialog: "" })).isError).toBe(true);
+    expect((await call("answer_dialog", { ...args, dialog: "2. SQLite" })).isError).toBe(true);
+    const { dialog: _, ...noId } = args;
+    expect((await call("answer_dialog", { ...noId, label: "2. SQLite" })).isError).toBe(true);
     expect(dialogAnswers).toEqual([]);
   });
 });

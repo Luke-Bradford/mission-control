@@ -70,13 +70,15 @@ will not stop ends the run instead, so two Claudes never work one worktree.
   same.
 - **Answer it.** Any other dialog (a question for you) shows on the Agents page as Waiting with
   "Needs your input in cmux", and cmux rings. If it is still open after 20 s, FLIGHT is called with
-  its question and every option (a seat call, delivered after the watch's 20 s debounce). FLIGHT's
+  its id, its question and every option (a seat call, delivered after the watch's 20 s debounce). FLIGHT's
   own dialog stays yours.
-- **FLIGHT answers it.** FLIGHT's `answer_dialog { seat, option, label, basis }` picks an option for
+- **FLIGHT answers it.** FLIGHT's `answer_dialog { seat, option, dialog, basis }` picks an option for
   a seat at needs-input, within the seat's own rules. The hub reads the screen before every key, moves
   the cursor with the arrow keys and presses Enter only once the cursor is on that option (the keys
   are forced: cmux will not type into a workspace with a dialog open). It refuses when the dialog is
-  gone, has no such option, reads differently from `label`, or is Claude's tool permission dialog.
+  gone or has no such option, when its id no longer matches `dialog` (the id is a hash of its whole
+  question and every whole option, so a changed question with the same labels is refused), or when
+  it is Claude's tool permission dialog.
   A protected path, a hard-rule path or a money action goes to you in a Needs-you brief instead.
   Each answer is logged as a FLIGHT decision.
 - **Close it.** Ends the process; the hub treats it like any other exit.
