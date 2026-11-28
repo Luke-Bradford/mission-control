@@ -132,6 +132,34 @@ it("shows machine history as CPU and memory graphs", async () => {
   expect(await screen.findByRole("img", { name: "CPU history" })).toBeTruthy();
   expect(screen.getByRole("img", { name: "Memory history" })).toBeTruthy();
 });
+
+it("shows hub open files, its restart threshold, and unknown readings", async () => {
+  stubFetch({
+    "/api/machine": {
+      latest: { at: NOW, hubOpenFiles: 820, hubOpenFileLimit: 1000 },
+      warning: null,
+    },
+    "/api/overview": OVERVIEW,
+    "/api/test-lock": { holder: null, waiting: [] },
+  });
+  const { rerender } = render(<MachinePanel />);
+
+  expect(
+    await screen.findByText("820 / 1,000 open files · over the 80% restart threshold"),
+  ).toBeTruthy();
+
+  hub.clear();
+  stubFetch({
+    "/api/machine": {
+      latest: { at: NOW, hubOpenFiles: null, hubOpenFileLimit: 1000 },
+      warning: null,
+    },
+    "/api/overview": OVERVIEW,
+    "/api/test-lock": { holder: null, waiting: [] },
+  });
+  rerender(<MachinePanel />);
+  expect(await screen.findByText("open-file reading unknown")).toBeTruthy();
+});
 it("marks the projected quota at reset", async () => {
   stubFetch({ "/api/health": [] });
   const { container } = render(<QuotaMeter row={limit7d({ projected: 84 })} now={NOW} />);
