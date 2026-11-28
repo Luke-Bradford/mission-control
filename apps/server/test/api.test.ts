@@ -63,6 +63,7 @@ import {
   HUD_RENDERER_HEADER,
   type MachineSample,
   NEW_LOOP,
+  OPERATOR_BOOTSTRAP_CAPABILITY_HEADER,
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
@@ -9864,7 +9865,7 @@ describe("operator token", () => {
       supervisor: stubSupervisor(),
       updater: stubUpdater(),
       operatorToken: "tok-1",
-      bootstrapPeer: () => true,
+      consumeBootstrapCapability: () => true,
     });
     await guarded.ready();
   });
@@ -10393,7 +10394,7 @@ describe("operator token", () => {
       store,
       bus,
       operatorToken: "tok-1",
-      bootstrapPeer: () => true,
+      consumeBootstrapCapability: () => true,
       seatPeer: (port) => {
         ports.push(port);
         return seat;
@@ -10417,13 +10418,14 @@ describe("operator token", () => {
     await app.close();
   });
 
-  it("refuses the token to a non-browser peer that forges the same-origin header", async () => {
+  it("refuses the token to a verified browser peer without the operator capability", async () => {
     const app = buildApp({
       config,
       store,
       bus,
       operatorToken: "tok-1",
-      bootstrapPeer: () => false,
+      seatPeer: () => false,
+      consumeBootstrapCapability: () => false,
     });
     const response = await app.inject({
       method: "GET",
@@ -10434,6 +10436,33 @@ describe("operator token", () => {
     expect(response.statusCode).toBe(403);
     expect(response.json()).toEqual({ error: BOOTSTRAP_REFUSED });
     expect(response.body).not.toContain("tok-1");
+    await app.close();
+  });
+
+  it("serves the operator capability once", async () => {
+    const capability = "operator-page-capability";
+    let unused = true;
+    const app = buildApp({
+      config,
+      store,
+      bus,
+      operatorToken: "tok-1",
+      consumeBootstrapCapability: (given) => {
+        if (!unused || given !== capability) return false;
+        unused = false;
+        return true;
+      },
+    });
+    const headers = {
+      "sec-fetch-site": "same-origin",
+      [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: capability,
+    };
+    expect((await app.inject({ method: "GET", url: OPERATOR_BOOTSTRAP_PATH, headers })).json()).toEqual({
+      token: "tok-1",
+    });
+    expect((await app.inject({ method: "GET", url: OPERATOR_BOOTSTRAP_PATH, headers })).statusCode).toBe(
+      403,
+    );
     await app.close();
   });
 

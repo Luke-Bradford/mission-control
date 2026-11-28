@@ -95,7 +95,7 @@ describe("a seat's run token on the operator's routes (#1214)", () => {
       store,
       bus: new ChangeBus(),
       operatorToken: TOKEN,
-      bootstrapPeer: () => true,
+      consumeBootstrapCapability: () => true,
       tokens,
     });
     return { app, seatToken };

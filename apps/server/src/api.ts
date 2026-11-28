@@ -108,6 +108,7 @@ import {
   NEW_LOOP,
   needsYouAlert,
   OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_BOOTSTRAP_CAPABILITY_HEADER,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
   OWNER_OPERATOR,
@@ -622,8 +623,8 @@ export interface AppDeps {
   operatorToken?: string;
   /** Whether the local process behind a loopback connection (by its client port) is a seat or started by one. */
   seatPeer?: (clientPort: number | undefined) => boolean;
-  /** Whether the local process behind a loopback connection (by its client port) is the operator's browser. */
-  bootstrapPeer?: (clientPort: number | undefined) => boolean;
+  /** Consumes the one-time capability that the hub puts in the operator page's URL. */
+  consumeBootstrapCapability?: (capability: unknown) => boolean;
   /** The per-boot controller token: the controller's own key, which labels its messages. */
   controllerToken?: string;
   /** Holds new runs while FLIGHT's Update waits for running turns; without it FLIGHT's Update refuses a busy crew. */
@@ -4244,7 +4245,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             req.headers["sec-fetch-site"] !== "same-origin" ||
             req.headers[HUD_RENDERER_HEADER] !== undefined ||
             deps.seatPeer?.(req.socket.remotePort) === true ||
-            deps.bootstrapPeer?.(req.socket.remotePort) !== true
+            deps.consumeBootstrapCapability?.(req.headers[OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]) !==
+              true
           ) {
             return reply.code(403).send({ error: BOOTSTRAP_REFUSED });
           }
