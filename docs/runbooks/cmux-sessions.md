@@ -40,7 +40,9 @@ Every route needs the operator token. A seat's token gets 403. A hub without cmu
 Each live crew seat runs its configured development app in terminal panes of its own cmux workspace,
 from that seat's worktree. `app_commands` names one command per pane. The hub reserves a distinct
 loopback port block for each running seat, passes `PORT` and repository-specific variables such as
-`BACKEND_PORT`, and sets the first URL as the workspace `app` status. It never starts eBull's
+`BACKEND_PORT`, and sets the first URL as the workspace `app` status. Each endpoint's health goes in
+the `app-health` status, for cmux's sidebar; the Sessions page never shows it as the session's own
+status. It never starts eBull's
 launchd-owned jobs process.
 
 A writer seat uses `app_start`, `app_restart` and `app_status` to start its panes, restart after a
@@ -48,8 +50,8 @@ code change, and read the last lines from every app pane. The Sessions page list
 address and its current loopback reachability, and provides Start and Stop
 (`GET /api/sessions/apps`, `POST /api/sessions/apps/<seat>/start|stop` with body `{}`).
 
-The hub probes app URLs each minute. A stopped app restarts no more than once every five minutes;
-the restart is logged. It stops and closes every app pane, and the terminal pane, when the seat's run
+The hub probes app URLs each minute. A stopped app restarts no more than once every five minutes,
+including across a hub restart (the restart time is saved with the panes); the restart is logged. It stops and closes every app pane, and the terminal pane, when the seat's run
 ends, then releases that seat's port block. Preview hubs never start or restart crew apps.
 
 ### The seat's terminal pane
