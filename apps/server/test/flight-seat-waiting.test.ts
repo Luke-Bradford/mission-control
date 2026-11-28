@@ -131,6 +131,28 @@ describe("a seat idle at its prompt with its run unreported (#2318)", () => {
     expect(waits()[0]?.evidence).toContain(`waiting on FLIGHT: ${said}`);
   });
 
+  it("joins a reply's text blocks with the target in the first, transcript to status", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "m1",
+        content: [
+          { type: "text", text: "Waiting on FLIGHT to reset my branch." },
+          { type: "text", text: "All safe work is complete." },
+        ],
+      },
+      parent_tool_use_id: null,
+      timestamp: new Date(NOW - 40 * MIN).toISOString(),
+    });
+    store.setDigest(RUN, foldTranscript(null, [line], 1).digest);
+    seatRow("idle", FLIGHT_SEAT_WAITING_MS);
+    const want =
+      "waiting on FLIGHT: Waiting on FLIGHT to reset my branch. All safe work is complete.";
+    const crewWs = { owner: "crew" as const, name: "guido-1 · mc#7" };
+    expect(workspaceWaitingText(store, ["guido-1"], crewWs)).toBe(want);
+    expect(waits()[0]?.evidence).toContain(want);
+  });
+
   it("cuts a long message in cmux's sidebar line; FLIGHT's evidence keeps it whole", () => {
     const long = `Waiting on FLIGHT. ${"More detail here. ".repeat(30)}`.trim();
     store.setDigest(RUN, { lastText: "Waiting on FLIGHT.", lastMessage: long } as RunDigest);

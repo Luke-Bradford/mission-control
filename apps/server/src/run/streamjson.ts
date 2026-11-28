@@ -151,8 +151,11 @@ interface DigestState {
   cwd: string | null;
   /** leadSentence of the newest top-level assistant text block. */
   lastText: string | null;
-  /** The newest top-level assistant text block whole, cut at SEAT_LAST_MESSAGE_MAX. */
+  /** The newest top-level assistant message's text blocks joined, cut at SEAT_LAST_MESSAGE_MAX. */
   lastMessage: string | null;
+  /** That message's id and its text blocks so far: a message can come over several lines. */
+  lastMessageId: string | null;
+  lastMessageParts: string[];
   /** `all` tokens at the latest `result` line with a numeric cost; null before one. */
   costTokens: number | null;
   /** The newest top-level `user` frame's time since the last top-level assistant message. */
@@ -192,6 +195,8 @@ const emptyDigestState = (): DigestState => ({
   cwd: null,
   lastText: null,
   lastMessage: null,
+  lastMessageId: null,
+  lastMessageParts: [],
   costTokens: null,
   asked: null,
   replies: new Map(),
@@ -221,6 +226,7 @@ function copyDigestState(d: DigestState): DigestState {
     finals: new Set(d.finals),
     background: new Map(d.background),
     replies: new Map([...d.replies].map(([id, r]) => [id, { ...r }])),
+    lastMessageParts: [...d.lastMessageParts],
   };
 }
 
@@ -395,6 +401,20 @@ function foldTasks(d: DigestState, ev: Json, content: unknown[]): void {
   }
 }
 
+/**
+ * Adds a top-level text block to the newest message's text: a new message id starts it again, and
+ * a block already taken (a line read twice) is not added twice.
+ */
+function noteMessageText(d: DigestState, id: string | null, text: string): void {
+  const part = cleanText(text, SEAT_LAST_MESSAGE_MAX);
+  if (id === null || id !== d.lastMessageId) {
+    d.lastMessageId = id;
+    d.lastMessageParts = [];
+  }
+  if (d.lastMessageParts.at(-1) !== part) d.lastMessageParts.push(part);
+  d.lastMessage = cleanText(d.lastMessageParts.join(" "), SEAT_LAST_MESSAGE_MAX);
+}
+
 /** An assistant or user frame's content blocks: tool calls, tool results, usage, timestamps. */
 function digestFrame(d: DigestState, ev: Json): void {
   const at = timeOf(ev.timestamp);
@@ -475,10 +495,10 @@ function digestFrame(d: DigestState, ev: Json): void {
       if (top) d.toolCalls += 1;
     } else if (ev.type === "assistant" && block.type === "text" && top) {
       const text = typeof block.text === "string" ? leadSentence(cleanText(block.text)) : null;
-      if (text !== null) {
-        d.lastText = text;
-        d.lastMessage = cleanText(block.text as string, SEAT_LAST_MESSAGE_MAX);
-      }
+      if (text !== null) d.lastText = text;
+      // the whole message counts even when its first sentence gives no lastText (a bare "Done.")
+      if (typeof block.text === "string" && block.text.trim() !== "")
+        noteMessageText(d, msg === null ? null : str(msg.id), block.text);
     } else if (ev.type === "user" && block.type === "tool_result") {
       const id = str(block.tool_use_id);
       const use = id === null ? undefined : d.pending.get(id);
