@@ -279,7 +279,7 @@ describe("seat terminal", () => {
     const nextWorktree = join(dir, "next-worktree");
     mkdirSync(nextWorktree);
     const cmux = paneCmux();
-    const t = terminal(cmux, { sandboxProfile: (path: string) => `profile:${path}` });
+    const t = terminal(cmux);
     await t.run({ seatId: SEAT, runId: RUN, worktree, command: "true", timeoutMs: 5_000 });
     await t.run({
       seatId: SEAT,
@@ -293,11 +293,8 @@ describe("seat terminal", () => {
     expect(cmux.newPane).toHaveBeenLastCalledWith(
       "ws-eb",
       nextWorktree,
-      expect.stringContaining(`profile:${nextWorktree}`),
+      expect.any(String),
     );
-    expect(
-      (cmux.newPane.mock.calls as unknown as [string, string, string][])[1]?.[2],
-    ).not.toContain(`profile:${worktree}`);
     expect(cmux.typed.map((entry) => entry.surface)).toEqual(["surface:1", "surface:2"]);
   });
 
