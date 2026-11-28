@@ -1202,7 +1202,7 @@ export async function main(): Promise<void> {
       try {
         const restart = JSON.parse(raw) as { cause?: unknown };
         return typeof restart.cause === "string"
-          ? ` The hub restarted itself after its watchdog found: ${restart.cause}.`
+          ? `The hub restarted itself after its watchdog found: ${restart.cause}.`
           : null;
       } catch {
         return null;

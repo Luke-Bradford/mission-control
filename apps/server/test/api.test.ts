@@ -7918,6 +7918,22 @@ describe("update routes", () => {
     expect(r.json()).toEqual({
       error: "Could not reach origin; last checked 2026-10-20.",
       checkedAt: 1234,
+      fetchError: null,
+    });
+  });
+
+  it("POST /api/version/check names a local spawn failure beside its last good check", async () => {
+    updaterCheckError = new UpdateError(
+      502,
+      "Could not fetch origin: spawn EBADF; last checked 2026-10-20.",
+      { checkedAt: 1234, fetchError: "spawn EBADF" },
+    );
+    const r = await post("/api/version/check");
+    expect(r.statusCode).toBe(502);
+    expect(r.json()).toEqual({
+      error: "Could not fetch origin: spawn EBADF; last checked 2026-10-20.",
+      checkedAt: 1234,
+      fetchError: "spawn EBADF",
     });
   });
 

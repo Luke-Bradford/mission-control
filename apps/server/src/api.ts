@@ -6173,7 +6173,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         } catch (e) {
           captureError(reply, e);
           if (e instanceof UpdateError) {
-            return reply.code(e.status).send({ error: e.message, checkedAt: e.checkedAt ?? null });
+            return reply.code(e.status).send({
+              error: e.message,
+              checkedAt: e.checkedAt ?? null,
+              fetchError: e.fetchError ?? null,
+            });
           }
           reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "version check failed");
           return reply.code(500).send({ error: CHECK_FAILED });

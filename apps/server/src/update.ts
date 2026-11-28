@@ -226,9 +226,25 @@ export const UPDATE_FAILED = "update failed; see update.log";
 /** `call` is the seat's call sign (`seatCallSign`). */
 export const seatStarting = (call: string) => `${call} is starting`;
 
-/** What a check answers (502) when origin cannot be fetched; `checkedAt` is the last good fetch. */
-export const originUnreachable = (checkedAt: number | null) =>
-  `Could not reach origin; ${checkedAt === null ? "no earlier check" : `last checked ${new Date(checkedAt).toISOString()}`}.`;
+/** The reason line of a failed fetch: git's message starts with the command line, then its own advice. */
+export const fetchFailureReason = (error: string | null): string | null => {
+  const lines = (error ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  return (
+    lines.findLast((line) => line.startsWith("fatal:")) ??
+    lines.find((line) => !line.startsWith("Command failed")) ??
+    null
+  );
+};
+
+/**
+ * What a check answers (502) when origin cannot be fetched; `checkedAt` is the last good fetch.
+ * `reason` is the fetch's own error: a local failure such as `spawn EBADF` must not read as a network one.
+ */
+export const originUnreachable = (checkedAt: number | null, reason: string | null = null) =>
+  `${reason ? `Could not fetch origin: ${reason}` : "Could not reach origin"}; ${checkedAt === null ? "no earlier check" : `last checked ${new Date(checkedAt).toISOString()}`}.`;
 
 export type UpdateStep = "fetch" | "pull" | "install" | "build" | "swap";
 export const updateFailed = (step: UpdateStep) => `update failed at ${step}; see update.log`;
@@ -237,6 +253,8 @@ export class UpdateError extends Error {
   readonly status: 409 | 500 | 502;
   /** A 502 from check(): when origin was last fetched, null if never. */
   readonly checkedAt?: number | null;
+  /** A 502 from check(): the failed fetch's own reason (`spawn EBADF`, git's `fatal:` line). */
+  readonly fetchError?: string | null;
   /** A 409 from an auto update: the range it left for a person. */
   readonly held?: HeldRange;
   /** Raised after update.log was started, which then says why: the page may show the log. */
@@ -244,10 +262,16 @@ export class UpdateError extends Error {
   constructor(
     status: 409 | 500 | 502,
     message: string,
-    options?: { cause?: unknown; checkedAt?: number | null; held?: HeldRange },
+    options?: {
+      cause?: unknown;
+      checkedAt?: number | null;
+      fetchError?: string | null;
+      held?: HeldRange;
+    },
   ) {
     super(message, options);
     this.checkedAt = options?.checkedAt;
+    this.fetchError = options?.fetchError;
     this.held = options?.held;
     this.name = "UpdateError";
     this.status = status;
@@ -972,7 +996,13 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     // a web-only change waits for no seat
     const reason = other ?? ((await webOnly()) ? null : deps.crewRefusal());
     const current = n === 0 && (running === null || head === running);
-    const why = reason ?? (fetchOk === false ? fetchError : current ? UP_TO_DATE_MAIN : null);
+    const why =
+      reason ??
+      (fetchOk === false
+        ? originUnreachable(checkedAt, fetchFailureReason(fetchError))
+        : current
+          ? UP_TO_DATE_MAIN
+          : null);
     return { sha, behind: n, checkedAt, canUpdate: why === null, reason: why };
   }
 
@@ -990,8 +1020,13 @@ export function createUpdater(deps: UpdaterDeps): Updater {
       if (!deps.preview) {
         await floorFetch();
         // while an update runs nothing was fetched, and the answer is UPDATE_RUNNING anyway
-        if (fetchOk === false && !updating)
-          throw new UpdateError(502, originUnreachable(checkedAt), { checkedAt });
+        if (fetchOk === false && !updating) {
+          const reason = fetchFailureReason(fetchError);
+          throw new UpdateError(502, originUnreachable(checkedAt, reason), {
+            checkedAt,
+            fetchError: reason,
+          });
+        }
       }
       return read();
     },
