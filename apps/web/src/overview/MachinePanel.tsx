@@ -2,7 +2,7 @@ import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
 import { useId } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { bytes, fixed, hhmm, percent, plural, rel } from "../fmt.ts";
+import { bytes, hhmm, percent, plural, rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
@@ -16,7 +16,6 @@ const DASH = "—";
 const NO_SAMPLE = "No machine sample yet";
 const AGENTS_COLOUR = "var(--fg-2)";
 const OTHER_COLOUR = "var(--line-2)";
-const HUB_OPEN_FILE_RESTART_THRESHOLD = 80;
 /** The shared byte formatter divides by 1024; name the binary unit on this measured panel. */
 const binaryBytes = (value: number) => bytes(value).replace(/\b([KMG])B$/, "$1iB");
 
@@ -213,40 +212,6 @@ function AgentSlots({ view }: { view: MachineView }) {
   );
 }
 
-/** The watchdog exits when this reading passes its process-limit share. */
-function HubOpenFiles({ machine }: { machine: MachineSample | null }) {
-  const openFiles = machine?.hubOpenFiles ?? null;
-  const limit = machine?.hubOpenFileLimit ?? null;
-  const reading =
-    openFiles !== null && limit !== null && limit > 0
-      ? { openFiles, limit, use: (100 * openFiles) / limit }
-      : null;
-  const overThreshold = reading !== null && reading.use >= HUB_OPEN_FILE_RESTART_THRESHOLD;
-  return (
-    <div className="resrow" data-testid="hub-open-files">
-      <span className="s fg2">Hub files</span>
-      <Bar
-        segs={
-          reading === null
-            ? []
-            : [
-                {
-                  pct: reading.use,
-                  colour: overThreshold ? "var(--warn)" : OTHER_COLOUR,
-                  label: `${percent(reading.use)} of the hub process file limit`,
-                },
-              ]
-        }
-      />
-      <span className="num s">
-        {reading === null
-          ? "open-file reading unknown"
-          : `${fixed(reading.openFiles, 0)} / ${fixed(reading.limit, 0)} open files · ${overThreshold ? `at or above the ${HUB_OPEN_FILE_RESTART_THRESHOLD}% restart threshold` : `below the ${HUB_OPEN_FILE_RESTART_THRESHOLD}% restart threshold`}`}
-      </span>
-    </div>
-  );
-}
-
 /** This Mac's CPU, memory and disk, the agents row and the test lock (catalogue 2.1.4). Lock history arrives with run records (2c). */
 export function MachinePanel() {
   const source = useResource<MachineView>(RESOURCES.machine);
@@ -414,7 +379,6 @@ export function MachinePanel() {
               <span className="muted"> free</span>
             </span>
           </div>
-          <HubOpenFiles machine={m} />
           {m?.agents && (
             <p className="s machine-processes">
               Agent processes: {m.agents.count} ·{" "}

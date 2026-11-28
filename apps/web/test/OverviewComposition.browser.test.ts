@@ -71,6 +71,31 @@ const measure = (page: RenderedPage) =>
 
 describeRendered("Overview composition", () => {
   it.each([
+    [1280, 800, true],
+    [1600, 700, false],
+    [1920, 940, true],
+  ])(
+    "keeps the hub file-limit reading visible at %ix%i, dark: %s",
+    async (width, height, dark) => {
+      const page = await open("mixed", width, height, dark);
+      await settled(page);
+      await page.boxes("[data-testid=hub-open-files]");
+      const reading = await page.evaluate(() => {
+        const row = document.querySelector("[data-testid=hub-open-files]") as HTMLElement;
+        const panel = document.querySelector("#macP") as HTMLElement;
+        const r = row.getBoundingClientRect();
+        const p = panel.getBoundingClientRect();
+        return { text: row.textContent, inside: r.left >= p.left && r.right <= p.right };
+      }, undefined);
+      expect(reading.text).toContain(
+        "820 / 1,000 open files · at or above the 80% restart threshold",
+      );
+      expect(reading.inside).toBe(true);
+    },
+    60_000,
+  );
+
+  it.each([
     [1920, 940],
     [2560, 1145],
     [2560, 1250],

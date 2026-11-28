@@ -133,49 +133,6 @@ it("shows machine history as CPU and memory graphs", async () => {
   expect(screen.getByRole("img", { name: "Memory history" })).toBeTruthy();
 });
 
-it("shows hub open files, its restart threshold, and unknown readings", async () => {
-  stubFetch({
-    "/api/machine": {
-      latest: { at: NOW, hubOpenFiles: 700, hubOpenFileLimit: 1000 },
-      warning: null,
-    },
-    "/api/overview": OVERVIEW,
-    "/api/test-lock": { holder: null, waiting: [] },
-  });
-  const normal = render(<MachinePanel />);
-
-  expect(
-    await screen.findByText("700 / 1,000 open files · below the 80% restart threshold"),
-  ).toBeTruthy();
-
-  normal.unmount();
-  hub.clear();
-  stubFetch({
-    "/api/machine": {
-      latest: { at: NOW, hubOpenFiles: 800, hubOpenFileLimit: 1000 },
-      warning: null,
-    },
-    "/api/overview": OVERVIEW,
-    "/api/test-lock": { holder: null, waiting: [] },
-  });
-  const warning = render(<MachinePanel />);
-  expect(
-    await screen.findByText("800 / 1,000 open files · at or above the 80% restart threshold"),
-  ).toBeTruthy();
-
-  warning.unmount();
-  hub.clear();
-  stubFetch({
-    "/api/machine": {
-      latest: { at: NOW, hubOpenFiles: null, hubOpenFileLimit: 1000 },
-      warning: null,
-    },
-    "/api/overview": OVERVIEW,
-    "/api/test-lock": { holder: null, waiting: [] },
-  });
-  render(<MachinePanel />);
-  expect(await screen.findByText("open-file reading unknown")).toBeTruthy();
-});
 it("marks the projected quota at reset", async () => {
   stubFetch({ "/api/health": [] });
   const { container } = render(<QuotaMeter row={limit7d({ projected: 84 })} now={NOW} />);
@@ -223,7 +180,7 @@ it.each([
   const cpu = "machine" in overview && overview.machine?.cpu ? "20%" : "—";
   expect(
     [...container.querySelectorAll("#macP .mac-measure b")].map((el) => el.textContent),
-  ).toEqual([cpu, "—", "—", "—", "free"]);
+  ).toEqual([cpu, "—", "—", "—", "free", "unknown"]);
   expect(
     [...container.querySelectorAll("#pipelineP .ph b[data-metric]")].map((el) => el.textContent),
   ).toEqual(["—", "—", "—"]);

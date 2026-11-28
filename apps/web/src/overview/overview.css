@@ -2081,6 +2081,10 @@ button.quota-details {
   min-width: var(--sp-5);
   height: var(--sp-4);
 }
+.mac-files {
+  flex-basis: 100%;
+  white-space: normal;
+}
 .mac-warning {
   flex-basis: 100%;
 }

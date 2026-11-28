@@ -3,13 +3,14 @@ import { useNow, useTz } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { hhmm, percent } from "../fmt.ts";
+import { fixed, hhmm, percent } from "../fmt.ts";
 import { Sparkline } from "../hud/Sparkline.tsx";
 import { followLink, telemetryPath } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
 const GIB = 2 ** 30;
 const DASH = "—";
+const HUB_OPEN_FILE_RESTART_THRESHOLD = 80;
 const gib = (bytes: number | null | undefined) =>
   bytes == null ? DASH : `${Number((bytes / GIB).toFixed(1))} GiB`;
 
@@ -50,6 +51,18 @@ export function MacRow() {
   const mem =
     total !== null && latest?.memUsedBytes != null ? (100 * latest.memUsedBytes) / total : null;
   const swap = latest?.swapUsedBytes ?? null;
+  const hubOpenFiles = latest?.hubOpenFiles ?? null;
+  const hubOpenFileLimit = latest?.hubOpenFileLimit ?? null;
+  const hubFileReading =
+    hubOpenFiles !== null && hubOpenFileLimit !== null && hubOpenFileLimit > 0
+      ? {
+          openFiles: hubOpenFiles,
+          limit: hubOpenFileLimit,
+          use: (100 * hubOpenFiles) / hubOpenFileLimit,
+        }
+      : null;
+  const hubFileWarning =
+    hubFileReading !== null && hubFileReading.use >= HUB_OPEN_FILE_RESTART_THRESHOLD;
   const holder = lock?.holder?.seatId;
   return (
     <section id="macP" className="panel mac-row" aria-label="This machine">
@@ -84,6 +97,26 @@ export function MacRow() {
           <span className="mac-measure">
             <span className="muted">Lock</span>{" "}
             <b>{lock ? (holder ? nameOf(holder) : "free") : DASH}</b>
+          </span>
+          <span
+            className={`mac-measure mac-files${hubFileWarning ? " warn-t" : ""}`}
+            data-testid="hub-open-files"
+          >
+            <span className="muted">Hub files</span>{" "}
+            <b className="num">
+              {hubFileReading === null
+                ? "unknown"
+                : `${fixed(hubFileReading.openFiles, 0)} / ${fixed(hubFileReading.limit, 0)} open files`}
+            </b>
+            {hubFileReading !== null && (
+              <span>
+                {" "}
+                ·{" "}
+                {hubFileWarning
+                  ? `at or above the ${HUB_OPEN_FILE_RESTART_THRESHOLD}% restart threshold`
+                  : `below the ${HUB_OPEN_FILE_RESTART_THRESHOLD}% restart threshold`}
+              </span>
+            )}
           </span>
         </>
       )}
