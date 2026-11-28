@@ -399,6 +399,43 @@ describe("crew apps", () => {
     expect(pane.newPane).toHaveBeenCalledTimes(6);
     expect(pane.newPane).toHaveBeenLastCalledWith("ws", "/crew/ebull-3", expect.any(String));
   });
+  for (const failing of ["app", "app-health"]) {
+    it(`hands a seat to its next run and keeps other seats going when clearing ${failing} fails`, async () => {
+      const ae = {
+        id: "guido-ae",
+        runId: "run-ae",
+        repoId: "autonomy-engine",
+        worktree: "/crew/ae",
+      };
+      const pane = cmux();
+      pane.workspaces.mockResolvedValue([
+        { id: "ws", name: "guido-eb · #1", cwd: seat.worktree },
+        { id: "ae", name: "guido-ae · #2", cwd: ae.worktree },
+      ]);
+      pane.setStatus.mockImplementation(async (ws: string, key: string, value: string) => {
+        if (ws === "ws" && key === failing && value === "")
+          throw new Error("cmux set-status failed");
+      });
+      let seats = [seat];
+      const apps = createCrewApps({
+        cmux: pane,
+        repos: () => [
+          { id: "ebull", commands: CREW_APP_DEFAULTS.ebull ?? [] },
+          { id: "autonomy-engine", commands: CREW_APP_DEFAULTS["autonomy-engine"] ?? [] },
+        ],
+        seats: () => seats,
+        probe: vi.fn().mockResolvedValue(true),
+      });
+      await apps.start(seat.id);
+      seats = [{ ...seat, runId: "run-eb-2" }, ae];
+      await apps.tick();
+      expect(pane.newPane).toHaveBeenCalledTimes(5);
+      expect(apps.view().map((app) => [app.id, app.running, app.apps[0]?.url])).toEqual([
+        [seat.id, true, "http://127.0.0.1:5173"],
+        [ae.id, true, "http://127.0.0.1:5183"],
+      ]);
+    });
+  }
   it("refuses eBull's launchd-owned jobs command", async () => {
     const apps = createCrewApps({
       cmux: cmux(),

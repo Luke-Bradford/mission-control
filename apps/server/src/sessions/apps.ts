@@ -205,12 +205,20 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     )
       throw new CrewAppError("eBull jobs is owned by launchd and cannot be an app command");
   };
+  /** Clears both app statuses, each on its own: a failed clear never stops a teardown. */
+  const clearStatuses = async (workspace: string) => {
+    for (const key of [SESSION_APP_STATUS_KEY, SESSION_APP_HEALTH_STATUS_KEY])
+      try {
+        await deps.cmux.setStatus(workspace, key, "");
+      } catch (error) {
+        deps.log?.(`Could not clear the ${key} status of ${workspace}: ${String(error)}`);
+      }
+  };
   const close = async (seatId: string) => {
     const app = running.get(seatId);
     if (!app) return;
     await Promise.all(app.apps.map((entry) => deps.cmux.closePane(entry.pane).catch(() => {})));
-    await deps.cmux.setStatus(app.workspace, SESSION_APP_STATUS_KEY, "");
-    await deps.cmux.setStatus(app.workspace, SESSION_APP_HEALTH_STATUS_KEY, "");
+    await clearStatuses(app.workspace);
     running.delete(seatId);
     reservedPorts.delete(seatId);
     save();
@@ -246,12 +254,7 @@ export function createCrewApps(deps: CrewAppsDeps): CrewApps {
     } catch (error) {
       // a half-started app holds no panes, no statuses and no ports; the next tick tries again
       await Promise.all(apps.map((entry) => deps.cmux.closePane(entry.pane).catch(() => {})));
-      for (const key of [SESSION_APP_STATUS_KEY, SESSION_APP_HEALTH_STATUS_KEY])
-        try {
-          await deps.cmux.setStatus(workspace, key, "");
-        } catch {
-          // the pane is gone either way; a stale status is cleared by the next start or stop
-        }
+      await clearStatuses(workspace);
       reservedPorts.delete(seatId);
       save();
       throw error;

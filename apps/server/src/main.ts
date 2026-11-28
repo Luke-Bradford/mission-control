@@ -1395,8 +1395,10 @@ export async function main(): Promise<void> {
     void crewApps.tick().catch((error) => log(String(error)));
     trackTimer(
       setInterval(() => {
-        void crewApps?.tick();
-        void seatTerminal?.tick(store.liveSeatRuns().map(({ seatId }) => seatId));
+        void crewApps?.tick().catch((error) => log(`Crew app tick failed: ${String(error)}`));
+        void seatTerminal
+          ?.tick(store.liveSeatRuns().map(({ seatId }) => seatId))
+          .catch((error) => log(`Seat terminal tick failed: ${String(error)}`));
       }, 60_000),
     ).unref();
   }
