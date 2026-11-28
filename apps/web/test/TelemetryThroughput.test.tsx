@@ -226,6 +226,38 @@ describe("Telemetry, Throughput tab", () => {
     expect(scoreboard.textContent).toContain("Baseline not configured");
   });
 
+  it("explains an empty repository comparison and keeps many repositories in the scroll region", async () => {
+    await open(tel({ repoWeeks: [] }), "?tab=throughput&view=table");
+    expect(panel("tRepoScoreboard").textContent).toContain(
+      "No repository telemetry is configured yet.",
+    );
+    cleanup();
+
+    await open(
+      tel({
+        repoWeeks: Array.from({ length: 12 }, (_, index) => ({
+          repoId: `crew-repo-${index + 1}`,
+          baseline: { mergedPrsPerWeek: 88, tokensPerWeek: 1_500_000_000 },
+          weeks: [
+            {
+              week: "2026-11-02",
+              mergedPrs: 1,
+              tokensPerMergedPr: { claude: 29_000_000, codex: null },
+              reviewRoundsPerPr: 1,
+              medianReadyToMergeHours: 1,
+              noSeatWorkingHours: 0,
+            },
+          ],
+        })),
+      }),
+      "?tab=throughput&view=table",
+    );
+    const scoreboard = panel("tRepoScoreboard");
+    expect(scoreboard.querySelectorAll(".repo-scoreboard-repo")).toHaveLength(12);
+    expect(scoreboard.querySelector(".repo-scoreboard-scroll")).toBeTruthy();
+    expect(scoreboard.textContent).toContain("crew-repo-12");
+  });
+
   it("builds the five panels and drops the forecast and the coming note", async () => {
     await open(tel());
     for (const id of ["tMerged", "tCycleTicket", "tCycleSize", "tWip"])

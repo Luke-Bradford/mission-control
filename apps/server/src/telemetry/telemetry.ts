@@ -124,6 +124,10 @@ const addCost = (sum: number | null, c: number | null, f = 1): number | null =>
 
 const ioTokens = (r: Run): number => (r.tokens ? r.tokens.input + r.tokens.output : 0);
 
+/** Every reported usage token: repository efficiency compares against loop token allowances. */
+const usageTokens = (r: Run): number =>
+  r.tokens ? r.tokens.input + r.tokens.output + r.tokens.cacheRead + r.tokens.cacheCreate : 0;
+
 /** Which loops the scoped parts count; null is no restriction. */
 export interface TelemetryScope {
   agent: string | null;
@@ -977,9 +981,6 @@ export function telemetry(
   );
   const allRuns = store.runsOverlapping(0, now + 1);
   const allReviews = store.reviewsIn(["reported"]);
-  const issuesByTicket = new Map<string, { startAt: number | null }>(
-    store.flowIssues(0).map((issue) => [`${issue.repoId}#${issue.number}`, issue] as const),
-  );
   const repoWeeks: NonNullable<Telemetry["repoWeeks"]> = config.repos.map((repo) => {
     const repoPrs = store
       .pullRequests(repo.id)
@@ -1048,7 +1049,8 @@ export function telemetry(
                 account.id === agents.find((agent) => agent.id === run.agentId)?.accountId,
             )?.vendor ??
             "claude";
-          if (vendor === "claude" || vendor === "codex") tokens[vendor] += ioTokens(run) * overlap;
+          if (vendor === "claude" || vendor === "codex")
+            tokens[vendor] += usageTokens(run) * overlap;
         }
         const rounds = merged.flatMap((pr) => {
           const reported = allReviews.filter(
@@ -1057,10 +1059,16 @@ export function telemetry(
           return reported.length === 0 ? [] : [Math.max(...reported.map((review) => review.round))];
         });
         const durations = merged.flatMap((pr) => {
-          const issue = pr.ticket === null ? undefined : issuesByTicket.get(pr.ticket);
-          return issue?.startAt === null || issue?.startAt === undefined || pr.mergedAt === null
-            ? []
-            : [(pr.mergedAt - issue.startAt) / HOUR_MS];
+          const mergedAt = pr.mergedAt;
+          if (mergedAt === null) return [];
+          const readyAt = repoMoves.reduce<number | null>(
+            (latest, move) =>
+              move.number === pr.number && move.column === "Ready" && move.at <= mergedAt
+                ? Math.max(latest ?? move.at, move.at)
+                : latest,
+            null,
+          );
+          return readyAt === null ? [] : [(mergedAt - readyAt) / HOUR_MS];
         });
         return {
           week: dayFormatter(tz)(start),

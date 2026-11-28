@@ -313,7 +313,7 @@
 
 .tabpanel .grid[data-view="table"][data-n="2"] {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(240px, 1fr);
+  grid-template-rows: minmax(264px, 0.7fr) minmax(240px, 1fr);
 }
 
 .repo-scoreboard .repo-scoreboard-scroll {

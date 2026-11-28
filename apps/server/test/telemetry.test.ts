@@ -2429,13 +2429,24 @@ describe("repository weekly telemetry", () => {
     );
     store.upsertRun(
       run({
-        id: "mc-week",
+        id: "mc-claude-week",
         agentId: "mission-control-loop",
         repoId: "mission-control",
         vendor: "claude",
         startedAt: at("2026-11-19T00:00:00Z"),
         endedAt: at("2026-11-20T00:00:00Z"),
-        tokens: tok(58_000_000, 0),
+        tokens: tok(500_000, 500_000, 37_000_000, 2_000_000),
+      }),
+    );
+    store.upsertRun(
+      run({
+        id: "mc-codex-week",
+        agentId: "mission-control-loop",
+        repoId: "mission-control",
+        vendor: "codex",
+        startedAt: at("2026-11-20T00:00:00Z"),
+        endedAt: at("2026-11-21T00:00:00Z"),
+        tokens: tok(500_000, 500_000, 16_000_000, 1_000_000),
       }),
     );
 
@@ -2446,8 +2457,32 @@ describe("repository weekly telemetry", () => {
       expect.objectContaining({
         week: "2026-11-16",
         mergedPrs: 2,
-        tokensPerMergedPr: { claude: 29_000_000, codex: 0 },
+        tokensPerMergedPr: { claude: 20_000_000, codex: 9_000_000 },
       }),
+    );
+  });
+
+  it("does not calculate Ready-to-merge from a Ready transition after the merge", () => {
+    const week = at("2026-10-12T00:00:00Z");
+    store.replacePullRequests("shop-app", [{ ...pr(4, week + 5 * HOUR), ticket: "shop-app#4" }], 0);
+    store.replaceFlow(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 4,
+          size: "S",
+          startAt: week + 6 * HOUR,
+          doneAt: null,
+        },
+      ],
+      [],
+      [{ repoId: "shop-app", number: 4, at: week + 6 * HOUR, column: "Ready" }],
+    );
+
+    const row = tel("7d").repoWeeks?.find((value) => value.repoId === "shop-app");
+    expect(row?.weeks).toContainEqual(
+      expect.objectContaining({ week: "2026-10-12", medianReadyToMergeHours: null }),
     );
   });
 

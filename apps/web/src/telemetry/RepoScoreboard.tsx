@@ -59,7 +59,7 @@ export function RepoScoreboard({ repoWeeks }: { repoWeeks: Telemetry["repoWeeks"
       ) : repoWeeks.length === 0 ? (
         <p className="pb s muted">No repository telemetry is configured yet.</p>
       ) : (
-        <div className="pb repo-scoreboard-scroll">
+        <section className="pb repo-scoreboard-scroll" aria-label="Repository throughput weeks">
           {repoWeeks.map((repo) => (
             <section
               className="repo-scoreboard-repo"
@@ -110,7 +110,7 @@ export function RepoScoreboard({ repoWeeks }: { repoWeeks: Telemetry["repoWeeks"
               )}
             </section>
           ))}
-        </div>
+        </section>
       )}
     </Panel>
   );
