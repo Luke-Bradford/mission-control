@@ -107,6 +107,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.cmuxOpen,
   MC_TOOL_NAMES.setFlightMode,
   MC_TOOL_NAMES.answerDialog,
+  MC_TOOL_NAMES.allowDependency,
 ];
 
 /**

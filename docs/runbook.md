@@ -1107,8 +1107,8 @@ Seats cannot change them:
 - a commit that holds one is refused whole;
 - the hub won't install from a branch that changes an install input.
 
-When a ticket needs such a change, a seat can make it under a path grant (next section). Otherwise
-land it outside the crew, in one of two ways:
+When a ticket needs such a change, a seat can make it under a path grant (below), or, for a new
+package, under a dependency allowance (below). Otherwise land it outside the crew, in one of two ways:
 - **by hand:** change it in your own checkout and open the PR yourself;
 - **a controller PR:** have the head agent, working outside the crew under your eye, open it.
 
@@ -1145,6 +1145,42 @@ the start cannot prove it stays inside the area (for example `apps/**/server/**`
 - The merge gates do not change: a hard-rule path in the diff still needs FLIGHT's clearance (or the
   operator's, on a repo that keeps it) before merge, and the hub still won't install from a branch
   that changes an install input.
+
+### A ticket that needs a new package: a dependency allowance
+
+A seat that needs a new package asks FLIGHT with `mc ask_flight`. The commit tool's refusal of
+`package.json` or `pnpm-lock.yaml` names this route. FLIGHT decides, then calls
+`mc allow_dependency { runId, files, packages, basis }`:
+- `files` lists the manifest and lockfile paths. Only files named `package.json` or `pnpm-lock.yaml`
+  can be listed, nested ones included.
+- `packages` lists each package with its exact SemVer version (no range, no leading zero) and its
+  licence, such as `{ name: "hyparquet", version: "1.33.2", licence: "MIT" }`.
+
+The call logs a `dependency` decision ("Allowed GUIDO-1 to add hyparquet 1.33.2 (MIT) in
+package.json, pnpm-lock.yaml"). The allowance is for that run only. A second call adds to it.
+
+The packages are installed in the seat's worktree with `pnpm add <name>@<version>`. If the seat's
+sandbox cannot reach the registry, FLIGHT runs it there. The seat then commits with `mc commit`.
+Never use `git commit`: the push refuses any commit the commit tool did not make. The commit tool
+accepts an allowed file only when its change adds just the named packages:
+- **A manifest** may only gain new entries in `dependencies`, `devDependencies`,
+  `optionalDependencies` or `peerDependencies`. Each entry must be a named package, at its version
+  exactly or with `^` or `~`. Changing or removing an entry is refused, and so is any change to another
+  field (`scripts`, for one).
+- **A lockfile** may only gain direct entries for the named packages in its `importers`, each
+  resolved at the named version. New transitive `packages` and `snapshots` entries are allowed; the
+  PR shows them in the lockfile diff. An entry already there must stay exactly as it was: changing
+  or removing its resolution, integrity or anything else is refused. Any change to another
+  top-level key, such as `overrides` or `settings`, is refused.
+
+The push's stray check counts the allowed files as granted. The PR body gets an `## Added
+dependencies` section, with each added package's version and licence as allowed when its commit
+was made; a later allowance of the same name does not change that line. A scoped name is written
+whole in a code span, where GitHub mentions no one, and the PR text check lets just those lines
+through. The section survives a seat's
+`pr_body` rewrite and RETRO's minor-findings update. It is written when the PR opens and at the
+review's minor-findings update, so a package added after the review shows only from the next
+update on. The merge gates do not change.
 
 ### Python dependencies in crew worktrees
 
