@@ -142,23 +142,33 @@ export const CMUX_DIALOG_REPORT_MS = 20_000;
 const DIALOG_REASON_MAX = 1500;
 /** The most of one option a call carries: every option keeps its number and a label. */
 const DIALOG_OPTION_MAX = 160;
+/** The least of one option a call keeps: its number and the start of its label ("20. Ke…"). */
+const DIALOG_OPTION_MIN = 8;
+/** The question keeps this much of the budget before the options share the rest. */
+const DIALOG_QUESTION_MIN = 200;
 
 const cut = (s: string, max: number) =>
   s.length > max ? `${s.slice(0, Math.max(0, max - 1))}…` : s;
 
 /**
  * The call to FLIGHT about a dialog nobody has answered: what it asks and every option, numbered.
- * The options are bounded first, so a long question is what gets cut, never an option.
+ * The budget is shared out first: each option gets an equal part (with its number always kept), and
+ * the question has what is left, so a long question or many long options never drop an option.
  */
 export function cmuxDialogReason(d: CmuxDialog): string {
   const head =
     "A Claude dialog is open in this seat's cmux workspace and nobody has answered it. It asks: \"";
-  let options = d.options.map((o) => cut(o, DIALOG_OPTION_MAX)).join(" / ");
-  const tail = () => `" Options: ${options}.`;
-  if (head.length + tail().length > DIALOG_REASON_MAX)
-    options = cut(options, DIALOG_REASON_MAX - head.length - 12);
-  const room = DIALOG_REASON_MAX - head.length - tail().length;
-  return `${head}${cut(d.question, room)}${tail()}`;
+  const n = Math.max(1, d.options.length);
+  const fixed = head.length + `" Options: .`.length + " / ".length * (n - 1);
+  const share = Math.floor(
+    (DIALOG_REASON_MAX - fixed - Math.min(d.question.length, DIALOG_QUESTION_MIN)) / n,
+  );
+  const each = Math.min(DIALOG_OPTION_MAX, Math.max(DIALOG_OPTION_MIN, share));
+  const options = d.options.map((o) => cut(o, each)).join(" / ");
+  const room = Math.max(0, DIALOG_REASON_MAX - fixed - (options.length - " / ".length * (n - 1)));
+  const text = `${head}${cut(d.question, room)}" Options: ${options}.`;
+  // only a dialog of very many options could still run over: cut it at the end
+  return cut(text, DIALOG_REASON_MAX);
 }
 
 export const CMUX_DIALOG_NOT_WAITING =

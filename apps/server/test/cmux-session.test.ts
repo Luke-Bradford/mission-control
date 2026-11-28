@@ -859,6 +859,14 @@ describe("startCmuxSession", () => {
     expect(long).toContain("1. Keep data");
     expect(long).toContain("2. Delete data");
     expect(long).toContain("3. yyy");
+    // twenty long options: every number, the twentieth too, and a label prefix for each
+    const many = cmuxDialogReason({
+      question: "q".repeat(1600),
+      options: Array.from({ length: 20 }, (_, n) => `${n + 1}. ${"Label".repeat(30)}`),
+    });
+    expect(many.length).toBeLessThanOrEqual(1500);
+    for (let n = 1; n <= 20; n++) expect(many).toContain(`${n}. LabelLabel`);
+    expect(many).toContain("qqqqqqqqqq");
   });
 
   describe("answerCmuxDialog (FLIGHT's answer_dialog)", () => {
