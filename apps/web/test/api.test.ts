@@ -160,6 +160,36 @@ describe("api", () => {
     );
   });
 
+  it("restores the exchanged bootstrap token after a page reload", async () => {
+    window.history.replaceState(null, "", "/?bootstrap=page-capability");
+    const fetchMock = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === OPERATOR_BOOTSTRAP_PATH)
+        return new Headers(init?.headers).get(OPERATOR_BOOTSTRAP_CAPABILITY_HEADER) ===
+          "page-capability"
+          ? json(200, { token: "tab-token" })
+          : json(403, { error: "The operator bootstrap request was refused." });
+      return new Headers(init?.headers).get(OPERATOR_HEADER) === "tab-token"
+        ? json(200, { ok: true })
+        : json(401, { error: OPERATOR_TOKEN_REQUIRED });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadOperatorToken();
+    expect(window.location.search).toBe("");
+
+    vi.resetModules();
+    const reloaded = await import("../src/api.ts");
+    await reloaded.loadOperatorToken();
+    await expect(reloaded.apiPost(ACTIONS.ack, { keys: ["one"] })).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      ACTIONS.ack,
+      expect.objectContaining({
+        headers: expect.objectContaining({ [OPERATOR_HEADER]: "tab-token" }),
+      }),
+    );
+  });
+
   it("shares an in-flight bootstrap and holds every early POST until it completes", async () => {
     let resolveBootstrap!: (response: Response) => void;
     const bootstrap = new Promise<Response>((resolve) => {

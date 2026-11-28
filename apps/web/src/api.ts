@@ -23,6 +23,24 @@ export function openStream(path: string): StreamSource {
 
 let operatorToken: string | undefined;
 let operatorTokenLoad: Promise<void> | undefined;
+const OPERATOR_TOKEN_STORAGE_KEY = "mission-control:operator-token";
+
+function storedOperatorToken(): string | undefined {
+  try {
+    const token = globalThis.sessionStorage.getItem(OPERATOR_TOKEN_STORAGE_KEY);
+    return token === null || token === "" ? undefined : token;
+  } catch {
+    return undefined;
+  }
+}
+
+function rememberOperatorToken(token: string): void {
+  try {
+    globalThis.sessionStorage.setItem(OPERATOR_TOKEN_STORAGE_KEY, token);
+  } catch {
+    // Private browsing or browser policy may deny storage; the page still works until it reloads.
+  }
+}
 
 /** Takes the one-time page capability out of the URL before any other code can copy that URL. */
 function takeBootstrapCapability(): string | undefined {
@@ -42,15 +60,19 @@ function takeBootstrapCapability(): string | undefined {
 export function loadOperatorToken(): Promise<void> {
   if (isDemo()) return Promise.resolve();
   if (operatorTokenLoad) return operatorTokenLoad;
+  operatorToken ??= storedOperatorToken();
   if (operatorToken !== undefined) return Promise.resolve();
   const capability = takeBootstrapCapability();
   operatorTokenLoad = request<{ token?: unknown } | null>(OPERATOR_BOOTSTRAP_PATH, {
     ...(capability === undefined
       ? {}
       : { headers: { [OPERATOR_BOOTSTRAP_CAPABILITY_HEADER]: capability } }),
-  })
+    })
     .then((body) => {
-      if (typeof body?.token === "string") operatorToken = body.token;
+      if (typeof body?.token === "string") {
+        operatorToken = body.token;
+        rememberOperatorToken(body.token);
+      }
     })
     .catch(() => {
       // A preview or an older hub may not provide the bootstrap route.
@@ -63,6 +85,11 @@ export function loadOperatorToken(): Promise<void> {
 
 export function forgetOperatorToken(): void {
   operatorToken = undefined;
+  try {
+    globalThis.sessionStorage.removeItem(OPERATOR_TOKEN_STORAGE_KEY);
+  } catch {
+    // Storage may be unavailable; in-memory access is still cleared.
+  }
 }
 
 export class ApiError extends Error {
