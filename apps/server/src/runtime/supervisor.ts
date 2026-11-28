@@ -108,6 +108,7 @@ import {
   pathGrantProblem,
   pathsNeedingGrant,
   RATE_LIMIT_PARK_PREFIX,
+  RELAY_ATTACH_STUCK_MS,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -232,6 +233,7 @@ import {
   withoutHubConfig,
 } from "./brief.ts";
 import {
+  branchWorktree,
   cloneGitDir,
   existingCheckout,
   existingDetached,
@@ -668,13 +670,21 @@ export interface Supervisor {
    * Puts right a stale state that keeps the engine's lines from the seat's live session for
    * `runId`, where it dates from before `before` (when the owed line was recorded). One per call,
    * first match: `owner`, the seat's row names no run or an ended one while its live process runs
-   * `runId` (the row is set back to it); `attach`, an attach begun before then never finished its
-   * replay (it is finished, its open turn as the keeper reported it); `turn`, a turn begun before
+   * `runId` (the row is set back to it); `attach`, an attach left unfinished for
+   * RELAY_ATTACH_STUCK_MS, whenever it began (it is finished, its open turn as the keeper reported
+   * it); `turn`, a turn begun before
    * then is still counted as open (the CLI is interrupted, and only once it confirms is the turn
    * counted as ended). Never for a seat waiting on a dialog or still starting. Null when nothing
    * was put right, a refused or unanswered interrupt included.
    */
   recoverRelay?(seatId: string, runId: string, before: number): Promise<RelayRecovery | null>;
+  /**
+   * A live writer run that is neither its seat's (the seat's row and process are on another run)
+   * nor set aside: its own branch's worktree under the crew root, so the engine can set it aside
+   * and wake it through the usual hand-back. Null when the run is its seat's, has no branch, or no
+   * such worktree exists apart from the one the seat is in.
+   */
+  strandedWorktree?(runId: string): Promise<string | null>;
   /**
    * Whether the seat's CLI session is attached and alive, for the run its row holds: the process
    * the hub holds, not the run row. Null while the hub cannot tell: crew is off or stopping, the startup take-back is running,
@@ -6012,6 +6022,31 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return { inTurn: l.inTurn, resumedAt: l.resumedAt, rateLimitedUntil: l.rateLimitedUntil };
     },
 
+    async strandedWorktree(runId) {
+      if (!mayAct() || stopping) return null;
+      const run = store.run(runId);
+      if (run === null || run.endedAt !== null || run.branch === null) return null;
+      const info = findSeat(run.agentId);
+      if (!info) return null;
+      const row = store.seatSession(run.agentId);
+      if (row?.runId === runId || live.get(run.agentId)?.run.id === runId) return null;
+      try {
+        const path = await branchWorktree(
+          {
+            checkout: info.session.checkout,
+            worktreesRoot: crew?.worktrees ?? "",
+            peers: clonePeers(deps.config, deps.hubRoot),
+          },
+          run.branch,
+        );
+        // the seat's own worktree is the other run's now
+        return path === null || path === row?.worktree ? null : path;
+      } catch (e) {
+        log(`${runId}: could not find its worktree: ${errText(e)}`);
+        return null;
+      }
+    },
+
     async recoverRelay(seatId, runId, before) {
       if (
         !mayAct() ||
@@ -6042,7 +6077,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         return "owner";
       }
       if (l.attaching) {
-        if (l.attachStartedAt === null || l.attachStartedAt >= before) return null;
+        // by how long it has gone unfinished: an attach begun after the line was owed can stick too
+        if (l.attachStartedAt === null || now() - l.attachStartedAt < RELAY_ATTACH_STUCK_MS)
+          return null;
         // the keeper's own word on an open turn (taken at the attach) stands
         onAttached(l, false);
         log(

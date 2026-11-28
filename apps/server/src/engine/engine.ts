@@ -271,6 +271,7 @@ export interface EngineDeps {
     | "seat"
     | "seatFacts"
     | "recoverRelay"
+    | "strandedWorktree"
     | "endRunByEngine"
     | "startReview"
     | "busy"
@@ -709,9 +710,11 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /**
    * A CI failure on the run's pushed sha, owed to its seat and still unsent CI_RELAY_RECOVER_MS
-   * after it was recorded: something stale on the seat's live session holds the line back (its row
-   * naming another run, an attach that never finished, a turn whose end was missed). The
-   * supervisor puts it right, so this pass plans the line as usual.
+   * after it was recorded: something holds the line back. A seat another live run holds is left
+   * to it, and this run set aside with its wake due, to come back by the usual hand-back.
+   * Otherwise the supervisor puts right what is stale on the seat's live session (its row naming
+   * no run, an attach that never finished, a turn whose end was missed), so this pass plans the
+   * line as usual.
    */
   async function recoverCiRelay(run: Run, loop: RunLoop, at: number): Promise<void> {
     const sha = loop.ciFailedSha;
@@ -734,17 +737,26 @@ export function createEngine(deps: EngineDeps): Engine {
       )
       .reduce((n, e) => Math.max(n, e.at), 0);
     if (failedAt === 0 || at - failedAt < CI_RELAY_RECOVER_MS) return;
-    // a dialog is FLIGHT's to answer; a turn begun since the failure may be the seat's own work
     const row = store.seatSession(run.agentId);
-    // a row naming another live run is that run's seat now (the aside and wake path's, not this)
-    const holder = row?.runId == null || row.runId === run.id ? null : store.run(row.runId);
-    if (
-      row === null ||
-      (holder !== null && holder.endedAt === null) ||
-      row.state === "needs-input" ||
-      (row.lastTurnStartedAt ?? 0) >= failedAt
-    )
+    if (row === null) return;
+    // a seat another live run holds is not taken from it: this run is set aside where its own
+    // worktree is, with its wake due, and comes back by the usual hand-back
+    const holder = row.runId === null || row.runId === run.id ? null : store.run(row.runId);
+    if (holder !== null && holder.endedAt === null) {
+      const worktree = await supervisor.strandedWorktree?.(run.id).catch(() => null);
+      if (!worktree) return;
+      loop.hold = leaveSeat(loop.hold, worktree, true);
+      store.setRunLoop(run.id, loop);
+      store.addLoopEvent(
+        `${run.id}:relay-aside:${sha}`,
+        run.id,
+        `${seatCallSign(run.agentId)}'s seat is on ${holder.ticket ?? holder.id}; set this run aside to come back for the failure on ${sha.slice(0, 7)}`,
+        at,
+      );
       return;
+    }
+    // a dialog is FLIGHT's to answer; a turn begun since the failure may be the seat's own work
+    if (row.state === "needs-input" || (row.lastTurnStartedAt ?? 0) >= failedAt) return;
     let put: RelayRecovery | null = null;
     try {
       put = (await supervisor.recoverRelay?.(run.agentId, run.id, failedAt)) ?? null;

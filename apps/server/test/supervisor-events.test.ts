@@ -279,6 +279,23 @@ describe("seat states", () => {
       expect(sup.seatFacts("guido-1")?.inTurn).toBe(true);
     });
 
+    it("finds a run's own worktree once its seat's row is on another live run", async () => {
+      const { sup } = make();
+      sup.start();
+      await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      const row = store.seatSession("guido-1");
+      const red = row?.runId === null || row === null ? null : store.run(row.runId);
+      if (row === null || red === null || row.worktree === null) throw new Error("no run");
+      // while the run holds its seat it is not stranded
+      expect(await sup.strandedWorktree?.(red.id)).toBeNull();
+      await sup.endRun("guido-1");
+      store.upsertRun({ ...red, endedAt: null, status: "running" });
+      store.upsertRun({ ...red, id: `${red.id}:other`, branch: null });
+      store.setSeatSession({ ...row, runId: `${red.id}:other`, worktree: join(dir, "elsewhere") });
+      expect(await sup.strandedWorktree?.(red.id)).toBe(row.worktree);
+    });
+
     it("sets a row naming no run back to the run its live process runs", async () => {
       const { sup } = make();
       sup.start();

@@ -934,12 +934,13 @@ hub holding the crew lock) carries a loop. A writer run started without one cann
   run. A failure still unsent 2 minutes after it was recorded is held back by stale seat state,
   which the hub puts right, one state a pass, so the excerpt goes within 5 minutes: a seat row
   naming no run or an ended one while the live process runs this run is set back to it; an attach
-  begun before the failure that never finished its replay is finished; a turn begun before the
-  failure that still counts as open is interrupted, and counted as ended only once the CLI
-  confirms (a refused or unanswered interrupt leaves it running). A seat waiting on a dialog, a
-  turn begun since the failure, and a row naming another live run are left alone; the 30-minute
-  `red_pr_idle` signal still wakes FLIGHT. Each recovery is a loop event ("…; set it back",
-  "…; finished it", "…; interrupted it"). A pass raises "Ready for review" in Needs you. Review fixes go to the seat by message: it
+  left unfinished for a minute, whenever it began, is finished; a turn begun before the failure
+  that still counts as open is interrupted, and counted as ended only once the CLI confirms (a
+  refused or unanswered interrupt leaves it running). A seat another live run holds is not taken
+  from it: the red run is set aside in its own branch's worktree with its wake due, and comes
+  back by the usual wake. A seat waiting on a dialog and a turn begun since the failure are left
+  alone; the 30-minute `red_pr_idle` signal still wakes FLIGHT. Each recovery is a loop event
+  ("…; set it back", "…; finished it", "…; interrupted it", "…; set this run aside"). A pass raises "Ready for review" in Needs you. Review fixes go to the seat by message: it
   commits and reports again, and the engine pushes to the same PR.
 - **Parked.** Any limit parks the run with a Blocked note (and, in a `merge` repo, the card in
   *Blocked*). Your next message to the seat resumes it; the seat then needs a new commit, or a
