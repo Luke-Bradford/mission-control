@@ -492,7 +492,7 @@ export class Store {
   }
 
   /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
-  private transaction(fn: () => void, writeLock = false): void {
+  transaction(fn: () => void, writeLock = false): void {
     this.db.exec(writeLock ? "BEGIN IMMEDIATE" : "BEGIN");
     try {
       fn();

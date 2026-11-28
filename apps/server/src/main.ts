@@ -159,7 +159,7 @@ import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { watchPreviewParent } from "./runtime/preview-parent.ts";
 import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
-import { createSupervisor } from "./runtime/supervisor.ts";
+import { createSupervisor, type Supervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { createSessionChecks } from "./sessions/checks.ts";
 import { applyCmuxSessionEvent, startCmuxEvents } from "./sessions/events.ts";
@@ -189,6 +189,27 @@ import {
 export const HOST = LOOPBACK_HOST;
 /** `pnpm build` output of apps/web, served by this process. */
 const WEB_ROOT = fileURLToPath(new URL("../../web/dist", import.meta.url));
+
+/** Interrupt a stranded Codex turn after its test process ended without a final tool result. */
+export function notifyLostCheck(
+  store: { run(runId: string): Pick<Run, "agentId"> | null },
+  supervisor: Pick<Supervisor, "message">,
+  log: (line: string) => void,
+  runId: string,
+  commands: readonly string[],
+): void {
+  const run = store.run(runId);
+  if (run === null) return;
+  void supervisor
+    .message(
+      run.agentId,
+      `The test command ended without a final result: ${commands.join(", ")}. Run it again; do not keep polling the lost command.`,
+      { interrupt: true, questions: "none", expectedRunId: runId },
+    )
+    .catch((e: unknown) =>
+      log(`checks: could not tell ${run.agentId} about a lost command: ${String(e)}`),
+    );
+}
 
 export async function main(): Promise<void> {
   const configPath =
@@ -646,12 +667,14 @@ export async function main(): Promise<void> {
   // The checks a repo configures (`mc.checks`): seats' shell calls are recorded against the commit
   // they ran on, and `mc push` asks for the record.
   const runChecks = configuredChecks(store, engineRules);
+  let supervisor!: Supervisor;
   const checkRecorder = createCheckRecorder({
     store,
     checks: runChecks,
     state: cloneState(config, store),
     worktree: seatWorktree(store),
     processAlive,
+    onLost: (runId, commands) => notifyLostCheck(store, supervisor, log, runId, commands),
     log: (line) => log(line),
   });
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
@@ -691,7 +714,7 @@ export async function main(): Promise<void> {
             config.crew?.sessions.find((s) => s.repoId === repoId)?.checkout ?? null,
           log: (line) => log(line),
         });
-  const supervisor = createSupervisor({
+  supervisor = createSupervisor({
     // every Claude seat runs as a cmux workspace the operator can see, type into and clear
     cmuxCommand: [CMUX_COMMAND],
     auditPack: (seatId) =>

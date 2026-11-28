@@ -1649,6 +1649,18 @@ async function managedWorktreesOf(
   return worktrees;
 }
 
+/** The managed worktree under the crew root that has `branch` checked out, or null. */
+export async function branchWorktree(
+  i: { checkout: string; worktreesRoot: string; peers?: readonly RepoPeer[] },
+  branch: string,
+): Promise<string | null> {
+  const common = await cloneGitDir(i.checkout, i.peers);
+  const inClone = (args: string[], timeoutMs?: number) =>
+    crewGit(i.checkout, args, common, { gitDir: common, timeoutMs });
+  const found = await managedWorktreesOf(inClone, new Set([branch]), i.worktreesRoot);
+  return found[0]?.path ?? null;
+}
+
 /** A stopped ticket branch must not be discarded when an open PR selects another branch. */
 async function stoppedTicketWorktreeBlock(
   path: string,

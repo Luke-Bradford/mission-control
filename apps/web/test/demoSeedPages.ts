@@ -69,6 +69,25 @@ export const DEMO_TICKETS: readonly DemoTicket[] = [
   { n: 254, title: "Fix the broken wishlist link", stage: "merged", seat: null },
 ];
 
+/** The configured Demo day uses two working boards and one deliberately empty board. */
+export const DEMO_CONFIGURED_REPOS = ["mission-control", "eBull", "autonomy-engine"] as const;
+
+export type DemoRepoId = (typeof DEMO_CONFIGURED_REPOS)[number];
+
+/** Ticket ownership is shared by Overview, Board, FLIGHT and the scene. */
+export function demoRepoForTicket(ticket: DemoTicket): DemoRepoId {
+  const index = DEMO_TICKETS.findIndex((candidate) => candidate.n === ticket.n);
+  return DEMO_CONFIGURED_REPOS[index % 2] ?? "mission-control";
+}
+
+export const demoTicketRef = (ticket: DemoTicket): string =>
+  `${demoRepoForTicket(ticket)}#${ticket.n}`;
+
+export const demoTicketsForRepo = (repoId: DemoRepoId, tickets = DEMO_TICKETS): DemoTicket[] =>
+  repoId === "autonomy-engine"
+    ? []
+    : tickets.filter((ticket) => demoRepoForTicket(ticket) === repoId);
+
 const PIPELINE_ORDER: readonly PipelineStage["stage"][] = [
   "ready",
   "building",
@@ -79,7 +98,10 @@ const PIPELINE_ORDER: readonly PipelineStage["stage"][] = [
 ];
 
 /** The Overview's pipeline, counted from the ticket list. */
-export function pipelineStages(tickets: readonly DemoTicket[]): PipelineStage[] {
+export function pipelineStages(
+  tickets: readonly DemoTicket[],
+  repoForTicket: (ticket: DemoTicket) => string = () => DEMO_REPO,
+): PipelineStage[] {
   return PIPELINE_ORDER.map((name) => {
     const here = tickets.filter((t) => t.stage === name);
     return {
@@ -87,7 +109,7 @@ export function pipelineStages(tickets: readonly DemoTicket[]): PipelineStage[] 
       count: here.length,
       oldestAt: here.length ? NOW - 40 * MIN : null,
       cards: here.slice(0, 8).map((t, i) => ({
-        repoId: DEMO_REPO,
+        repoId: repoForTicket(t),
         ticket: t.n,
         title: t.title,
         pr: null,
@@ -129,7 +151,8 @@ export function boardItems(tickets: readonly DemoTicket[] = DEMO_TICKETS) {
       labels: [],
       priority: i % 3 === 0 ? "P0" : "P1",
       size: (["S", "M", "L"] as const)[i % 3] ?? "M",
-      updatedAt: NOW - (i + 1) * 7 * MIN,
+      // Finished tickets span separate visible calendar days, not one repeated recent merge.
+      updatedAt: t.stage === "merged" ? NOW - (t.n - 250) * 25 * HOUR : NOW - (t.n * 7 + i) * MIN,
       createdAt: NOW - (i + 3) * 5 * HOUR,
       url: `https://github.com/octo-org/shop-app/issues/${t.n}`,
     }),
@@ -661,30 +684,38 @@ function setupApi(): Record<string, unknown> {
 }
 
 /** The QA queue: the open PRs, newest first. */
-export function qaQueue(tickets: readonly DemoTicket[]) {
+export function qaQueue(
+  tickets: readonly DemoTicket[],
+  repoForTicket: (ticket: DemoTicket) => string = () => DEMO_REPO,
+) {
   const sha = "a".repeat(40);
   const acceptancePrs = new Set(
     tickets.filter((ticket) => ticket.stage === "checks").map((ticket) => ticket.n + 1000),
   );
   return {
-    prs: openPrs(tickets).map((pr, i) => ({
-      repoId: DEMO_REPO,
-      number: pr.number,
-      title: pr.title,
-      url: pr.url,
-      branch: `feature/${pr.number - 1000}-demo`,
-      ticket: pr.ticket,
-      state: "open",
-      isDraft: false,
-      review: acceptancePrs.has(pr.number) ? "approved" : "none",
-      ci: acceptancePrs.has(pr.number) ? "passing" : "pending",
-      createdAt: NOW - (i + 2) * HOUR,
-      updatedAt: NOW - 5 * MIN,
-      mergedAt: null,
-      headSha: sha,
-      mergeable: "MERGEABLE",
-      ...(acceptancePrs.has(pr.number) ? { uat: { sha, since: NOW - 40 * MIN } } : {}),
-    })),
+    prs: openPrs(tickets).map((pr, i) => {
+      const ticket = tickets.find((item) => item.n + 1000 === pr.number);
+      const repoId = ticket ? repoForTicket(ticket) : DEMO_REPO;
+      return {
+        ...pr,
+        repoId,
+        number: pr.number,
+        title: pr.title,
+        url: pr.url.replaceAll(DEMO_REPO, repoId),
+        branch: `feature/${pr.number - 1000}-demo`,
+        ticket: ticket ? `${repoId}#${ticket.n}` : pr.ticket,
+        state: "open",
+        isDraft: false,
+        review: acceptancePrs.has(pr.number) ? "approved" : "none",
+        ci: acceptancePrs.has(pr.number) ? "passing" : "pending",
+        createdAt: NOW - (i + 2) * HOUR,
+        updatedAt: NOW - 5 * MIN,
+        mergedAt: null,
+        headSha: sha,
+        mergeable: "MERGEABLE",
+        ...(acceptancePrs.has(pr.number) ? { uat: { sha, since: NOW - 40 * MIN } } : {}),
+      };
+    }),
     flightId: "flight-1",
   };
 }
@@ -693,17 +724,22 @@ export function qaQueue(tickets: readonly DemoTicket[]) {
  * The saved-evidence reads for each open PR, copied from the QA fixture. That fixture reads the
  * clock when it loads, so it is moved onto `NOW` first, like the rest of the seed.
  */
-function qaPrApi(tickets: readonly DemoTicket[]): Record<string, unknown> {
+function qaPrApi(
+  tickets: readonly DemoTicket[],
+  repoForTicket: (ticket: DemoTicket) => string = () => DEMO_REPO,
+): Record<string, unknown> {
   const clock = Date.now();
   const fixture = shiftTimes(qaAcceptanceFixture(1), clock, NOW - clock);
   const out: Record<string, unknown> = {};
   for (const pr of allPrs(tickets)) {
+    const ticket = tickets.find((item) => item.n + 1000 === pr.number);
+    const repoId = ticket ? repoForTicket(ticket) : DEMO_REPO;
     for (const [path, value] of Object.entries(fixture)) {
       if (path === "/api/qa/queue") continue;
       const own = (text: string) =>
         text
-          .replaceAll('"mission-control"', `"${DEMO_REPO}"`)
-          .replaceAll("mission-control/", `${DEMO_REPO}/`)
+          .replaceAll('"mission-control"', `"${repoId}"`)
+          .replaceAll("mission-control/", `${repoId}/`)
           .replaceAll("1011", String(pr.number));
       const read = JSON.parse(own(JSON.stringify(value)));
       // QA's browser checks: the reviewer's before and after shots of the page the PR touches.
@@ -717,15 +753,14 @@ function qaPrApi(tickets: readonly DemoTicket[]): Record<string, unknown> {
         }));
       out[own(path)] = read;
     }
-    out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}`] = { reports: [] };
-    out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}&headSha=${"a".repeat(40)}`] = {
+    out[`/api/qa-reports?repoId=${repoId}&prNumber=${pr.number}`] = { reports: [] };
+    out[`/api/qa-reports?repoId=${repoId}&prNumber=${pr.number}&headSha=${"a".repeat(40)}`] = {
       reports: [],
     };
-    const ticket = tickets.find((item) => item.n + 1000 === pr.number);
-    out[`/api/repos/${DEMO_REPO}/prs/${pr.number}`] = {
-      repoId: DEMO_REPO,
+    out[`/api/repos/${repoId}/prs/${pr.number}`] = {
+      repoId,
       number: pr.number,
-      ticket: ticket ? `${DEMO_REPO}#${ticket.n}` : null,
+      ticket: ticket ? `${repoId}#${ticket.n}` : null,
     };
   }
   return out;
@@ -818,15 +853,25 @@ function flightApi(): Record<string, unknown> {
 /** Everything but the Overview's own answers; the keys are request paths. */
 export function demoPageAnswers(
   tickets: readonly DemoTicket[] = DEMO_TICKETS,
+  repoForTicket: (ticket: DemoTicket) => string = () => DEMO_REPO,
 ): Record<string, unknown> {
   const telemetry = telemetryView();
   const clock = Date.now();
+  const historyRepo = tickets[0] ? repoForTicket(tickets[0]) : "mission-control";
   // The history fixture is written for other repos; Demo's are its own.
   const history = JSON.parse(
     JSON.stringify(shiftTimes(qaHistoryApi(3), clock, NOW - clock))
-      .replaceAll("mission-control", DEMO_REPO)
+      .replaceAll("mission-control", historyRepo)
       .replaceAll('{"id":"sample"}', '{"id":"site-builder"}'),
   ) as Record<string, unknown>;
+  const historyPage = history["/api/qa/history?limit=50"] as {
+    entries: unknown[];
+    repositories: { id: string }[];
+  };
+  historyPage.repositories = DEMO_CONFIGURED_REPOS.map((id) => ({ id }));
+  for (const repoId of DEMO_CONFIGURED_REPOS)
+    history[`/api/qa/history?limit=50&repoId=${repoId}`] =
+      repoId === "mission-control" ? historyPage : { ...historyPage, entries: [] };
   for (const i of [0, 2]) {
     const report = JSON.parse(
       JSON.stringify(shiftTimes(qaHistorySavedReport(i), clock, NOW - clock)).replaceAll(
@@ -850,9 +895,9 @@ export function demoPageAnswers(
     ...commsApi(),
     ...setupApi(),
     ...flightApi(),
-    ...qaPrApi(tickets),
+    ...qaPrApi(tickets, repoForTicket),
     ...ticketItems(tickets),
-    "/api/qa/queue": qaQueue(tickets),
+    "/api/qa/queue": qaQueue(tickets, repoForTicket),
     "/api/plans": plansView(),
     [`/api/plans?repoId=${DEMO_REPO}`]: plansView(),
     "/api/dependencies": [],
@@ -942,7 +987,11 @@ function plansView() {
 }
 
 /** The PR flow table, from the same tickets and seats as the rest of the crew. */
-export function prFlowView(tickets: readonly DemoTicket[] = DEMO_TICKETS): FlightPrFlowView {
+export function prFlowView(
+  tickets: readonly DemoTicket[] = DEMO_TICKETS,
+  repoForTicket: (ticket: DemoTicket) => string = () => DEMO_REPO,
+  repoIds: readonly string[] = [...new Set(tickets.map(repoForTicket))],
+): FlightPrFlowView {
   const base = prFlowFixture(0);
   const stageOf: Record<DemoTicket["stage"], FlightPrFlowRow["stage"]> = {
     ready: "building",
@@ -951,12 +1000,13 @@ export function prFlowView(tickets: readonly DemoTicket[] = DEMO_TICKETS): Fligh
     review: "review",
     merged: "merge",
   };
+  const blocked = tickets.find((ticket) => ticket.n === 104);
   const rows: FlightPrFlowRow[] = openPrs(tickets).map((pr, i) => {
     const t = tickets.find((x) => `${DEMO_REPO}#${x.n}` === pr.ticket) as DemoTicket;
     const seat = t.seat ?? "dev-1";
     return {
       pr: pr.number,
-      ticket: `${DEMO_REPO}#${t.n}`,
+      ticket: `${repoForTicket(t)}#${t.n}`,
       title: t.title,
       owner: seat,
       ownerKind: "seat",
@@ -967,7 +1017,7 @@ export function prFlowView(tickets: readonly DemoTicket[] = DEMO_TICKETS): Fligh
       openSince: NOW - (i + 2) * 40 * MIN,
       waitsOn:
         t.stage === "checks" ? ["CI to finish"] : t.stage === "review" ? ["review by dev-9"] : [],
-      blocks: i === 0 ? [`${DEMO_REPO}#104`] : [],
+      blocks: i === 0 && blocked ? [`${repoForTicket(blocked)}#${blocked.n}`] : [],
       lastAction: "pushed",
       lastActor: seat,
       lastActionAt: NOW - 4 * MIN,
@@ -975,15 +1025,13 @@ export function prFlowView(tickets: readonly DemoTicket[] = DEMO_TICKETS): Fligh
   });
   return {
     generatedAt: NOW,
-    repos: [
-      {
-        ...(base.repos[0] as FlightPrFlowView["repos"][number]),
-        repoId: DEMO_REPO,
-        generatedAt: NOW,
-        unowned: 0,
-        rows,
-      },
-    ],
+    repos: repoIds.map((repoId) => ({
+      ...(base.repos[0] as FlightPrFlowView["repos"][number]),
+      repoId,
+      generatedAt: NOW,
+      unowned: 0,
+      rows: rows.filter((row) => row.ticket?.startsWith(`${repoId}#`)),
+    })),
   };
 }
 
@@ -996,6 +1044,7 @@ export function ticketHistory(t: DemoTicket, at = NOW) {
   const merged = t.stage === "merged";
   const sha = "a".repeat(40);
   const runId = `demo-run-${t.seat ?? t.n}`;
+  const reworked = t.n === 108;
   return {
     repoId: DEMO_REPO,
     number: t.n,
@@ -1040,8 +1089,69 @@ export function ticketHistory(t: DemoTicket, at = NOW) {
               headSha: sha,
               createdAt: at - 2 * HOUR,
               mergedAt: merged ? at - 20 * MIN : null,
-              rounds: [],
+              rounds: reworked
+                ? [
+                    {
+                      reviewId: 1081,
+                      round: 1,
+                      sha: "b".repeat(40),
+                      state: "complete",
+                      verdict: "rework",
+                      summary: "The first pass found a missing narrow-screen state.",
+                      blocking: 1,
+                      minor: 0,
+                      at: at - 80 * MIN,
+                      findings: [],
+                    },
+                    {
+                      reviewId: 1082,
+                      round: 2,
+                      sha: "c".repeat(40),
+                      state: "complete",
+                      verdict: "rework",
+                      summary: "The fix needs one more focused browser check.",
+                      blocking: 1,
+                      minor: 1,
+                      at: at - 50 * MIN,
+                      findings: [],
+                    },
+                    {
+                      reviewId: 1083,
+                      round: 3,
+                      sha,
+                      state: "complete",
+                      verdict: "pass",
+                      summary: "Third review round passed.",
+                      blocking: 0,
+                      minor: 0,
+                      at: at - 20 * MIN,
+                      findings: [],
+                    },
+                  ]
+                : [],
               ci: [
+                ...(reworked
+                  ? [
+                      {
+                        sha: "c".repeat(40),
+                        at: at - 45 * MIN,
+                        checks: [
+                          {
+                            name: "test (attempt 1)",
+                            conclusion: "failure",
+                            state: "failing" as const,
+                            url: null,
+                          },
+                          {
+                            name: "test (attempt 2, re-run)",
+                            conclusion: "success",
+                            state: "passing" as const,
+                            url: null,
+                          },
+                        ],
+                      },
+                    ]
+                  : []),
                 {
                   sha,
                   at: at - 30 * MIN,

@@ -78,7 +78,9 @@ export const MC_TOOL_NAMES = {
   cmuxSessions: "cmux_sessions",
   cmuxSend: "cmux_send",
   cmuxOpen: "cmux_open",
+  answerDialog: "answer_dialog",
   setFlightMode: "set_flight_mode",
+  allowDependency: "allow_dependency",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -159,7 +161,9 @@ export const MC_TOOLS = {
   cmuxSessions: mcTool(MC_TOOL_NAMES.cmuxSessions),
   cmuxSend: mcTool(MC_TOOL_NAMES.cmuxSend),
   cmuxOpen: mcTool(MC_TOOL_NAMES.cmuxOpen),
+  answerDialog: mcTool(MC_TOOL_NAMES.answerDialog),
   setFlightMode: mcTool(MC_TOOL_NAMES.setFlightMode),
+  allowDependency: mcTool(MC_TOOL_NAMES.allowDependency),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */
@@ -243,8 +247,15 @@ export const outsideAreaText = (paths: readonly string[], globs: readonly string
 export const otherAreaText = (paths: readonly string[], call: string): string =>
   `Not committed: ${pathList(paths)} ${isAre(paths)} in ${call}'s area.`;
 
+/** A package.json or pnpm-lock.yaml, which FLIGHT can allow for one run (`allow_dependency`). */
+const INSTALL_FILE = /(?:^|\/)(?:package\.json|pnpm-lock\.yaml)$/;
+
 export const protectedPathsText = (paths: readonly string[]): string =>
-  `Not committed: ${pathList(paths)} ${isAre(paths)} protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs ${paths.length === 1 ? "it" : "them"}.`;
+  `Not committed: ${pathList(paths)} ${isAre(paths)} protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs ${paths.length === 1 ? "it" : "them"}.${
+    paths.some((p) => INSTALL_FILE.test(p))
+      ? ` For a new package, ask FLIGHT to allow it with ${MC_TOOL_NAMES.allowDependency} (name each package and version); this commit tool then takes the package.json and pnpm-lock.yaml change.`
+      : ""
+  }`;
 
 /** New or changed symlinks (mode 120000) and gitlinks (160000), which the commit tool refuses. */
 export const specialPathsText = (paths: readonly string[]): string =>

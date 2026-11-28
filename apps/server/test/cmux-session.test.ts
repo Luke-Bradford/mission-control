@@ -25,7 +25,12 @@ import {
   createCmux,
 } from "../src/runtime/cmux.ts";
 import {
+  answerCmuxDialog,
   attachCmuxSession,
+  CMUX_DIALOG_CHANGED,
+  CMUX_DIALOG_GONE,
+  CMUX_DIALOG_NO_OPTION,
+  CMUX_DIALOG_PERMISSION,
   CMUX_ENDED,
   CMUX_ENV_FILE,
   CMUX_LAUNCHER_FILE,
@@ -35,7 +40,10 @@ import {
   CMUX_TOOL_REFUSED_TEXT,
   CMUX_TRUST_QUIT,
   claudeTranscript,
+  cmuxDialogId,
+  cmuxDialogReason,
   cmuxMessageText,
+  dialogOf,
   dialogOpen,
   envFileText,
   isPermissionPrompt,
@@ -693,10 +701,10 @@ describe("startCmuxSession", () => {
     });
     const h = start();
     await h.session.ready;
+    // the screen is read while cmux says running: the prompt is refused before cmux says needsInput
     h.setLifecycle("running");
-    await wait(() => h.events.some((e) => e.kind === "turn-start"));
-    h.setLifecycle("needsInput");
     await wait(() => (state().keys ?? []).some((k) => k.key === "escape"));
+    h.setLifecycle("needsInput");
     expect(state().keys.find((k) => k.key === "escape")).toMatchObject({ force: true });
     await new Promise((r) => setTimeout(r, 200));
     expect(h.events.some((e) => e.kind === "needs-input")).toBe(false);
@@ -757,6 +765,92 @@ describe("startCmuxSession", () => {
     await h.session.close();
   });
 
+  // #2304: cmux's record went on saying `running` while Claude's dialog was open, and the hub never looked
+  it("reads the screen while cmux says running: a question is needs-input, with its text and options", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen = "Thinking…";
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("running");
+    await wait(() => h.events.some((e) => e.kind === "turn-start"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    await wait(() => h.events.some((e) => e.kind === "needs-input"));
+    expect(h.events.find((e) => e.kind === "needs-input")).toMatchObject({
+      dialog: { question: "Which database should I use?", options: ["1. Postgres", "2. SQLite"] },
+    });
+    await h.session.close();
+  });
+
+  it("reports a dialog closing or changing while cmux stays needs-input", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("needsInput");
+    await wait(() => h.events.filter((e) => e.kind === "needs-input").length === 1);
+    patch((s) => {
+      s.screen = "Thinking…";
+    });
+    await wait(() => h.events.filter((e) => e.kind === "needs-input").length === 2);
+    expect(h.events.filter((e) => e.kind === "needs-input").at(-1)).not.toHaveProperty("dialog");
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which cache should I use?",
+        " ❯ 1. Redis",
+        "   2. Memcached",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    await wait(() => h.events.filter((e) => e.kind === "needs-input").length === 3);
+    expect(h.events.filter((e) => e.kind === "needs-input").at(-1)).toMatchObject({
+      dialog: { question: "Which cache should I use?", options: ["1. Redis", "2. Memcached"] },
+    });
+    await h.session.close();
+  });
+
+  it("refuses the eBull create-file dialog even while cmux's record says running", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen = "Thinking…";
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("running");
+    await wait(() => h.events.some((e) => e.kind === "turn-start"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Do you want to create 518_filing_processing_receipts.sql?",
+        " ❯ 1. Yes",
+        "   2. Yes, and switch to accept edits",
+        "   3. No",
+        "",
+        " Esc to cancel",
+      ].join("\n");
+    });
+    await wait(() => (state().keys ?? []).some((k) => k.key === "escape"));
+    await h.session.close();
+  });
+
   it("leaves a plain question that starts 'Do you want to proceed' to the operator", async () => {
     patch((s) => {
       s.claudePid = ALIVE;
@@ -768,6 +862,210 @@ describe("startCmuxSession", () => {
     await wait(() => h.events.some((e) => e.kind === "needs-input"));
     expect((state().keys ?? []).some((k) => k.key === "escape")).toBe(false);
     await h.session.close();
+  });
+
+  it("reads an open dialog's question and options, a wrapped option joined, for FLIGHT's call", () => {
+    const screen = [
+      " earlier conversation",
+      "────────────────────────────────────────────────────────────",
+      " Which migration should run first?",
+      " ❯ 1. 518_filing_processing_receipts",
+      "   2. 519_backfill, which is long and",
+      "      wraps",
+      "",
+      " Enter to select · Esc to cancel",
+    ].join("\n");
+    const d = dialogOf(screen);
+    expect(d).toEqual({
+      question: "Which migration should run first?",
+      options: ["1. 518_filing_processing_receipts", "2. 519_backfill, which is long and wraps"],
+    });
+    expect(dialogOf(" Thinking…")).toBeNull();
+    const reason = cmuxDialogReason(d as NonNullable<typeof d>);
+    expect(reason).toContain('"Which migration should run first?"');
+    expect(reason).toContain("1. 518_filing_processing_receipts / 2. 519_backfill");
+    expect(
+      cmuxDialogReason({ question: "x".repeat(5000), options: [] }).length,
+    ).toBeLessThanOrEqual(1500);
+    // a long question never pushes the options out of FLIGHT's call
+    const long = cmuxDialogReason({
+      question: "q".repeat(1600),
+      options: ["1. Keep data", "2. Delete data", `3. ${"y".repeat(800)}`],
+    });
+    expect(long.length).toBeLessThanOrEqual(1500);
+    expect(long).toContain("1. Keep data");
+    expect(long).toContain("2. Delete data");
+    expect(long).toContain("3. yyy");
+    // twenty long options: every number, the twentieth too, and a label prefix for each
+    const many = cmuxDialogReason({
+      question: "q".repeat(1600),
+      options: Array.from({ length: 20 }, (_, n) => `${n + 1}. ${"Label".repeat(30)}`),
+    });
+    expect(many.length).toBeLessThanOrEqual(1500);
+    for (let n = 1; n <= 20; n++) expect(many).toContain(`${n}. LabelLabel`);
+    expect(many).toContain("qqqqqqqqqq");
+  });
+
+  describe("answerCmuxDialog (FLIGHT's answer_dialog)", () => {
+    const RULE_LINE = "────────────────────────────────────────────────────────────";
+    /** A screen whose cursor the arrow keys move, as Claude's menu does; Enter closes it. */
+    const menu = (options: string[], at = 0, question = "Which database should I use?") => {
+      const m = {
+        at,
+        keys: [] as { key: string; force: boolean }[],
+        closed: false,
+        options,
+        question,
+      };
+      const screen = () =>
+        m.closed
+          ? " ❯ "
+          : [
+              RULE_LINE,
+              ` ${m.question}`,
+              ...m.options.map((o, n) => `${n === m.at ? " ❯ " : "   "}${o}`),
+              " Enter to select · Esc to cancel",
+            ].join("\n");
+      const cmux = {
+        readScreen: async () => screen(),
+        sendKey: async (_ws: string, key: string, force = false) => {
+          m.keys.push({ key, force });
+          if (key === "down") m.at = Math.min(m.at + 1, m.options.length - 1);
+          if (key === "up") m.at = Math.max(m.at - 1, 0);
+          if (key === "enter") m.closed = true;
+        },
+      };
+      return { m, cmux };
+    };
+    const OPTS = ["1. Postgres", "2. SQLite", "3. Neither"];
+    const Q = "Which database should I use?";
+    /** The id FLIGHT's call gives for a dialog asking `question` with `options`. */
+    const idOf = (options: string[], question = Q) => cmuxDialogId({ question, options });
+
+    it("moves the cursor to the option a key at a time, then Enter, forced past the open dialog", async () => {
+      const { m, cmux } = menu(OPTS);
+      await answerCmuxDialog(cmux, "ws", { option: 3, dialog: idOf(OPTS) }, { pollMs: 0 });
+      expect(m.keys).toEqual([
+        { key: "down", force: true },
+        { key: "down", force: true },
+        { key: "enter", force: true },
+      ]);
+      const up = menu(OPTS, 2);
+      await expect(
+        answerCmuxDialog(up.cmux, "ws", { option: 1, dialog: idOf(OPTS) }, { pollMs: 0 }),
+      ).resolves.toBe("1. Postgres");
+      expect(up.m.keys.map((k) => k.key)).toEqual(["up", "up", "enter"]);
+    });
+
+    it("answers a dialog whose option FLIGHT's call cut short", async () => {
+      const opts = ["1. Keep data", `2. Delete data and every backup ${"z".repeat(300)}`];
+      expect(cmuxDialogReason({ question: Q, options: opts })).toContain(idOf(opts));
+      const { m, cmux } = menu(opts);
+      await answerCmuxDialog(cmux, "ws", { option: 2, dialog: idOf(opts) }, { pollMs: 0 });
+      expect(m.keys.map((k) => k.key)).toEqual(["down", "enter"]);
+    });
+
+    it("refuses with no key sent: no dialog, no such option, a changed dialog, a permission prompt", async () => {
+      const gone = menu(OPTS);
+      gone.m.closed = true;
+      await expect(
+        answerCmuxDialog(gone.cmux, "ws", { option: 1, dialog: idOf(OPTS) }, { pollMs: 0 }),
+      ).rejects.toThrow(CMUX_DIALOG_GONE);
+      const none = menu(OPTS);
+      await expect(
+        answerCmuxDialog(none.cmux, "ws", { option: 4, dialog: idOf(OPTS) }, { pollMs: 0 }),
+      ).rejects.toThrow(CMUX_DIALOG_NO_OPTION);
+      const changed = menu(OPTS);
+      await expect(
+        answerCmuxDialog(
+          changed.cmux,
+          "ws",
+          { option: 2, dialog: idOf(["1. Keep data", "2. Delete data", "3. Neither"]) },
+          { pollMs: 0 },
+        ),
+      ).rejects.toThrow(CMUX_DIALOG_CHANGED);
+      // the same labels under another question are another dialog
+      const asked = menu(OPTS);
+      await expect(
+        answerCmuxDialog(
+          asked.cmux,
+          "ws",
+          { option: 1, dialog: idOf(OPTS, "Which cache should I use?") },
+          { pollMs: 0 },
+        ),
+      ).rejects.toThrow(CMUX_DIALOG_CHANGED);
+      const toolOpts = ["1. Yes", "2. Yes, and switch to accept edits", "3. No"];
+      const tool = menu(toolOpts, 0, "Do you want to create a.sql?");
+      await expect(
+        answerCmuxDialog(
+          tool.cmux,
+          "ws",
+          { option: 1, dialog: idOf(toolOpts, "Do you want to create a.sql?") },
+          { pollMs: 0 },
+        ),
+      ).rejects.toThrow(CMUX_DIALOG_PERMISSION);
+      for (const t of [gone, none, changed, asked, tool]) expect(t.m.keys).toEqual([]);
+    });
+
+    it("stops if the dialog changes under it, before Enter", async () => {
+      const { m, cmux } = menu(OPTS);
+      const send = cmux.sendKey;
+      cmux.sendKey = async (ws, key, force) => {
+        await send(ws, key, force);
+        m.options = ["1. Yes, migrate", "2. No, wait", "3. Later"];
+      };
+      await expect(
+        answerCmuxDialog(cmux, "ws", { option: 3, dialog: idOf(OPTS) }, { pollMs: 0 }),
+      ).rejects.toThrow(CMUX_DIALOG_CHANGED);
+      expect(m.keys.map((k) => k.key)).not.toContain("enter");
+    });
+
+    // RETRO-CX: "Use the cached data?" answered 2, then "Delete the cached data?" with the same labels
+    it("stops if the question changes under it with the same option labels", async () => {
+      const opts = ["1. Yes", "2. No"];
+      const { m, cmux } = menu(opts, 0, "Use the cached data?");
+      const send = cmux.sendKey;
+      cmux.sendKey = async (ws, key, force) => {
+        await send(ws, key, force);
+        m.question = "Delete the cached data?";
+      };
+      await expect(
+        answerCmuxDialog(
+          cmux,
+          "ws",
+          { option: 2, dialog: idOf(opts, "Use the cached data?") },
+          { pollMs: 0 },
+        ),
+      ).rejects.toThrow(CMUX_DIALOG_CHANGED);
+      expect(m.keys.map((k) => k.key)).toEqual(["down"]);
+    });
+
+    it("stops if an option changes past the part FLIGHT's call showed", async () => {
+      const long = (end: string) => [
+        "1. Keep data",
+        `2. Delete data from ${"the shared store ".repeat(20)}${end}`,
+      ];
+      const reason = cmuxDialogReason({ question: Q, options: long("then stop") });
+      expect(reason).not.toContain("then stop");
+      const { m, cmux } = menu(long("then stop"));
+      const send = cmux.sendKey;
+      cmux.sendKey = async (ws, key, force) => {
+        await send(ws, key, force);
+        m.options = long("and every backup");
+      };
+      await expect(
+        answerCmuxDialog(cmux, "ws", { option: 2, dialog: idOf(long("then stop")) }, { pollMs: 0 }),
+      ).rejects.toThrow(CMUX_DIALOG_CHANGED);
+      expect(m.keys.map((k) => k.key)).toEqual(["down"]);
+    });
+  });
+
+  it("knows Claude 2.1.332's create-file dialog, which has no title, as a tool prompt", () => {
+    expect(
+      isPermissionPrompt(
+        " Do you want to create 518_filing_processing_receipts.sql?\n ❯ 1. Yes\n   2. Yes, and switch to accept edits\n   3. No\n\n Esc to cancel",
+      ),
+    ).toBe(true);
   });
 
   it("knows Claude's permission dialog by its fixed options, not by its question alone", () => {

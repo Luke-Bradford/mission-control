@@ -413,10 +413,10 @@ describe("the hub closes a question on a recorded fact", () => {
       at: NOW - 60_000,
     });
     expect(await closeSettledQuestions({ config: config(), store, now: NOW })).toBe(0);
-    const item = attentionItems(config(), store, NOW).find(
-      (i) => i.key === `${NOTE_KEY}cleanup:r1`,
-    );
-    expect(item?.owner).toBe("operator");
+    // its ticket is closed, so the list settles it whenever the ticket closed (#2285)
+    expect(
+      attentionItems(config(), store, NOW).some((i) => i.key === `${NOTE_KEY}cleanup:r1`),
+    ).toBe(false);
   });
 
   it("shows a note raised again under a closed key as a new item", () => {

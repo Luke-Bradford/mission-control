@@ -28,6 +28,7 @@ import {
   FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_OPERATOR_WAKE_GAP_MS,
+  FLIGHT_QUESTION_REWAKE_MS,
   FLIGHT_ROTATIONS_MAX,
   FLIGHT_RUN_TOOLS_SETTING,
   FLIGHT_STARTS_MAX,
@@ -717,6 +718,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     });
     const wake = modeFacts(wakeFacts(state));
     const listed = hasFacts(wake);
+    // a seat's question still unanswered at 10 minutes wakes FLIGHT a second time (#2285)
+    const asked = new Set(state.questions.map((q) => q.id));
+    for (const q of store.openQuestions())
+      if (asked.has(q.id) && t - q.at < FLIGHT_QUESTION_REWAKE_MS)
+        later(q.at + FLIGHT_QUESTION_REWAKE_MS - t);
     recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t));
     // FLIGHT's writes are stopped until the operator lifts the breaker: a wake could only idle
     if (state.breaker.tripped) {

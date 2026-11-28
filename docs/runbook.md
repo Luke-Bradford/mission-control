@@ -580,7 +580,9 @@ What each seat's process starts with:
   answers it or briefs it for you, and only a briefed question reaches your Needs you. A seat
   that is blocked outside its area, needs a decision it cannot make or disputes a finding calls
   FLIGHT with `mcp__mc__call_flight { reason, ref }` (below). While FLIGHT
-  is not triaging, one "FLIGHT is not triaging" item counts what waits on it. A read-only seat
+  is not triaging, one "FLIGHT is not triaging" item on FLIGHT's queue counts what waits on it;
+  it is not on your Needs you, and the FLIGHT-down notification tells you of the outage (#2285).
+  A seat's question unanswered after 10 minutes wakes FLIGHT a second time, naming it first. A read-only seat
   (RETRO) has the question tool and `report_evidence`, which refuses it (read-only runs have no
   loop).
 - **Unanswered Comms.** A labelled direct `question` or `blocker` shows its elapsed wait in Comms.
@@ -600,7 +602,9 @@ What each seat's process starts with:
   An overdue crew question stays with FLIGHT. The hub does not write a Proceed/Hold brief or
   answer it for the operator. Only FLIGHT's complete brief makes it an operator question.
   Old hub-written Comms briefs remain in history but are ignored by the attention projection.
-  When FLIGHT is down, waiting crew messages count under one FLIGHT-down/not-triaging alert.
+  When FLIGHT is down, waiting crew messages count under the one not-triaging item on FLIGHT's
+  queue. Any item 14 days old, or whose ticket is closed, settles and leaves
+  (#2285).
   Protected operator approvals, account and budget holds, and the runaway alert keep their own rules.
 
   The Comms graph also reports 24-hour run-token totals per link and flags a pair
@@ -615,7 +619,8 @@ What each seat's process starts with:
   that only sent notices is dropped).
   The Comms copy of a CI failure is one line with a link, such as "CI failed on 341f108 in job
   web-core. https://github.com/o/mc/commit/<sha>/checks"; the seat still gets the whole log
-  excerpt, with the failing test and its error.
+  excerpt, with each failing test and its error: vitest `FAIL` and `×` lines, and Playwright's
+  numbered `1) [chromium] › …` lines, each with up to 10 lines of its error.
 - **Push and draft PR, made by the engine.** The push sends the run's own branch
   (`feature/<issue>-…`, never the default branch or another live run's) as a plain fast-forward: no force, no lease, no tags. It sends only
   commits the commit tool recorded for that branch, none of them a merge or a root commit, and only
@@ -930,7 +935,16 @@ hub holding the crew lock) carries a loop. A writer run started without one cann
   without an accepted reason. The engine pushes and opens the draft PR (or pushes to the run's PR
   on a later report), then waits for CI.
 - **CI.** A failure goes back to the seat as a log excerpt, twice; the third failure parks the
-  run. A pass raises "Ready for review" in Needs you. Review fixes go to the seat by message: it
+  run. A failure still unsent 2 minutes after it was recorded is held back by stale seat state,
+  which the hub puts right, one state a pass, so the excerpt goes within 5 minutes: a seat row
+  naming no run or an ended one while the live process runs this run is set back to it; an attach
+  left unfinished for a minute, whenever it began, is finished; a turn begun before the failure
+  that still counts as open is interrupted, and counted as ended only once the CLI confirms (a
+  refused or unanswered interrupt leaves it running). A seat another live run holds is not taken
+  from it: the red run is set aside in its own branch's worktree with its wake due, and comes
+  back by the usual wake. A seat waiting on a dialog and a turn begun since the failure are left
+  alone; the 30-minute `red_pr_idle` signal still wakes FLIGHT. Each recovery is a loop event
+  ("…; set it back", "…; finished it", "…; interrupted it", "…; set this run aside"). A pass raises "Ready for review" in Needs you. Review fixes go to the seat by message: it
   commits and reports again, and the engine pushes to the same PR.
 - **Parked.** Any limit parks the run with a Blocked note (and, in a `merge` repo, the card in
   *Blocked*). Your next message to the seat resumes it; the seat then needs a new commit, or a
@@ -1107,8 +1121,8 @@ Seats cannot change them:
 - a commit that holds one is refused whole;
 - the hub won't install from a branch that changes an install input.
 
-When a ticket needs such a change, a seat can make it under a path grant (next section). Otherwise
-land it outside the crew, in one of two ways:
+When a ticket needs such a change, a seat can make it under a path grant (below), or, for a new
+package, under a dependency allowance (below). Otherwise land it outside the crew, in one of two ways:
 - **by hand:** change it in your own checkout and open the PR yourself;
 - **a controller PR:** have the head agent, working outside the crew under your eye, open it.
 
@@ -1145,6 +1159,42 @@ the start cannot prove it stays inside the area (for example `apps/**/server/**`
 - The merge gates do not change: a hard-rule path in the diff still needs FLIGHT's clearance (or the
   operator's, on a repo that keeps it) before merge, and the hub still won't install from a branch
   that changes an install input.
+
+### A ticket that needs a new package: a dependency allowance
+
+A seat that needs a new package asks FLIGHT with `mc ask_flight`. The commit tool's refusal of
+`package.json` or `pnpm-lock.yaml` names this route. FLIGHT decides, then calls
+`mc allow_dependency { runId, files, packages, basis }`:
+- `files` lists the manifest and lockfile paths. Only files named `package.json` or `pnpm-lock.yaml`
+  can be listed, nested ones included.
+- `packages` lists each package with its exact SemVer version (no range, no leading zero) and its
+  licence, such as `{ name: "hyparquet", version: "1.33.2", licence: "MIT" }`.
+
+The call logs a `dependency` decision ("Allowed GUIDO-1 to add hyparquet 1.33.2 (MIT) in
+package.json, pnpm-lock.yaml"). The allowance is for that run only. A second call adds to it.
+
+The packages are installed in the seat's worktree with `pnpm add <name>@<version>`. If the seat's
+sandbox cannot reach the registry, FLIGHT runs it there. The seat then commits with `mc commit`.
+Never use `git commit`: the push refuses any commit the commit tool did not make. The commit tool
+accepts an allowed file only when its change adds just the named packages:
+- **A manifest** may only gain new entries in `dependencies`, `devDependencies`,
+  `optionalDependencies` or `peerDependencies`. Each entry must be a named package, at its version
+  exactly or with `^` or `~`. Changing or removing an entry is refused, and so is any change to another
+  field (`scripts`, for one).
+- **A lockfile** may only gain direct entries for the named packages in its `importers`, each
+  resolved at the named version. New transitive `packages` and `snapshots` entries are allowed; the
+  PR shows them in the lockfile diff. An entry already there must stay exactly as it was: changing
+  or removing its resolution, integrity or anything else is refused. Any change to another
+  top-level key, such as `overrides` or `settings`, is refused.
+
+The push's stray check counts the allowed files as granted. The PR body gets an `## Added
+dependencies` section, with each added package's version and licence as allowed when its commit
+was made; a later allowance of the same name does not change that line. A scoped name is written
+whole in a code span, where GitHub mentions no one, and the PR text check lets just those lines
+through. The section survives a seat's
+`pr_body` rewrite and RETRO's minor-findings update. It is written when the PR opens and at the
+review's minor-findings update, so a package added after the review shows only from the next
+update on. The merge gates do not change.
 
 ### Python dependencies in crew worktrees
 
@@ -1382,6 +1432,7 @@ never counts.
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |
 | `wake_stuck` | a set-aside run's wake met the same hub error (a 502, such as its dependencies not reinstalling) on two passes in a row; the hub keeps trying every pass. The evidence names the run and the error. Once per run |
+| `red_pr_idle` | a live run's PR is still red on its pushed sha 30 minutes after CI failed again on the hub's re-run, and its seat has started no turn, made no commit and sent no report since. The evidence names the run, the PR, the sha and whether the failure reached the seat. Once per run and sha |
 | `old_park` | a run has been parked for 15 minutes |
 | `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
 | `item_stale` | a Needs-you item for FLIGHT has gone 10 minutes untriaged (a PR ready to merge is `merge_stalled`) |

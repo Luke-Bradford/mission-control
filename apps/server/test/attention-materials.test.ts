@@ -335,7 +335,8 @@ describe("a held question", () => {
       seatId: null,
       repoId: "sample",
       text: "Choose",
-      at: 1,
+      // raised now: an item from 1970 would be settled as stale (#2285)
+      at: Date.now(),
     });
     let at = Date.now();
     const config = {

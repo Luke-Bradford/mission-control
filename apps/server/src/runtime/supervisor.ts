@@ -108,6 +108,7 @@ import {
   pathGrantProblem,
   pathsNeedingGrant,
   RATE_LIMIT_PARK_PREFIX,
+  RELAY_ATTACH_STUCK_MS,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -175,6 +176,7 @@ import { RepoRulesError } from "../engine/rules.ts";
 import { flightFloor, flightShellContext } from "../flight/floor.ts";
 import { noteFlightWrite } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
+import { recordSeatCall } from "../flight/signals.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
@@ -232,6 +234,7 @@ import {
   withoutHubConfig,
 } from "./brief.ts";
 import {
+  branchWorktree,
   cloneGitDir,
   existingCheckout,
   existingDetached,
@@ -263,11 +266,16 @@ import {
 } from "./cli-check.ts";
 import { type Cmux, CmuxError, type CmuxOptions, createCmux } from "./cmux.ts";
 import {
+  answerCmuxDialog,
   attachCmuxSession,
+  CMUX_DIALOG_NOT_WAITING,
+  CMUX_DIALOG_REPORT_MS,
   CMUX_WORKSPACE_PREFIX,
+  type CmuxDialog,
   type CmuxSaved,
   claudeConfigDir,
   claudeTranscript,
+  cmuxDialogReason,
   cmuxKeeperKey,
   cmuxSourceKey,
   cmuxWorkspaceKey,
@@ -515,6 +523,8 @@ export interface SupervisorDeps {
   /** How often a cmux run is polled, and how long it may take to show Claude (default 1 s, 60 s). */
   cmuxPollMs?: number;
   cmuxStartWaitMs?: number;
+  /** How long a cmux dialog stays open before FLIGHT is called about it (default 20 s). */
+  cmuxDialogReportMs?: number;
   /** How cmux is started when it is not running (tests give a stand-in and a short wait). */
   cmuxOptions?: CmuxOptions;
   /** Default "codex"; its version and app-server are run through the same binary. */
@@ -594,6 +604,9 @@ export type SupervisorEvent =
 export type SendResult = "sent" | "busy" | "no-session" | "dup" | "gone";
 
 /** What the snapshot reads of a seat's process. */
+/** What `recoverRelay` put right: the seat row's run, an unfinished attach, or a stale open turn. */
+export type RelayRecovery = "owner" | "attach" | "turn";
+
 export interface SeatFacts {
   inTurn: boolean;
   /** `Date.now()` at the resume that spawned the process; null for a fresh start. */
@@ -661,6 +674,25 @@ export interface Supervisor {
   resumeDeferredRuns?(): Promise<void>;
   /** null when the seat has no live process. */
   seatFacts(seatId: string): SeatFacts | null;
+  /**
+   * Puts right a stale state that keeps the engine's lines from the seat's live session for
+   * `runId`, where it dates from before `before` (when the owed line was recorded). One per call,
+   * first match: `owner`, the seat's row names no run or an ended one while its live process runs
+   * `runId` (the row is set back to it); `attach`, an attach left unfinished for
+   * RELAY_ATTACH_STUCK_MS, whenever it began (it is finished, its open turn as the keeper reported
+   * it); `turn`, a turn begun before
+   * then is still counted as open (the CLI is interrupted, and only once it confirms is the turn
+   * counted as ended). Never for a seat waiting on a dialog or still starting. Null when nothing
+   * was put right, a refused or unanswered interrupt included.
+   */
+  recoverRelay?(seatId: string, runId: string, before: number): Promise<RelayRecovery | null>;
+  /**
+   * A live writer run that is neither its seat's (the seat's row and process are on another run)
+   * nor set aside: its own branch's worktree under the crew root, so the engine can set it aside
+   * and wake it through the usual hand-back. Null when the run is its seat's, has no branch, or no
+   * such worktree exists apart from the one the seat is in.
+   */
+  strandedWorktree?(runId: string): Promise<string | null>;
   /**
    * Whether the seat's CLI session is attached and alive, for the run its row holds: the process
    * the hub holds, not the run row. Null while the hub cannot tell: crew is off or stopping, the startup take-back is running,
@@ -762,6 +794,12 @@ export interface Supervisor {
     },
   ): Promise<void>;
   interrupt(seatId: string): Promise<void>;
+  /**
+   * FLIGHT's answer to the dialog open in a seat's cmux workspace (`answerCmuxDialog`). Throws with
+   * the reason when the seat is not waiting on one in cmux, or the dialog is not the one named by
+   * its id. Returns the option picked, as the screen showed it.
+   */
+  answerDialog(seatId: string, answer: { option: number; dialog: string }): Promise<string>;
   /** Ends the run and leaves the seat idle for its next ticket; `hold` benches it (stopped) instead. */
   endRun(seatId: string, opts?: { hold?: boolean }): Promise<void>;
   /** null when the seat has no live session, or it did not answer. */
@@ -837,6 +875,10 @@ interface Live {
   spawn: string;
   /** Attached to a keeper that is still replaying the lines the hub missed: no line goes out yet. */
   attaching: boolean;
+  /** Releases the queue held until an attaching keeper finishes replaying, once only. */
+  releaseAttachBarrier: (() => void) | null;
+  /** now() when the attach began; null for a session the hub started itself. */
+  attachStartedAt: number | null;
   /** At an attach: the keeper's line count, below which the lines are a replay of what the last hub missed. */
   replayedBelow: number;
   /** At an attach: the keeper said a turn was open. A replayed `result` is then an earlier turn's. */
@@ -1137,6 +1179,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     });
 
   const live = new Map<string, Live>();
+  /** Per run: the call to FLIGHT about its open dialog, made if the dialog is still open when it fires. */
+  const dialogTimers = new Map<string, NodeJS.Timeout>();
+  /** Per run: the dialog the latest cmux screen read still shows. */
+  const openDialogs = new Map<string, CmuxDialog>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
   /** Runs already taken back once: a second such exit ends them as a crash. In memory only, so a hub restart allows one more. */
@@ -1401,6 +1447,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   ): void {
     const seatId = l.info.seat.id;
     if (transferState(l.run.id)?.pending) return;
+    clearDialog(l);
     if (live.get(seatId) === l) live.delete(seatId);
     if (stopping && l.ending === null) {
       // The hub is going down: the run stays active and is resumed on the next start.
@@ -1489,6 +1536,52 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     emit({ kind: "run-ended", seatId, runId: l.run.id, endedBy: l.endedBy ?? "exit" });
   }
 
+  /**
+   * A dialog still open in a seat's cmux workspace after `cmuxDialogReportMs` is FLIGHT's to see:
+   * a call with its question and options, which the watch delivers after its debounce. FLIGHT's own
+   * dialog waits on the operator, whose HUD shows the seat waiting.
+   */
+  const sameDialog = (a: CmuxDialog | undefined, b: CmuxDialog) =>
+    a !== undefined &&
+    a.question === b.question &&
+    a.options.length === b.options.length &&
+    a.options.every((option, index) => option === b.options[index]);
+
+  function clearDialog(l: Live): void {
+    openDialogs.delete(l.run.id);
+    clearTimeout(dialogTimers.get(l.run.id));
+    dialogTimers.delete(l.run.id);
+  }
+
+  function reportDialogLater(l: Live, dialog: CmuxDialog): void {
+    const runId = l.run.id;
+    const seatId = l.info.seat.id;
+    if (seatDef(l.info.seat).loop === "watch") return;
+    clearTimeout(dialogTimers.get(runId));
+    const timer = setTimeout(() => {
+      dialogTimers.delete(runId);
+      if (live.get(seatId)?.run.id !== runId) return;
+      // The cmux record can remain needsInput after a dialog has closed or changed. Its screen
+      // updates this map independently, so tell FLIGHT only about the dialog still on screen.
+      if (!sameDialog(openDialogs.get(runId), dialog)) return;
+      // A turn's end or exit clears the dialog; a seat no longer waiting has none open either way.
+      if (store.seatSession(seatId)?.state !== "needs-input") return;
+      try {
+        recordSeatCall(store, l.info.repo.id, {
+          seat: seatId,
+          reason: cmuxDialogReason(dialog),
+          ref: l.run.ticket ?? null,
+          at: now(),
+        });
+        bus.emit("attention");
+      } catch (err) {
+        log(`${seatId}: could not tell FLIGHT about an open dialog: ${err}`);
+      }
+    }, deps.cmuxDialogReportMs ?? CMUX_DIALOG_REPORT_MS);
+    timer.unref?.();
+    dialogTimers.set(runId, timer);
+  }
+
   function onEvent(l: Live, e: SessionEvent): void {
     switch (e.kind) {
       case "init":
@@ -1502,6 +1595,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       case "needs-input":
         l.inTurn = true;
         setState(l, "needs-input", CMUX_NEEDS_INPUT_TEXT);
+        if (e.dialog === undefined) clearDialog(l);
+        else {
+          openDialogs.set(l.run.id, e.dialog);
+          reportDialogLater(l, e.dialog);
+        }
         break;
       case "turn-refused":
         if (!e.active) {
@@ -1510,6 +1608,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         break;
       case "turn-start":
+        clearDialog(l);
         if (l.resumedAt !== null && !runGone(l.run.id, l.info.seat.id))
           store.addLoopEvent(
             `${l.run.id}:resume-confirmed:${l.resumedAt}`,
@@ -1572,9 +1671,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       case "result": {
         // No call is in flight once the turn has ended: whatever the run held is freed. Not for a
         // result replayed at an attach while a later turn is open: its hold is that turn's.
+        // Its dialog went with it, so FLIGHT is not told of one already closed.
         if (!(l.awaitingAtAttach && l.session.lines <= l.replayedBelow)) {
           deps.lock.releaseRun(l.run.id);
           deps.checks?.dropRun(l.run.id);
+          clearDialog(l);
         }
         const interrupted = l.interrupted;
         l.inTurn = false;
@@ -2850,6 +2951,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       lastStderr: null,
       lastStderrAt: null,
       attaching: false,
+      releaseAttachBarrier: null,
+      attachStartedAt: null,
       replayedBelow: 0,
       awaitingAtAttach: false,
       keeperPid: null,
@@ -3547,9 +3650,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } catch (e) {
       return refuse(`${CANNOT_START}: ${errText(e)}`);
     }
-    track(info, run, driver, grant(info, run), {
+    const l = track(info, run, driver, grant(info, run), {
       spawn: hello.spawn,
       attaching: true,
+      attachStartedAt: now(),
       replayedBelow: hello.lines,
       awaitingAtAttach: hello.awaiting,
       keeperPid: readPidFile(crewKeeperDir(deps.dbPath, runId), KEEPER_PID_FILE),
@@ -3558,10 +3662,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       rateLimitedUntil: cursor?.spawn === hello.spawn ? cursor.rateLimitedUntil : null,
       chain,
     });
-    const off = driver.on((e) => {
-      if (e.kind !== "attached" && e.kind !== "exit") return;
+    let off = () => {};
+    l.releaseAttachBarrier = () => {
+      l.releaseAttachBarrier = null;
       off();
       unblock();
+    };
+    off = driver.on((e) => {
+      if (e.kind !== "attached" && e.kind !== "exit") return;
+      l.releaseAttachBarrier?.();
     });
   }
 
@@ -3569,6 +3678,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function onAttached(l: Live, awaiting: boolean): void {
     const seatId = l.info.seat.id;
     l.attaching = false;
+    l.releaseAttachBarrier?.();
     l.inTurn ||= awaiting;
     fold(l, true);
     saveCursor(l);
@@ -5949,6 +6059,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
     },
 
+    async answerDialog(seatId, answer) {
+      const l = live.get(seatId);
+      if (l === undefined || store.seatSession(seatId)?.state !== "needs-input")
+        throw new SupervisorError(409, CMUX_DIALOG_NOT_WAITING);
+      const saved = viaCmux(l.run) ? savedWorkspace(l.run.id) : null;
+      if (saved === null || cmux === null) throw new SupervisorError(409, CMUX_DIALOG_NOT_WAITING);
+      const picked = await answerCmuxDialog(cmux, saved.workspace, answer);
+      log(`${seatId}: FLIGHT answered its cmux dialog with option ${answer.option}`);
+      return picked;
+    },
+
     async interrupt(seatId) {
       if (transfers.has(seatId)) await transfers.get(seatId);
       const l = liveOrRefuse(need(seatId));
@@ -5992,6 +6113,94 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const l = live.get(seatId);
       if (!l?.session.alive) return null;
       return { inTurn: l.inTurn, resumedAt: l.resumedAt, rateLimitedUntil: l.rateLimitedUntil };
+    },
+
+    async strandedWorktree(runId) {
+      if (!mayAct() || stopping) return null;
+      const run = store.run(runId);
+      if (run === null || run.endedAt !== null || run.branch === null) return null;
+      const info = findSeat(run.agentId);
+      if (!info) return null;
+      const row = store.seatSession(run.agentId);
+      if (row?.runId === runId || live.get(run.agentId)?.run.id === runId) return null;
+      try {
+        const path = await branchWorktree(
+          {
+            checkout: info.session.checkout,
+            worktreesRoot: crew?.worktrees ?? "",
+            peers: clonePeers(deps.config, deps.hubRoot),
+          },
+          run.branch,
+        );
+        // the seat's own worktree is the other run's now
+        return path === null || path === row?.worktree ? null : path;
+      } catch (e) {
+        log(`${runId}: could not find its worktree: ${errText(e)}`);
+        return null;
+      }
+    },
+
+    async recoverRelay(seatId, runId, before) {
+      if (
+        !mayAct() ||
+        stopping ||
+        reattaching !== null ||
+        starting.has(seatId) ||
+        transfers.has(seatId)
+      )
+        return null;
+      const l = live.get(seatId);
+      // only the process that runs this run, alive and not being ended, is put right
+      const ours = (x: Live) =>
+        live.get(seatId) === x &&
+        x.session.alive &&
+        x.run.id === runId &&
+        x.ending === null &&
+        store.run(runId)?.endedAt === null;
+      if (l === undefined || !ours(l)) return null;
+      const row = store.seatSession(seatId);
+      if (row === null || row.state === "needs-input" || row.state === "starting") return null;
+      if (row.runId !== runId) {
+        // a row left naming no run, or one that has ended: the live process is the truth. A row
+        // naming another live run is that run's, not this one's to take.
+        const holder = row.runId === null ? null : store.run(row.runId);
+        if (holder !== null && holder.endedAt === null) return null;
+        setSeat(seatId, { runId, cliSessionId: l.run.sessionId ?? row.cliSessionId });
+        log(`${seatId}: its row named ${row.runId ?? "no run"}; set back to ${runId}`);
+        return "owner";
+      }
+      if (l.attaching) {
+        // by how long it has gone unfinished: an attach begun after the line was owed can stick too
+        if (l.attachStartedAt === null || now() - l.attachStartedAt < RELAY_ATTACH_STUCK_MS)
+          return null;
+        // the keeper's own word on an open turn (taken at the attach) stands
+        onAttached(l, false);
+        log(
+          `${seatId}: an attach begun ${new Date(l.attachStartedAt).toISOString()} never finished; finished it`,
+        );
+        return "attach";
+      }
+      if (!l.inTurn || (row.lastTurnStartedAt ?? 0) >= before) return null;
+      return enqueue(l, async (): Promise<RelayRecovery | null> => {
+        const now_ = store.seatSession(seatId);
+        if (!ours(l) || !l.inTurn || now_?.runId !== runId || now_.state === "needs-input")
+          return null;
+        try {
+          await sendInterrupt(l);
+        } catch (e) {
+          // refused or unanswered: the turn may well be going, so it is left as it is
+          log(`${seatId}: stale turn interrupt failed: ${errText(e)}`);
+          return null;
+        }
+        // confirmed: a turn really going ends with its own result; one whose end was missed is
+        // ended here, as that result would have
+        if (l.inTurn) {
+          l.inTurn = false;
+          setState(l, "idle", null);
+          emit({ kind: "idle", seatId, runId: l.run.id, resumed: false });
+        }
+        return "turn";
+      });
     },
 
     sessionAlive(seatId) {
