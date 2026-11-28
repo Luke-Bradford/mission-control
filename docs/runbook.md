@@ -580,7 +580,9 @@ What each seat's process starts with:
   answers it or briefs it for you, and only a briefed question reaches your Needs you. A seat
   that is blocked outside its area, needs a decision it cannot make or disputes a finding calls
   FLIGHT with `mcp__mc__call_flight { reason, ref }` (below). While FLIGHT
-  is not triaging, one "FLIGHT is not triaging" item counts what waits on it. A read-only seat
+  is not triaging, one "FLIGHT is not triaging" item on FLIGHT's queue counts what waits on it;
+  it is not on your Needs you, and the FLIGHT-down notification tells you of the outage (#2285).
+  A seat's question unanswered after 10 minutes wakes FLIGHT a second time, naming it first. A read-only seat
   (RETRO) has the question tool and `report_evidence`, which refuses it (read-only runs have no
   loop).
 - **Unanswered Comms.** A labelled direct `question` or `blocker` shows its elapsed wait in Comms.
@@ -600,7 +602,9 @@ What each seat's process starts with:
   An overdue crew question stays with FLIGHT. The hub does not write a Proceed/Hold brief or
   answer it for the operator. Only FLIGHT's complete brief makes it an operator question.
   Old hub-written Comms briefs remain in history but are ignored by the attention projection.
-  When FLIGHT is down, waiting crew messages count under one FLIGHT-down/not-triaging alert.
+  When FLIGHT is down, waiting crew messages count under the one not-triaging item on FLIGHT's
+  queue. Any item 14 days old, or whose ticket has closed since it was raised, settles and leaves
+  (#2285).
   Protected operator approvals, account and budget holds, and the runaway alert keep their own rules.
 
   The Comms graph also reports 24-hour run-token totals per link and flags a pair

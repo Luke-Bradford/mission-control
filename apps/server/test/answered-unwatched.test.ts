@@ -178,3 +178,11 @@ it("flags an item from an unwatched repo so its panel can say its plan is not lo
     withRepoWatch({ ...item, repoId: "repo", ticket: "repo#1" }, config).repoUnwatched,
   ).toBeUndefined();
 });
+
+it("an applied answer settles the item: it leaves the list, yet the sweeps still read it (#2285)", async () => {
+  expect((await answer()).state).toBe("applied");
+  expect(find()).toBeUndefined();
+  expect(
+    attentionItems(config, store, AT, undefined, undefined, null, true).some((i) => i.key === KEY),
+  ).toBe(true);
+});
