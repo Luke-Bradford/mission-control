@@ -1418,6 +1418,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   ): void {
     const seatId = l.info.seat.id;
     if (transferState(l.run.id)?.pending) return;
+    clearDialog(l);
     if (live.get(seatId) === l) live.delete(seatId);
     if (stopping && l.ending === null) {
       // The hub is going down: the run stays active and is resumed on the next start.
@@ -1534,6 +1535,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // The cmux record can remain needsInput after a dialog has closed or changed. Its screen
       // updates this map independently, so tell FLIGHT only about the dialog still on screen.
       if (!sameDialog(openDialogs.get(runId), dialog)) return;
+      // A turn's end or exit clears the dialog; a seat no longer waiting has none open either way.
+      if (store.seatSession(seatId)?.state !== "needs-input") return;
       try {
         recordSeatCall(store, l.info.repo.id, {
           seat: seatId,
@@ -1639,9 +1642,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       case "result": {
         // No call is in flight once the turn has ended: whatever the run held is freed. Not for a
         // result replayed at an attach while a later turn is open: its hold is that turn's.
+        // Its dialog went with it, so FLIGHT is not told of one already closed.
         if (!(l.awaitingAtAttach && l.session.lines <= l.replayedBelow)) {
           deps.lock.releaseRun(l.run.id);
           deps.checks?.dropRun(l.run.id);
+          clearDialog(l);
         }
         const interrupted = l.interrupted;
         l.inTurn = false;

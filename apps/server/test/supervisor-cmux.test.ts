@@ -89,9 +89,9 @@ const flight = {
   area: [],
 };
 
-async function started() {
+async function started(over: { cmuxDialogReportMs?: number } = {}) {
   fakeCmux();
-  const made = make({ cmuxState: stateFile() });
+  const made = make({ cmuxState: stateFile(), ...over });
   made.sup.start();
   const { runId } = await made.sup.startRun("guido-1", 42);
   await until(() => expect(cmuxState().sent).toHaveLength(1));
@@ -202,6 +202,30 @@ describe("a Claude run in cmux", () => {
       s.screen = "Claude is thinking";
     });
     await new Promise((r) => setTimeout(r, 150));
+    const calls = Object.values(
+      JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals ?? {},
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("does not call FLIGHT about a dialog whose turn ended before the deadline", async () => {
+    await started({ cmuxDialogReportMs: 300 });
+    lifecycle("running");
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    patch((s) => {
+      s.screen = [
+        "────────────────────────────────────────────────────────────",
+        " Which database should I use?",
+        " ❯ 1. Postgres",
+        "   2. SQLite",
+        " Enter to select · Esc to cancel",
+      ].join("\n");
+    });
+    await until(() => expect(seatState("guido-1")).toBe("needs-input"));
+    // the turn ends with the dialog's text still on screen: cmux's idle record wins
+    lifecycle("idle");
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await new Promise((r) => setTimeout(r, 500));
     const calls = Object.values(
       JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals ?? {},
     );
