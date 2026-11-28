@@ -34,7 +34,7 @@ describe("work-Mac runbook", () => {
     expect(runbook).toContain('MC_LIVE_PORT="$MC_PORT"');
     expect(runbook).toContain("<key>MC_LIVE_PORT</key><string><port></string>");
     expect(runbook).toContain("Open Mission Control:");
-    expect(runbook).toContain('grep -F \'Open Mission Control:\' "$MC_LOG_DIR/server.log"');
+    expect(runbook).toContain("grep -F 'Open Mission Control:' \"$MC_LOG_DIR/server.log\"");
   });
 
   it("gives launchd a PATH built from the folders of the installed node and cmux", () => {
